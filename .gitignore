@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -13,9 +13,9 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# next.js (apps/web)
+apps/web/.next/
+apps/web/out/
 
 # production
 /build
@@ -40,9 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# SQLite demo database
-prisma/dev.db
-prisma/dev.db-journal
+# SQLite demo database (apps/api)
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
 
 # Rust build artifacts
 contracts/target/

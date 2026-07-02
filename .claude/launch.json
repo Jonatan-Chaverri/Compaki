@@ -2,10 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "compaki-dev",
+      "name": "compaki-api",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "runtimeArgs": ["run", "dev", "--workspace", "compaki-api"],
+      "port": 4000,
+      "autoPort": false
+    },
+    {
+      "name": "compaki-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace", "compaki-web"],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

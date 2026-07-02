@@ -1,0 +1,25 @@
+{
+  "name": "compaki-api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "deploy:testnet": "tsx scripts/deploy.ts",
+    "demo:purchase": "tsx scripts/demo-purchase.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@prisma/client": "^6.19.3",
+    "@stellar/stellar-sdk": "^16.0.1",
+    "dotenv": "^17.4.2",
+    "hono": "^4.6.14",
+    "prisma": "^6.19.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.22.4",
+    "typescript": "^5"
+  }
+}

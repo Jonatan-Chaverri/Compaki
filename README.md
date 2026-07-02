@@ -11,23 +11,36 @@ real and verifiable on [stellar.expert](https://stellar.expert/explorer/testnet)
 
 ## Stack
 
-- **Frontend + API:** Next.js (App Router, TypeScript strict), Tailwind CSS
+- **Frontend:** Next.js (App Router, TypeScript strict) + Tailwind CSS in
+  `apps/web` — UI only, no DB or chain access. Proxies `/api/*` to the API
+  app (`rewrites` in `next.config.ts`), so cookies and SSE stay same-origin.
+- **API:** standalone Hono (Node) app in `apps/api` — owns Prisma, the
+  Stellar service layer, and the session cookie
 - **Database:** SQLite via Prisma for the demo (schema designed to swap to
-  Postgres/Supabase — see notes in [prisma/schema.prisma](prisma/schema.prisma))
+  Postgres/Supabase — see notes in [apps/api/prisma/schema.prisma](apps/api/prisma/schema.prisma))
 - **Blockchain:** Soroban smart contract in Rust (workspace in `contracts/`),
-  deployed to Stellar **testnet**; backend talks to it via
-  `@stellar/stellar-sdk` through `src/lib/stellar/` only
+  deployed to Stellar **testnet**; the API talks to it via
+  `@stellar/stellar-sdk` through `apps/api/src/lib/stellar/` only
 - **Payment asset:** self-issued demo "USDC" on testnet, shown as `$` in the UI
 
 ## Project layout
 
 ```
-src/app/           Next.js routes (App Router)
-src/lib/db/        Prisma client singleton + TS types (Role, SplitSnapshot)
-src/lib/stellar/   Stellar/Soroban service layer — sole chain touchpoint
-contracts/         Rust workspace for the Soroban marketplace contract
-prisma/            Schema + migrations (SQLite dev.db)
+apps/web/                 Next.js frontend (npm workspace "compaki-web", port 3000)
+  src/app/                Pages (App Router) — data comes from the API app
+  src/lib/api.ts          Server-component fetch helper (forwards the session cookie)
+apps/api/                 Hono API server (npm workspace "compaki-api", port 4000)
+  src/routes/             HTTP routes (/api/*)
+  src/lib/db/             Prisma client singleton + TS types (Role, SplitSnapshot)
+  src/lib/stellar/        Stellar/Soroban service layer — sole chain touchpoint
+  prisma/                 Schema + migrations (SQLite dev.db)
+  scripts/                Testnet deploy + demo purchase
+contracts/                Rust workspace for the Soroban marketplace contract
 ```
+
+The browser only ever talks to the web app: `apps/web` rewrites `/api/*` to
+`http://localhost:4000` (override with `API_URL`), and server components call
+the API directly with the session cookie forwarded.
 
 On-chain: money movement and split config only. Off-chain (DB): users,
 marketplaces, product catalog, sales history. Every sale stores its Stellar
@@ -38,17 +51,19 @@ transaction hash so receipts link to stellar.expert.
 ### Run it
 
 ```bash
-npm install
-npx prisma migrate dev   # creates prisma/dev.db and generates the client
-npm run dev              # → http://localhost:3000
+npm install                                  # installs both workspaces
+(cd apps/api && npx prisma migrate dev)      # creates dev.db and generates the client
+npm run dev                                  # api → :4000, web → :3000 (both at once)
 ```
+
+`npm run dev:api` / `npm run dev:web` start each app on its own.
 
 ### What to check
 
 - `http://localhost:3000` — marketing landing page (hero, three feature
   cards, regenerative-mode callout, CTA). The CTA links to `/onboarding`,
   which intentionally 404s until the onboarding phase.
-- `npx prisma studio` — inspect the empty `User`, `Marketplace`, `Product`,
+- `npx prisma studio` (in `apps/api`) — inspect the empty `User`, `Marketplace`, `Product`,
   and `Sale` tables.
 
 ## Phase 2 — Soroban contract + testnet deployment
@@ -76,7 +91,7 @@ npm run deploy:testnet
 
 This creates + funds a demo-USDC issuer via Friendbot, deploys the USDC
 Stellar Asset Contract, builds/uploads/deploys the marketplace contract,
-initializes it, and writes everything to `.env.local` (RPC URLs, issuer keys,
+initializes it, and writes everything to `apps/api/.env.local` (RPC URLs, issuer keys,
 SAC + contract IDs, and a `WALLET_ENCRYPTION_KEY` for custodial secrets —
 preserved across re-deploys). Pure `@stellar/stellar-sdk`; no stellar-cli
 version dependency.
@@ -92,7 +107,7 @@ with $100), creates a 90/8/2 marketplace on-chain, registers the vendor,
 executes a $42 purchase and prints resulting balances
 ($37.80 / $3.36 / $0.84 / $58.00) plus the stellar.expert receipt link.
 
-### Backend service layer (`src/lib/stellar/`)
+### API service layer (`apps/api/src/lib/stellar/`)
 
 - `contract.ts` — typed wrappers (`createMarketplace`, `registerVendor`,
   `purchase`, `getMarketplace`): build → simulate → sign with server-held
@@ -109,7 +124,7 @@ executes a $42 purchase and prints resulting balances
 
 ### Try it
 
-With the dev server running (and `.env.local` from `npm run deploy:testnet`):
+With the dev server running (and `apps/api/.env.local` from `npm run deploy:testnet`):
 
 1. `http://localhost:3000/onboarding` — 4-step wizard:
    **About** (name, live-checked URL slug auto-suggested from the name,
@@ -176,7 +191,7 @@ lookups feeding every live-balance widget).
 ### Schema notes (v1)
 
 - `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no
-  enums; the `Role` union type in `src/lib/db/types.ts` enforces it in code.
+  enums; the `Role` union type in `apps/api/src/lib/db/types.ts` enforces it in code.
 - Splits are stored in **basis points** (`splitVendorBps` etc., summing to
   10 000) to avoid float drift in money math.
 - `Sale.splitSnapshot` is a JSON string capturing the split *at purchase
