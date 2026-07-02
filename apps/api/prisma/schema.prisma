@@ -22,6 +22,10 @@ model User {
   email                  String?  @unique
   name                   String
   role                   String // "OPERATOR" | "VENDOR" | "BUYER" | "COMMUNITY"
+  // scrypt hash ("salt:hash", hex). Null for legacy/custodial-only users, who
+  // can claim their account by registering with the same email.
+  passwordHash           String?
+  country                String?
   stellarPublicKey       String?  @unique
   stellarSecretEncrypted String?
   createdAt              DateTime @default(now())
@@ -101,6 +105,11 @@ model Sale {
   // Wall-clock seconds the on-chain settlement took — feeds the receipt's
   // "settled in N seconds" trust line. Null for sales predating this field.
   settleSeconds Int?
+  // Shipping address captured at checkout. Null for sales predating auth.
+  shipAddress    String?
+  shipCity       String?
+  shipPostalCode String?
+  shipCountry    String?
   createdAt     DateTime @default(now())
 
   productId String

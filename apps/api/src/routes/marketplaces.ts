@@ -33,8 +33,6 @@ interface LaunchInput {
   operatorBps: number;
   communityBps: number;
   regenerativeEnabled: boolean;
-  operatorName: string;
-  operatorEmail: string;
 }
 
 function parseInput(body: unknown): LaunchInput | string {
@@ -65,13 +63,6 @@ function parseInput(body: unknown): LaunchInput | string {
     return "Revenue split must sum to 100%";
   }
 
-  const operatorName = typeof b.operatorName === "string" ? b.operatorName.trim() : "";
-  if (operatorName.length < 2) return "Please tell us your name";
-
-  const operatorEmail =
-    typeof b.operatorEmail === "string" ? b.operatorEmail.trim().toLowerCase() : "";
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(operatorEmail)) return "Invalid email address";
-
   return {
     name,
     slug,
@@ -81,8 +72,6 @@ function parseInput(body: unknown): LaunchInput | string {
     operatorBps,
     communityBps,
     regenerativeEnabled: Boolean(b.regenerativeEnabled) || communityBps > 0,
-    operatorName,
-    operatorEmail,
   };
 }
 
@@ -114,6 +103,11 @@ marketplaces.get("/check-slug", async (c) => {
 type LaunchStep = "accounts" | "deploy" | "store";
 
 marketplaces.post("/", async (c) => {
+  const sessionUser = await getSessionUser(c);
+  if (!sessionUser) {
+    return c.json({ error: "Sign in to create a marketplace" }, 401);
+  }
+
   let body: unknown;
   try {
     body = await c.req.json();
@@ -125,25 +119,18 @@ marketplaces.post("/", async (c) => {
     return c.json({ error: input }, 400);
   }
 
-  // If the slug belongs to someone else's finished marketplace, fail fast.
+  // If the slug belongs to someone else's marketplace, fail fast.
   const existing = await prisma.marketplace.findUnique({
     where: { slug: input.slug },
-    include: { operator: true },
+    select: { operatorId: true },
   });
-  if (existing && existing.operator.email !== input.operatorEmail) {
+  if (existing && existing.operatorId !== sessionUser.id) {
     return c.json({ error: "That URL is already taken" }, 409);
   }
 
-  // Operator user exists before the stream starts so we can set the session
-  // cookie on the response headers.
-  const operator = await prisma.user.upsert({
-    where: { email: input.operatorEmail },
-    update: { name: input.operatorName, role: "OPERATOR" },
-    create: {
-      email: input.operatorEmail,
-      name: input.operatorName,
-      role: "OPERATOR",
-    },
+  const operator = await prisma.user.update({
+    where: { id: sessionUser.id },
+    data: { role: "OPERATOR" },
   });
 
   const encoder = new TextEncoder();
@@ -283,7 +270,6 @@ marketplaces.post("/", async (c) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
-      "Set-Cookie": sessionCookieHeader(operator.id),
     },
   });
 });

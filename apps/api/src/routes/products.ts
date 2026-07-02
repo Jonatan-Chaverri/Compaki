@@ -2,9 +2,9 @@
 // vendor of the marketplace).
 // PATCH /api/products/:id — edit a product (session user must own it).
 // GET /api/products/:id — public product info for the checkout page.
-// POST /api/products/:id/purchase — buy a product (simulated card on-ramp:
-// custodial buyer account pre-funded with demo USDC, then an atomic on-chain
-// split purchase).
+// POST /api/products/:id/purchase — buy a product (session user is the buyer;
+// requires a shipping address; simulated card on-ramp: custodial buyer account
+// pre-funded with demo USDC, then an atomic on-chain split purchase).
 
 import { Hono } from "hono";
 
@@ -92,6 +92,9 @@ products.get("/:id", async (c) => {
 products.post("/:id/purchase", async (c) => {
   const id = c.req.param("id");
 
+  const sessionUser = await getSessionUser(c);
+  if (!sessionUser) return c.json({ error: "Sign in to buy" }, 401);
+
   let body: unknown;
   try {
     body = await c.req.json();
@@ -99,11 +102,20 @@ products.post("/:id/purchase", async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
   const b = (body ?? {}) as Record<string, unknown>;
-  const name = typeof b.name === "string" ? b.name.trim() : "";
-  const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
-  if (name.length < 2) return c.json({ error: "Please tell us your name" }, 400);
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return c.json({ error: "Invalid email address" }, 400);
+  const field = (key: string, max: number) =>
+    typeof b[key] === "string" ? (b[key] as string).trim().slice(0, max) : "";
+  const shipping = {
+    address: field("shipAddress", 200),
+    city: field("shipCity", 80),
+    postalCode: field("shipPostalCode", 20),
+    country: field("shipCountry", 60),
+  };
+  if (shipping.address.length < 5) {
+    return c.json({ error: "Please enter your shipping address" }, 400);
+  }
+  if (shipping.city.length < 2) return c.json({ error: "Please enter your city" }, 400);
+  if (shipping.country.length < 2) {
+    return c.json({ error: "Please enter your shipping country" }, 400);
   }
 
   const product = await prisma.product.findUnique({
@@ -125,14 +137,10 @@ products.post("/:id/purchase", async (c) => {
   }
 
   try {
-    // 1. Buyer user + custodial payment account. New buyers start pre-funded
+    // 1. Buyer custodial payment account. First-time buyers start pre-funded
     //    (the "card payment" is simulated by minting demo USDC); returning
     //    buyers get topped up if their balance can't cover the price.
-    let buyer = await prisma.user.upsert({
-      where: { email },
-      update: { name },
-      create: { email, name, role: "BUYER" },
-    });
+    let buyer = sessionUser;
     if (!buyer.stellarPublicKey || !buyer.stellarSecretEncrypted) {
       const account = await createCustodialAccount({
         startingUsd: Math.max(100, Math.ceil(product.priceUsd)),
@@ -183,6 +191,10 @@ products.post("/:id/purchase", async (c) => {
         txHash,
         splitSnapshot: JSON.stringify(snapshot),
         settleSeconds,
+        shipAddress: shipping.address,
+        shipCity: shipping.city,
+        shipPostalCode: shipping.postalCode || null,
+        shipCountry: shipping.country,
         productId: product.id,
         buyerId: buyer.id,
       },

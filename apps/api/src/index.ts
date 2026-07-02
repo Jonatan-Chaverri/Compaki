@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 
+import { auth } from "./routes/auth";
 import { balance } from "./routes/balance";
 import { demo } from "./routes/demo";
 import { marketplaces } from "./routes/marketplaces";
@@ -17,6 +18,7 @@ const app = new Hono();
 
 app.use(logger());
 
+app.route("/api/auth", auth);
 app.route("/api/balance", balance);
 app.route("/api/demo", demo);
 app.route("/api/marketplaces", marketplaces);

@@ -18,7 +18,7 @@ me.get("/", async (c) => {
     select: { slug: true },
   });
   return c.json({
-    user: { id: user.id, name: user.name, email: user.email },
+    user: { id: user.id, name: user.name, email: user.email, country: user.country },
     operatedMarketplaceSlug: marketplace?.slug ?? null,
   });
 });

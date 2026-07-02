@@ -31,11 +31,17 @@ export default async function BuyPage(props: {
   params: Promise<{ slug: string; productId: string }>;
 }) {
   const { slug, productId } = await props.params;
-  const res = await apiFetch(`/api/products/${encodeURIComponent(productId)}`);
+  const [res, meRes] = await Promise.all([
+    apiFetch(`/api/products/${encodeURIComponent(productId)}`),
+    apiFetch("/api/me"),
+  ]);
   if (res.status === 404) notFound();
   if (!res.ok) throw new Error(`Checkout request failed (${res.status})`);
   const { product, marketplace } = (await res.json()) as CheckoutPayload;
   if (marketplace.slug !== slug) notFound();
+  const { user } = (await meRes.json()) as {
+    user: { name: string; email: string | null; country: string | null } | null;
+  };
 
   return (
     <div className="min-h-screen bg-slate-50/60">
@@ -76,6 +82,7 @@ export default async function BuyPage(props: {
             priceUsd={product.priceUsd}
             marketplaceSlug={marketplace.slug}
             marketplaceName={marketplace.name}
+            user={user}
           />
         </div>
       </main>

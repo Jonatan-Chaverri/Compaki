@@ -1,6 +1,8 @@
 import Link from "next/link";
 
-/** Shared app chrome: white top bar with logo + optional right-side slot. */
+import { UserMenu } from "./user-menu";
+
+/** Shared app chrome: white top bar with logo, optional right slot, session menu. */
 export function AppHeader({ right }: { right?: React.ReactNode }) {
   return (
     <header className="border-b border-slate-100 bg-white">
@@ -11,7 +13,10 @@ export function AppHeader({ right }: { right?: React.ReactNode }) {
           </span>
           <span className="text-lg font-semibold tracking-tight text-slate-900">Compaki</span>
         </Link>
-        {right}
+        <span className="flex items-center gap-4">
+          {right}
+          <UserMenu />
+        </span>
       </div>
     </header>
   );

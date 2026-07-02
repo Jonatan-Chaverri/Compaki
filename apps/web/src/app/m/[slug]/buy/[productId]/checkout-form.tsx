@@ -1,10 +1,13 @@
 "use client";
 
-// Simulated card checkout: name + email are all we need — the API provisions
-// a custodial buyer account pre-funded with demo USDC and settles the split
-// on-chain. The processing state covers the ~5-10s the chain takes.
+// Simulated card checkout for signed-in buyers: the session identifies the
+// buyer, the form collects the shipping address, and the API provisions a
+// custodial account pre-funded with demo USDC and settles the split on-chain.
+// The processing state covers the ~5-10s the chain takes. Logged-out visitors
+// get a sign-in prompt instead.
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { formatUsd } from "@/lib/format";
@@ -38,20 +41,26 @@ export function CheckoutForm({
   priceUsd,
   marketplaceSlug,
   marketplaceName,
+  user,
 }: {
   productId: string;
   productName: string;
   priceUsd: number;
   marketplaceSlug: string;
   marketplaceName: string;
+  user: { name: string; email: string | null; country: string | null } | null;
 }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const pathname = usePathname();
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [country, setCountry] = useState(user?.country ?? "");
   const [state, setState] = useState<"idle" | "processing" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PurchaseResult | null>(null);
 
-  const valid = name.trim().length >= 2 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  const valid =
+    address.trim().length >= 5 && city.trim().length >= 2 && country.trim().length >= 2;
 
   const submit = async () => {
     setState("processing");
@@ -60,7 +69,12 @@ export function CheckoutForm({
       const res = await fetch(`/api/products/${productId}/purchase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email }),
+        body: JSON.stringify({
+          shipAddress: address,
+          shipCity: city,
+          shipPostalCode: postalCode,
+          shipCountry: country,
+        }),
       });
       const data = (await res.json()) as PurchaseResult & { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Payment failed");
@@ -71,6 +85,27 @@ export function CheckoutForm({
       setState("idle");
     }
   };
+
+  if (!user) {
+    return (
+      <div className="py-4 text-center">
+        <p className="text-3xl">🔐</p>
+        <h2 className="mt-3 text-lg font-semibold tracking-tight text-slate-900">
+          Sign in to buy
+        </h2>
+        <p className="mx-auto mt-2 max-w-xs text-sm text-slate-600">
+          You can browse every marketplace freely — buying just needs an account, so your
+          orders and receipts stay yours.
+        </p>
+        <Link
+          href={`/login?next=${encodeURIComponent(pathname)}`}
+          className="mt-6 inline-block rounded-full bg-slate-900 px-8 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
+        >
+          Sign in or create account
+        </Link>
+      </div>
+    );
+  }
 
   if (state === "done" && result) {
     return (
@@ -139,24 +174,57 @@ export function CheckoutForm({
 
   return (
     <div>
+      <p className="mb-5 rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+        Buying as <span className="font-medium text-slate-900">{user.name}</span>
+        {user.email ? ` (${user.email})` : ""}
+      </p>
+
       <div className="mb-5">
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
+        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          Shipping address
+        </label>
         <input
           type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Sofía Vargas"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder="Street, number, apartment…"
           className={inputClass}
           disabled={state === "processing"}
         />
       </div>
+      <div className="mb-5 grid grid-cols-2 gap-3">
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">City</label>
+          <input
+            type="text"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            placeholder="San José"
+            className={inputClass}
+            disabled={state === "processing"}
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            Postal code <span className="font-normal text-slate-400">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={postalCode}
+            onChange={(e) => setPostalCode(e.target.value)}
+            placeholder="10101"
+            className={inputClass}
+            disabled={state === "processing"}
+          />
+        </div>
+      </div>
       <div className="mb-6">
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+        <label className="mb-1.5 block text-sm font-medium text-slate-700">Country</label>
         <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="sofia@example.com"
+          type="text"
+          value={country}
+          onChange={(e) => setCountry(e.target.value)}
+          placeholder="Costa Rica"
           className={inputClass}
           disabled={state === "processing"}
         />

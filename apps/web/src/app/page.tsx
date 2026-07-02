@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { UserMenu } from "@/components/user-menu";
+
 function Logo() {
   return (
     <span className="flex items-center gap-2">
@@ -64,12 +66,15 @@ export default function LandingPage() {
               Regenerative mode
             </a>
           </div>
-          <Link
-            href="/onboarding"
-            className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
-          >
-            Create your marketplace
-          </Link>
+          <span className="flex items-center gap-4">
+            <UserMenu />
+            <Link
+              href="/onboarding"
+              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
+            >
+              Create your marketplace
+            </Link>
+          </span>
         </nav>
       </header>
 
