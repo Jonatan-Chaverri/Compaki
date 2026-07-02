@@ -219,6 +219,25 @@ New APIs: `GET /api/marketplaces/[slug]/storefront`,
 `GET /api/products/[id]` (checkout info),
 `POST /api/products/[id]/purchase`.
 
+## Phase 6 — transparent receipt + demo readiness
+
+- `/receipt/{saleId}` — the public, shareable receipt: buyer → split flow
+  with names, roles, amounts and percentages, a "Verified ✓" per recipient
+  linking to the transaction on stellar.expert, and one trust line at the
+  bottom ("settled on the Stellar network in {N} seconds and cannot be
+  altered") — the only place the product ever mentions blockchain. OG tags
+  make the link preview well. `Sale.settleSeconds` (new migration) stores
+  the measured settlement time of each purchase.
+- `npm run demo:seed` — builds the full pitch scenario on real testnet:
+  "Café de Altura" (regenerative, 85/10/5), operator María, vendors Don
+  Carlos + Finca La Esperanza (5 products), and 5 backdated sales with real
+  on-chain transactions. Idempotent — safe to re-run; prints every demo
+  link (storefront, dashboard, receipts, stellar.expert txs) when done.
+- [DEMO.md](DEMO.md) — the 5-minute SCF runbook: exact click-path, what to
+  say at each step, and a fallback plan if testnet is slow (every claim in
+  the pitch is provable with the seeded links alone).
+- New API: `GET /api/sales/[id]/receipt`.
+
 ### Schema notes (v1)
 
 - `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no

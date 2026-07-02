@@ -9,6 +9,7 @@ import { demo } from "./routes/demo";
 import { marketplaces } from "./routes/marketplaces";
 import { me } from "./routes/me";
 import { products } from "./routes/products";
+import { sales } from "./routes/sales";
 
 // All routes live under /api so the web app can proxy /api/* here verbatim.
 // Cookies and SSE flow through that same-origin proxy, so no CORS is needed.
@@ -21,6 +22,7 @@ app.route("/api/demo", demo);
 app.route("/api/marketplaces", marketplaces);
 app.route("/api/me", me);
 app.route("/api/products", products);
+app.route("/api/sales", sales);
 
 app.get("/health", (c) => c.json({ ok: true }));
 

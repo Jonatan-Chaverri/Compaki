@@ -13,7 +13,8 @@
     "lint": "npm run lint --workspace compaki-web",
     "typecheck": "npm run typecheck --workspaces",
     "deploy:testnet": "npm run deploy:testnet --workspace compaki-api",
-    "demo:purchase": "npm run demo:purchase --workspace compaki-api"
+    "demo:purchase": "npm run demo:purchase --workspace compaki-api",
+    "demo:seed": "npm run demo:seed --workspace compaki-api"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

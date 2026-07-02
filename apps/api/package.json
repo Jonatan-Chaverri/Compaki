@@ -7,7 +7,8 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "deploy:testnet": "tsx scripts/deploy.ts",
-    "demo:purchase": "tsx scripts/demo-purchase.ts"
+    "demo:purchase": "tsx scripts/demo-purchase.ts",
+    "demo:seed": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

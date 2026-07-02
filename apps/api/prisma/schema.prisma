@@ -98,6 +98,9 @@ model Sale {
   // JSON snapshot of the split applied at purchase time, e.g.
   // {"vendorBps":9000,"operatorBps":800,"communityBps":200,"vendorAmount":...}
   splitSnapshot String
+  // Wall-clock seconds the on-chain settlement took — feeds the receipt's
+  // "settled in N seconds" trust line. Null for sales predating this field.
+  settleSeconds Int?
   createdAt     DateTime @default(now())
 
   productId String

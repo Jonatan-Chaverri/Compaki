@@ -153,13 +153,16 @@ products.post("/:id/purchase", async (c) => {
     }
 
     // 2. Atomic on-chain split purchase, signed by the buyer's custodial key.
+    //    Timed so the receipt can say "settled in N seconds".
     const amountStroops = usdToStroops(product.priceUsd);
+    const settleStart = Date.now();
     const { txHash } = await purchase({
       buyerSecret: decryptSecret(buyer.stellarSecretEncrypted as string),
       marketplaceId: BigInt(marketplace.contractMarketplaceId),
       vendorPublicKey: product.vendor.stellarPublicKey,
       amountStroops,
     });
+    const settleSeconds = Math.max(1, Math.round((Date.now() - settleStart) / 1000));
 
     // 3. Sale row with the split frozen at purchase time. Mirrors the
     //    contract's math: shares round down, remainder → community fund.
@@ -179,6 +182,7 @@ products.post("/:id/purchase", async (c) => {
         amountUsd: product.priceUsd,
         txHash,
         splitSnapshot: JSON.stringify(snapshot),
+        settleSeconds,
         productId: product.id,
         buyerId: buyer.id,
       },
