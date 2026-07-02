@@ -31,6 +31,20 @@ function getRpc(): rpc.Server {
   return rpcServer;
 }
 
+/** Freshly-funded accounts can lag on the load-balanced RPC; poll briefly. */
+async function getAccountWithWait(server: rpc.Server, publicKey: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      return await server.getAccount(publicKey);
+    } catch (error) {
+      lastError = error;
+      await sleep(2_000);
+    }
+  }
+  throw lastError;
+}
+
 function scAddress(publicKeyOrContract: string): xdr.ScVal {
   return nativeToScVal(publicKeyOrContract, { type: "address" });
 }
@@ -65,7 +79,7 @@ async function invokeContract(
 ): Promise<InvokeResult> {
   return withTimeoutRetry(`invoke ${method}`, async () => {
     const server = getRpc();
-    const account = await server.getAccount(signer.publicKey());
+    const account = await getAccountWithWait(server, signer.publicKey());
     const contract = new Contract(stellarConfig.marketplaceContractId);
 
     const tx = new TransactionBuilder(account, {

@@ -105,6 +105,39 @@ executes a $42 purchase and prints resulting balances
 - `retry.ts` — every outbound call retries once on timeout-ish errors
   (testnet is flaky); deploy adds retries for RPC load-balancer lag.
 
+## Phase 3 — operator onboarding wizard
+
+### Try it
+
+With the dev server running (and `.env.local` from `npm run deploy:testnet`):
+
+1. `http://localhost:3000/onboarding` — 4-step wizard:
+   **About** (name, live-checked URL slug auto-suggested from the name,
+   description, category) → **Revenue split** (three sliders that always sum
+   to 100%; "Enable regenerative mode" sets the community fund to 5% and
+   unlocks its slider) → **Your account** (name + email, no password — a
+   session cookie signs you in) → **Launch**.
+2. The launch screen's progress rows reflect real server-side steps streamed
+   over SSE: custodial payment accounts (operator + community fund, funded +
+   trustlines) → `create_marketplace` on-chain → DB records.
+3. Success screen shows `compaki.app/m/{slug}`, a dashboard button, and a
+   small "verified on-chain" link to the create_marketplace transaction on
+   stellar.expert.
+
+### API
+
+- `GET /api/marketplaces/check-slug?slug=x` — live slug availability.
+- `POST /api/marketplaces` — launch orchestrator; responds with an SSE stream
+  (`step` events for accounts/deploy/store, then `complete` or `error`).
+  Idempotent on retry: the operator is reused by email, the marketplace + fund
+  account by slug, and the on-chain step is skipped if `contractMarketplaceId`
+  is already set — so a retry never creates duplicates. Sets the demo session
+  cookie (`compaki_uid`).
+
+Schema additions (migration `onboarding_fields`): `Marketplace.category`,
+`Marketplace.createTxHash`, `Marketplace.communityFundId → User` (each
+marketplace gets its own custodial community-fund account, role `COMMUNITY`).
+
 ### Schema notes (v1)
 
 - `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no

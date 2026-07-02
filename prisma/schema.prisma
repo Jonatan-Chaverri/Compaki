@@ -21,14 +21,15 @@ model User {
   id                     String   @id @default(cuid())
   email                  String?  @unique
   name                   String
-  role                   String // "OPERATOR" | "VENDOR" | "BUYER"
+  role                   String // "OPERATOR" | "VENDOR" | "BUYER" | "COMMUNITY"
   stellarPublicKey       String?  @unique
   stellarSecretEncrypted String?
   createdAt              DateTime @default(now())
 
-  marketplaces Marketplace[] @relation("MarketplaceOperator")
-  products     Product[]     @relation("ProductVendor")
-  purchases    Sale[]        @relation("SaleBuyer")
+  marketplaces     Marketplace[] @relation("MarketplaceOperator")
+  communityFundFor Marketplace[] @relation("MarketplaceCommunityFund")
+  products         Product[]     @relation("ProductVendor")
+  purchases        Sale[]        @relation("SaleBuyer")
 }
 
 model Marketplace {
@@ -36,17 +37,23 @@ model Marketplace {
   name                 String
   slug                 String   @unique
   description          String   @default("")
+  category             String   @default("Other")
   // Revenue split in basis points; must sum to 10_000.
   splitVendorBps       Int      @default(9000)
   splitOperatorBps     Int      @default(1000)
   splitCommunityBps    Int      @default(0)
   // ID of this marketplace inside the shared Soroban contract (null until registered on-chain).
   contractMarketplaceId String? @unique
+  // Hash of the create_marketplace transaction — the "verified on-chain" link.
+  createTxHash         String?
   regenerativeEnabled  Boolean  @default(false)
   createdAt            DateTime @default(now())
 
   operatorId String
   operator   User      @relation("MarketplaceOperator", fields: [operatorId], references: [id])
+  // Custodial account receiving the community share (role COMMUNITY).
+  communityFundId String?
+  communityFund   User?  @relation("MarketplaceCommunityFund", fields: [communityFundId], references: [id])
   products   Product[]
 }
 
