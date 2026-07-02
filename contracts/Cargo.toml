@@ -1,10 +1,14 @@
 # Soroban contracts workspace for Compaki.
-# The `marketplace` member is added in a later phase — one contract supporting
-# multiple marketplace instances keyed by marketplace_id.
+# One `marketplace` contract supports multiple marketplace instances keyed by
+# marketplace_id — cheaper and simpler than a factory for the demo.
 
 [workspace]
 resolver = "2"
-members = []
+members = ["marketplace"]
+
+[workspace.dependencies]
+# Pinned to major 21 to match the installed stellar-cli (soroban-env 21).
+soroban-sdk = "21"
 
 [profile.release]
 opt-level = "z"

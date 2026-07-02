@@ -51,6 +51,60 @@ npm run dev              # → http://localhost:3000
 - `npx prisma studio` — inspect the empty `User`, `Marketplace`, `Product`,
   and `Sale` tables.
 
+## Phase 2 — Soroban contract + testnet deployment
+
+### The contract (`contracts/marketplace`)
+
+One deployment, many marketplaces: each `create_marketplace` call registers an
+instance (keyed by `marketplace_id`) with its own operator, community fund and
+bps split (must sum to 10 000). `purchase` moves demo USDC from the buyer to
+vendor / operator / community fund **atomically in one invocation** — both
+percentage shares round down and the remainder always goes to the community
+fund, so no dust is ever lost. Every purchase emits an event with all split
+amounts.
+
+```bash
+cd contracts && cargo test        # 9 unit tests: split math, rounding, auth, validation
+```
+
+### Deploy to testnet
+
+```bash
+rustup target add wasm32v1-none   # once; emits MVP wasm Soroban accepts
+npm run deploy:testnet
+```
+
+This creates + funds a demo-USDC issuer via Friendbot, deploys the USDC
+Stellar Asset Contract, builds/uploads/deploys the marketplace contract,
+initializes it, and writes everything to `.env.local` (RPC URLs, issuer keys,
+SAC + contract IDs, and a `WALLET_ENCRYPTION_KEY` for custodial secrets —
+preserved across re-deploys). Pure `@stellar/stellar-sdk`; no stellar-cli
+version dependency.
+
+### Prove it works
+
+```bash
+npm run demo:purchase
+```
+
+Provisions four custodial accounts (operator, community fund, vendor, buyer
+with $100), creates a 90/8/2 marketplace on-chain, registers the vendor,
+executes a $42 purchase and prints resulting balances
+($37.80 / $3.36 / $0.84 / $58.00) plus the stellar.expert receipt link.
+
+### Backend service layer (`src/lib/stellar/`)
+
+- `contract.ts` — typed wrappers (`createMarketplace`, `registerVendor`,
+  `purchase`, `getMarketplace`): build → simulate → sign with server-held
+  keys → submit → poll. The signer is the tx source, so its signature also
+  covers the token sub-transfers' `require_auth`.
+- `accounts.ts` — `createCustodialAccount()`: keypair → Friendbot →
+  trustline + optional starting balance (single transaction) → AES-encrypted
+  secret for DB storage. Plus `mintDemoUsd` and `getUsdBalance` helpers.
+- `crypto.ts` — AES-256-GCM for custodial secrets (key from env; demo-grade).
+- `retry.ts` — every outbound call retries once on timeout-ish errors
+  (testnet is flaky); deploy adds retries for RPC load-balancer lag.
+
 ### Schema notes (v1)
 
 - `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no
