@@ -7,11 +7,16 @@ verifiable on stellar.expert.
 ## Before the demo (once, ~10 minutes)
 
 ```bash
+cd apps/api
 npm install
-(cd apps/api && npx prisma migrate dev)   # Supabase/Postgres
+npm run prisma:migrate                    # Supabase/Postgres
 npm run deploy:testnet                    # issuer + contract → apps/api/.env.local
 npm run demo:seed                         # builds "Café de Altura" with real txs
-npm run dev                               # api :4000 + web :3000
+npm run dev                               # api :4000
+
+cd ../web
+npm install
+npm run dev                               # web :3000
 ```
 
 `demo:seed` prints a block of links at the end — **paste them into a note

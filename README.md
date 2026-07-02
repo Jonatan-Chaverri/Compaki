@@ -25,10 +25,10 @@ real and verifiable on [stellar.expert](https://stellar.expert/explorer/testnet)
 ## Project layout
 
 ```
-apps/web/                 Next.js frontend (npm workspace "compaki-web", port 3000)
+apps/web/                 Next.js frontend app (port 3000)
   src/app/                Pages (App Router) — data comes from the API app
   src/lib/api.ts          Server-component fetch helper (forwards the session cookie)
-apps/api/                 Hono API server (npm workspace "compaki-api", port 4000)
+apps/api/                 Hono API server app (port 4000)
   src/routes/             HTTP routes (/api/*)
   src/lib/db/             Prisma client singleton + TS types (Role, SplitSnapshot)
   src/lib/stellar/        Stellar/Soroban service layer — sole chain touchpoint
@@ -50,13 +50,19 @@ transaction hash so receipts link to stellar.expert.
 ### Run it
 
 ```bash
-npm install                                  # installs both workspaces
-# Add DATABASE_URL + DIRECT_URL in apps/api/.env or apps/api/.env.local
-(cd apps/api && npx prisma migrate dev)      # applies Supabase/Postgres migrations
-npm run dev                                  # api → :4000, web → :3000 (both at once)
+cd apps/api
+npm install
+# Add DATABASE_URL + DIRECT_URL in .env or .env.local
+npm run prisma:migrate                       # applies Supabase/Postgres migrations
+npm run dev                                  # API → :4000
+
+cd ../web
+npm install
+npm run dev                                  # Web → :3000
 ```
 
-`npm run dev:api` / `npm run dev:web` start each app on its own.
+The frontend and backend are intentionally independent npm apps. Run install,
+build, start, and deploy commands from each app directory.
 
 ### What to check
 
@@ -86,6 +92,7 @@ cd contracts && cargo test        # 9 unit tests: split math, rounding, auth, va
 
 ```bash
 rustup target add wasm32v1-none   # once; emits MVP wasm Soroban accepts
+cd apps/api
 npm run deploy:testnet
 ```
 
@@ -99,6 +106,7 @@ version dependency.
 ### Prove it works
 
 ```bash
+cd apps/api
 npm run demo:purchase
 ```
 
@@ -124,7 +132,7 @@ executes a $42 purchase and prints resulting balances
 
 ### Try it
 
-With the dev server running (and `apps/api/.env.local` from `npm run deploy:testnet`):
+With both dev servers running (and `apps/api/.env.local` from `npm run deploy:testnet`):
 
 1. `http://localhost:3000/onboarding` — 4-step wizard:
    **About** (name, live-checked URL slug auto-suggested from the name,
@@ -228,7 +236,7 @@ New APIs: `GET /api/marketplaces/[slug]/storefront`,
   altered") — the only place the product ever mentions blockchain. OG tags
   make the link preview well. `Sale.settleSeconds` (new migration) stores
   the measured settlement time of each purchase.
-- `npm run demo:seed` — builds the full pitch scenario on real testnet:
+- `npm run demo:seed` from `apps/api` — builds the full pitch scenario on real testnet:
   "Café de Altura" (regenerative, 85/10/5), operator María, vendors Don
   Carlos + Finca La Esperanza (5 products), and 5 backdated sales with real
   on-chain transactions. Idempotent — safe to re-run; prints every demo

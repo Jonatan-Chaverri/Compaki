@@ -5,6 +5,6 @@
 import { config } from "dotenv";
 import path from "node:path";
 
-const root = path.resolve(__dirname, "..");
+const root = process.cwd();
 config({ path: path.join(root, ".env.local") });
 config({ path: path.join(root, ".env") });

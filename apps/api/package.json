@@ -2,9 +2,11 @@
   "name": "compaki-api",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "build": "prisma generate && esbuild src/index.ts --bundle --platform=node --format=esm --target=node18 --packages=external --outfile=dist/index.js",
+    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "deploy:testnet": "tsx scripts/deploy.ts",
     "demo:purchase": "tsx scripts/demo-purchase.ts",
@@ -20,12 +22,13 @@
     "@prisma/client": "^6.19.3",
     "@stellar/stellar-sdk": "^16.0.1",
     "dotenv": "^17.4.2",
+    "esbuild": "^0.28.1",
     "hono": "^4.6.14",
-    "prisma": "^6.19.3"
+    "prisma": "^6.19.3",
+    "typescript": "^5"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "tsx": "^4.22.4",
-    "typescript": "^5"
+    "tsx": "^4.22.4"
   }
 }
