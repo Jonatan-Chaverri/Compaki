@@ -300,6 +300,43 @@ marketplaces.get("/:slug", async (c) => {
   return c.json({ marketplace });
 });
 
+// ── GET /:slug/storefront — public storefront payload ──────────────────────
+
+marketplaces.get("/:slug/storefront", async (c) => {
+  const slug = c.req.param("slug");
+  const marketplace = await prisma.marketplace.findUnique({
+    where: { slug },
+    include: {
+      communityFund: { select: { name: true } },
+      products: {
+        include: { vendor: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+
+  return c.json({
+    marketplace: {
+      name: marketplace.name,
+      slug: marketplace.slug,
+      description: marketplace.description,
+      category: marketplace.category,
+      regenerativeEnabled: marketplace.regenerativeEnabled,
+      splitCommunityBps: marketplace.splitCommunityBps,
+      communityFundName: marketplace.communityFund?.name ?? null,
+    },
+    products: marketplace.products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      priceUsd: p.priceUsd,
+      imageUrl: p.imageUrl,
+      vendorName: p.vendor.name,
+    })),
+  });
+});
+
 // ── GET /:slug/dashboard — operator dashboard payload ──────────────────────
 
 marketplaces.get("/:slug/dashboard", async (c) => {

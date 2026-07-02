@@ -1,0 +1,110 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { AppHeader, ProductVisual } from "@/components/shell";
+import { apiFetch } from "@/lib/api";
+import { formatUsd } from "@/lib/format";
+
+interface StorefrontPayload {
+  marketplace: {
+    name: string;
+    slug: string;
+    description: string;
+    category: string;
+    regenerativeEnabled: boolean;
+    splitCommunityBps: number;
+    communityFundName: string | null;
+  };
+  products: {
+    id: string;
+    name: string;
+    description: string;
+    priceUsd: number;
+    imageUrl: string | null;
+    vendorName: string;
+  }[];
+}
+
+export const dynamic = "force-dynamic";
+
+export default async function StorefrontPage(props: { params: Promise<{ slug: string }> }) {
+  const { slug } = await props.params;
+  const res = await apiFetch(`/api/marketplaces/${encodeURIComponent(slug)}/storefront`);
+  if (res.status === 404) notFound();
+  if (!res.ok) throw new Error(`Storefront request failed (${res.status})`);
+  const { marketplace, products } = (await res.json()) as StorefrontPayload;
+
+  const showRegenerativeBadge =
+    marketplace.regenerativeEnabled && marketplace.splitCommunityBps > 0;
+
+  return (
+    <div className="min-h-screen bg-slate-50/60">
+      <AppHeader
+        right={
+          <Link
+            href={`/m/${marketplace.slug}/join`}
+            className="text-sm text-slate-500 transition hover:text-slate-700"
+          >
+            Sell here →
+          </Link>
+        }
+      />
+      <main className="mx-auto w-full max-w-5xl px-6 py-12">
+        <div className="text-center">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+            {marketplace.category}
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+            {marketplace.name}
+          </h1>
+          {marketplace.description && (
+            <p className="mx-auto mt-3 max-w-xl text-slate-600">{marketplace.description}</p>
+          )}
+          {showRegenerativeBadge && (
+            <p className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              ♻ {marketplace.splitCommunityBps / 100}% of every sale funds{" "}
+              {marketplace.communityFundName ?? "the community fund"}
+            </p>
+          )}
+        </div>
+
+        {products.length === 0 ? (
+          <div className="mt-12 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
+            No products yet — check back soon.
+          </div>
+        ) : (
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {products.map((product) => (
+              <div
+                key={product.id}
+                className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+              >
+                <ProductVisual imageUrl={product.imageUrl} />
+                <div className="mt-4 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="font-semibold text-slate-900">{product.name}</h2>
+                    <p className="whitespace-nowrap font-semibold text-slate-900">
+                      {formatUsd(product.priceUsd)}
+                    </p>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">by {product.vendorName}</p>
+                  {product.description && (
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      {product.description}
+                    </p>
+                  )}
+                </div>
+                <Link
+                  href={`/m/${marketplace.slug}/buy/${product.id}`}
+                  className="mt-4 rounded-full bg-slate-900 px-5 py-2.5 text-center text-sm font-medium text-white transition hover:bg-slate-700"
+                >
+                  Buy now
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}

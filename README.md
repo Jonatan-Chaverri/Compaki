@@ -188,6 +188,37 @@ New APIs: `POST /api/marketplaces/[slug]/vendors`, `POST /api/products`,
 `PATCH /api/products/[id]`, `GET /api/balance?account=G...` (real SAC balance
 lookups feeding every live-balance widget).
 
+## Phase 5 — public storefront + checkout
+
+### Buyer journey
+
+1. `/m/{slug}` — public storefront: marketplace name + description, category,
+   product grid (visual, name, vendor, price, "Buy now"). If regenerative
+   mode is on, a badge shows "♻ {X}% of every sale funds {fund name}".
+2. `/m/{slug}/buy/{productId}` — per-product checkout (no cart for the MVP):
+   order summary + buyer name/email + "Pay $X". The card on-ramp is
+   simulated and the UI says so ("Demo: payment simulated with test funds").
+3. On submit the API (all chain/DB work lives in `apps/api`):
+   - gets-or-creates the buyer user + custodial account — new buyers start
+     pre-funded with demo USDC; returning buyers are topped up if short,
+   - calls the contract's `purchase()` signed by the buyer's custodial key
+     (atomic split to vendor / operator / community fund),
+   - stores the `Sale` row with `txHash` + frozen `splitSnapshot` (same
+     rounding as the contract: shares round down, remainder → community).
+4. Success screen (~5-10 s later): "Payment complete" with an animated
+   breakdown — "→ $10.80 to {vendor} (Vendor) → $0.60 to {operator}
+   (Platform) → $0.60 to {fund} (Community)" — plus "See where your money
+   went →" (the Phase 6 receipt page; 404s until then) and a stellar.expert
+   verify link.
+
+The full loop closes: after a purchase, the vendor's live balance (polls
+every 5 s) ticks up within seconds, and the sale appears in the vendor's
+"My sales" and the operator's overview on next load.
+
+New APIs: `GET /api/marketplaces/[slug]/storefront`,
+`GET /api/products/[id]` (checkout info),
+`POST /api/products/[id]/purchase`.
+
 ### Schema notes (v1)
 
 - `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no
