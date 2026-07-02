@@ -1,0 +1,17 @@
+# Soroban contracts workspace for Compaki.
+# The `marketplace` member is added in a later phase — one contract supporting
+# multiple marketplace instances keyed by marketplace_id.
+
+[workspace]
+resolver = "2"
+members = []
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

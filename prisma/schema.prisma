@@ -1,0 +1,82 @@
+// Compaki — Prisma schema v1
+//
+// NOTE ON SQLITE: this schema targets SQLite for the demo. SQLite (via Prisma)
+// does not support `enum`, `Decimal`, or `Json` column types, so:
+//   - User.role        → String, constrained to "OPERATOR" | "VENDOR" | "BUYER"
+//                        (see `Role` in src/lib/db/types.ts)
+//   - *.priceUsd/amountUsd → Float (swap to Decimal(12,2) on Postgres)
+//   - Sale.splitSnapshot   → String holding JSON (swap to Json on Postgres)
+// Swapping to Postgres/Supabase = change datasource provider + tighten these.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String   @id @default(cuid())
+  email                  String?  @unique
+  name                   String
+  role                   String // "OPERATOR" | "VENDOR" | "BUYER"
+  stellarPublicKey       String?  @unique
+  stellarSecretEncrypted String?
+  createdAt              DateTime @default(now())
+
+  marketplaces Marketplace[] @relation("MarketplaceOperator")
+  products     Product[]     @relation("ProductVendor")
+  purchases    Sale[]        @relation("SaleBuyer")
+}
+
+model Marketplace {
+  id                   String   @id @default(cuid())
+  name                 String
+  slug                 String   @unique
+  description          String   @default("")
+  // Revenue split in basis points; must sum to 10_000.
+  splitVendorBps       Int      @default(9000)
+  splitOperatorBps     Int      @default(1000)
+  splitCommunityBps    Int      @default(0)
+  // ID of this marketplace inside the shared Soroban contract (null until registered on-chain).
+  contractMarketplaceId String? @unique
+  regenerativeEnabled  Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  operatorId String
+  operator   User      @relation("MarketplaceOperator", fields: [operatorId], references: [id])
+  products   Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  priceUsd    Float // demo-grade; Decimal(12,2) on Postgres
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+  vendorId      String
+  vendor        User        @relation("ProductVendor", fields: [vendorId], references: [id])
+  sales         Sale[]
+}
+
+model Sale {
+  id            String   @id @default(cuid())
+  amountUsd     Float
+  // Stellar transaction hash — links the UI receipt to stellar.expert.
+  txHash        String   @unique
+  // JSON snapshot of the split applied at purchase time, e.g.
+  // {"vendorBps":9000,"operatorBps":800,"communityBps":200,"vendorAmount":...}
+  splitSnapshot String
+  createdAt     DateTime @default(now())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  buyerId   String
+  buyer     User    @relation("SaleBuyer", fields: [buyerId], references: [id])
+}
