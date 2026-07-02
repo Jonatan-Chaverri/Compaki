@@ -235,7 +235,7 @@ export async function POST(request: NextRequest) {
             slug: marketplace.slug,
             url: `compaki.app/m/${marketplace.slug}`,
             path: `/m/${marketplace.slug}`,
-            dashboardPath: "/dashboard",
+            dashboardPath: `/dashboard/${marketplace.slug}`,
             verifyUrl: createTxHash ? stellarExpertTxUrl(createTxHash) : null,
           },
         });

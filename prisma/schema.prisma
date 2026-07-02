@@ -26,10 +26,11 @@ model User {
   stellarSecretEncrypted String?
   createdAt              DateTime @default(now())
 
-  marketplaces     Marketplace[] @relation("MarketplaceOperator")
-  communityFundFor Marketplace[] @relation("MarketplaceCommunityFund")
-  products         Product[]     @relation("ProductVendor")
-  purchases        Sale[]        @relation("SaleBuyer")
+  marketplaces     Marketplace[]      @relation("MarketplaceOperator")
+  communityFundFor Marketplace[]      @relation("MarketplaceCommunityFund")
+  products         Product[]          @relation("ProductVendor")
+  purchases        Sale[]             @relation("SaleBuyer")
+  vendorMemberships VendorMembership[]
 }
 
 model Marketplace {
@@ -55,6 +56,23 @@ model Marketplace {
   communityFundId String?
   communityFund   User?  @relation("MarketplaceCommunityFund", fields: [communityFundId], references: [id])
   products   Product[]
+  vendors    VendorMembership[]
+}
+
+// A vendor's membership in one marketplace (a vendor may have no products yet).
+model VendorMembership {
+  id               String   @id @default(cuid())
+  sellsDescription String   @default("")
+  // Hash of the register_vendor transaction on testnet.
+  registerTxHash   String?
+  createdAt        DateTime @default(now())
+
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+
+  @@unique([marketplaceId, userId])
 }
 
 model Product {

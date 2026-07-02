@@ -138,6 +138,41 @@ Schema additions (migration `onboarding_fields`): `Marketplace.category`,
 `Marketplace.createTxHash`, `Marketplace.communityFundId → User` (each
 marketplace gets its own custodial community-fund account, role `COMMUNITY`).
 
+## Phase 4 — vendor flows + operator dashboard
+
+### Vendor journey
+
+1. Operator shares the invite link (`/m/{slug}/join`, shown in the Vendors tab).
+2. Vendor registers with name / email / "what do you sell". The server
+   provisions their custodial payment account (Friendbot + trustline), calls
+   `register_vendor` on-chain (signed by the operator's custodial key — the
+   invite implies approval), and records a `VendorMembership` (including the
+   registration tx hash). Idempotent on retry.
+3. `/vendor/{slug}` — vendor dashboard: **My products** (create/edit with
+   price, description, image URL *or* emoji picker), **My sales** (per-sale
+   vendor share from the frozen split snapshot), a **live Balance** card
+   polling their REAL on-chain token balance every 5 s, and a **Withdraw**
+   modal that is honest about the demo ("Off-ramp partners coming soon —
+   this demo runs on Stellar testnet").
+
+### Operator dashboard (`/dashboard/{slug}`)
+
+- **Overview** — total sales, gross volume, revenue by recipient
+  (vendors/operator/community, summed from split snapshots), live on-chain
+  balances of the operator + community fund, recent-sales feed with
+  stellar.expert "verify" links.
+- **Vendors** — invite link with copy button, vendor list with on-chain
+  registration links and a demo-only "view their dashboard" session switcher
+  (`/api/demo/impersonate` — the platform is custodial and passwordless, so
+  the presenter can hop between roles in one browser).
+- **Products** — read-only catalog across all vendors.
+
+`/dashboard` redirects to the session operator's marketplace.
+
+New APIs: `POST /api/marketplaces/[slug]/vendors`, `POST /api/products`,
+`PATCH /api/products/[id]`, `GET /api/balance?account=G...` (real SAC balance
+lookups feeding every live-balance widget).
+
 ### Schema notes (v1)
 
 - `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no
