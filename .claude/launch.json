@@ -4,16 +4,16 @@
     {
       "name": "compaki-api",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "compaki-api"],
+      "runtimeArgs": ["--prefix", "apps/api", "run", "dev"],
       "port": 4000,
       "autoPort": false
     },
     {
       "name": "compaki-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "compaki-web"],
+      "runtimeArgs": ["--prefix", "apps/web", "run", "dev"],
       "port": 3000,
-      "autoPort": true
+      "autoPort": false
     }
   ]
 }

@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AppHeader, ProductVisual } from "@/components/shell";
+import { AppHeader } from "@/components/shell";
 import { apiFetch } from "@/lib/api";
-import { formatUsd } from "@/lib/format";
+
+import { ProductGrid, type StorefrontProduct } from "./product-grid";
 
 interface StorefrontPayload {
   marketplace: {
@@ -15,14 +16,7 @@ interface StorefrontPayload {
     splitCommunityBps: number;
     communityFundName: string | null;
   };
-  products: {
-    id: string;
-    name: string;
-    description: string;
-    priceUsd: number;
-    imageUrl: string | null;
-    vendorName: string;
-  }[];
+  products: StorefrontProduct[];
 }
 
 export const dynamic = "force-dynamic";
@@ -73,36 +67,7 @@ export default async function StorefrontPage(props: { params: Promise<{ slug: st
             No products yet — check back soon.
           </div>
         ) : (
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {products.map((product) => (
-              <div
-                key={product.id}
-                className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <ProductVisual imageUrl={product.imageUrl} />
-                <div className="mt-4 flex-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <h2 className="font-semibold text-slate-900">{product.name}</h2>
-                    <p className="whitespace-nowrap font-semibold text-slate-900">
-                      {formatUsd(product.priceUsd)}
-                    </p>
-                  </div>
-                  <p className="mt-0.5 text-xs text-slate-500">by {product.vendorName}</p>
-                  {product.description && (
-                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                      {product.description}
-                    </p>
-                  )}
-                </div>
-                <Link
-                  href={`/m/${marketplace.slug}/buy/${product.id}`}
-                  className="mt-4 rounded-full bg-slate-900 px-5 py-2.5 text-center text-sm font-medium text-white transition hover:bg-slate-700"
-                >
-                  Buy now
-                </Link>
-              </div>
-            ))}
-          </div>
+          <ProductGrid slug={marketplace.slug} products={products} />
         )}
       </main>
     </div>
