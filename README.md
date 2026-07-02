@@ -16,8 +16,7 @@ real and verifiable on [stellar.expert](https://stellar.expert/explorer/testnet)
   app (`rewrites` in `next.config.ts`), so cookies and SSE stay same-origin.
 - **API:** standalone Hono (Node) app in `apps/api` — owns Prisma, the
   Stellar service layer, and the session cookie
-- **Database:** SQLite via Prisma for the demo (schema designed to swap to
-  Postgres/Supabase — see notes in [apps/api/prisma/schema.prisma](apps/api/prisma/schema.prisma))
+- **Database:** Supabase/Postgres via Prisma
 - **Blockchain:** Soroban smart contract in Rust (workspace in `contracts/`),
   deployed to Stellar **testnet**; the API talks to it via
   `@stellar/stellar-sdk` through `apps/api/src/lib/stellar/` only
@@ -33,7 +32,7 @@ apps/api/                 Hono API server (npm workspace "compaki-api", port 400
   src/routes/             HTTP routes (/api/*)
   src/lib/db/             Prisma client singleton + TS types (Role, SplitSnapshot)
   src/lib/stellar/        Stellar/Soroban service layer — sole chain touchpoint
-  prisma/                 Schema + migrations (SQLite dev.db)
+  prisma/                 Supabase/Postgres schema + migrations
   scripts/                Testnet deploy + demo purchase
 contracts/                Rust workspace for the Soroban marketplace contract
 ```
@@ -52,7 +51,8 @@ transaction hash so receipts link to stellar.expert.
 
 ```bash
 npm install                                  # installs both workspaces
-(cd apps/api && npx prisma migrate dev)      # creates dev.db and generates the client
+# Add DATABASE_URL + DIRECT_URL in apps/api/.env or apps/api/.env.local
+(cd apps/api && npx prisma migrate dev)      # applies Supabase/Postgres migrations
 npm run dev                                  # api → :4000, web → :3000 (both at once)
 ```
 
@@ -63,7 +63,7 @@ npm run dev                                  # api → :4000, web → :3000 (bot
 - `http://localhost:3000` — marketing landing page (hero, three feature
   cards, regenerative-mode callout, CTA). The CTA links to `/onboarding`,
   which intentionally 404s until the onboarding phase.
-- `npx prisma studio` (in `apps/api`) — inspect the empty `User`, `Marketplace`, `Product`,
+- `npx prisma studio` (in `apps/api`) — inspect the `User`, `Marketplace`, `Product`,
   and `Sale` tables.
 
 ## Phase 2 — Soroban contract + testnet deployment
@@ -240,8 +240,8 @@ New APIs: `GET /api/marketplaces/[slug]/storefront`,
 
 ### Schema notes (v1)
 
-- `User.role` is a string (`OPERATOR | VENDOR | BUYER`) because SQLite has no
-  enums; the `Role` union type in `apps/api/src/lib/db/types.ts` enforces it in code.
+- `User.role` is currently a string (`OPERATOR | VENDOR | BUYER | COMMUNITY`);
+  the `Role` union type in `apps/api/src/lib/db/types.ts` enforces it in code.
 - Splits are stored in **basis points** (`splitVendorBps` etc., summing to
   10 000) to avoid float drift in money math.
 - `Sale.splitSnapshot` is a JSON string capturing the split *at purchase

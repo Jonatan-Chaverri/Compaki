@@ -8,7 +8,12 @@
     "typecheck": "tsc --noEmit",
     "deploy:testnet": "tsx scripts/deploy.ts",
     "demo:purchase": "tsx scripts/demo-purchase.ts",
-    "demo:seed": "tsx scripts/seed-demo.ts"
+    "demo:seed": "tsx scripts/seed-demo.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "prisma:format": "prisma format"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

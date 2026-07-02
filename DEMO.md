@@ -8,7 +8,7 @@ verifiable on stellar.expert.
 
 ```bash
 npm install
-(cd apps/api && npx prisma migrate dev)   # local SQLite
+(cd apps/api && npx prisma migrate dev)   # Supabase/Postgres
 npm run deploy:testnet                    # issuer + contract → apps/api/.env.local
 npm run demo:seed                         # builds "Café de Altura" with real txs
 npm run dev                               # api :4000 + web :3000

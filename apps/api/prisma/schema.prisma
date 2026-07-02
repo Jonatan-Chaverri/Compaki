@@ -1,20 +1,20 @@
-// Compaki — Prisma schema v1
+// Compaki — Prisma schema v1.
 //
-// NOTE ON SQLITE: this schema targets SQLite for the demo. SQLite (via Prisma)
-// does not support `enum`, `Decimal`, or `Json` column types, so:
-//   - User.role        → String, constrained to "OPERATOR" | "VENDOR" | "BUYER"
-//                        (see `Role` in src/lib/db/types.ts)
-//   - *.priceUsd/amountUsd → Float (swap to Decimal(12,2) on Postgres)
-//   - Sale.splitSnapshot   → String holding JSON (swap to Json on Postgres)
-// Swapping to Postgres/Supabase = change datasource provider + tighten these.
+// Supabase/Postgres is the production database. A few app-facing fields remain
+// intentionally simple for the demo:
+//   - User.role is a String constrained in TypeScript (see src/lib/db/types.ts).
+//   - Sale.splitSnapshot is stored as a JSON string to keep API code numeric.
+//   - *.priceUsd/amountUsd are Float values; switch to Decimal when exact
+//     accounting beyond the Stellar settlement layer becomes product-critical.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider  = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -79,7 +79,7 @@ model Product {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
-  priceUsd    Float // demo-grade; Decimal(12,2) on Postgres
+  priceUsd    Float // demo-grade; Decimal(12,2) when off-chain accounting needs exact math
   imageUrl    String?
   createdAt   DateTime @default(now())
 

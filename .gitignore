@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# SQLite demo database (apps/api)
+# Legacy local database artifacts (apps/api)
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
 

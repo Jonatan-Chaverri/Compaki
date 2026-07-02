@@ -1,17 +1,19 @@
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "email" TEXT,
     "name" TEXT NOT NULL,
     "role" TEXT NOT NULL,
     "stellarPublicKey" TEXT,
     "stellarSecretEncrypted" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Marketplace" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "slug" TEXT NOT NULL,
     "description" TEXT NOT NULL DEFAULT '',
@@ -20,34 +22,40 @@ CREATE TABLE "Marketplace" (
     "splitCommunityBps" INTEGER NOT NULL DEFAULT 0,
     "contractMarketplaceId" TEXT,
     "regenerativeEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "operatorId" TEXT NOT NULL,
+
+    CONSTRAINT "Marketplace_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Marketplace_operatorId_fkey" FOREIGN KEY ("operatorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Product" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT NOT NULL DEFAULT '',
-    "priceUsd" REAL NOT NULL,
+    "priceUsd" DOUBLE PRECISION NOT NULL,
     "imageUrl" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "marketplaceId" TEXT NOT NULL,
     "vendorId" TEXT NOT NULL,
+
+    CONSTRAINT "Product_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Product_marketplaceId_fkey" FOREIGN KEY ("marketplaceId") REFERENCES "Marketplace" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "Product_vendorId_fkey" FOREIGN KEY ("vendorId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Sale" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "amountUsd" REAL NOT NULL,
+    "id" TEXT NOT NULL,
+    "amountUsd" DOUBLE PRECISION NOT NULL,
     "txHash" TEXT NOT NULL,
     "splitSnapshot" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "productId" TEXT NOT NULL,
     "buyerId" TEXT NOT NULL,
+
+    CONSTRAINT "Sale_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "Sale_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "Sale_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
