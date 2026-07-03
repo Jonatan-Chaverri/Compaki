@@ -1,258 +1,317 @@
+<p align="center">
+  <img src="./logo.png" alt="Compaki logo" width="180" />
+</p>
+
 # Compaki
 
-Multi-vendor marketplace platform where payments settle instantly and split
-automatically between vendors, the marketplace operator, and an optional
-community fund. Built on Stellar/Soroban (testnet) under the hood — end users
-only ever see payments, balances, payouts, and `$`.
+Compaki is a multi-vendor marketplace platform for communities, local producers,
+and purpose-driven commerce. It lets an operator launch a marketplace, onboard
+vendors, list products, accept purchases, and distribute each payment
+automatically between the seller, the marketplace operator, and an optional
+community fund.
 
-**Status:** demo for the Stellar Community Fund. Testnet only, custodial
-accounts, corners cut everywhere except the on-chain money movement, which is
-real and verifiable on [stellar.expert](https://stellar.expert/explorer/testnet).
+The project is built around a simple premise: digital commerce should not only
+extract value from a community, it should be able to circulate value back into
+it. Compaki makes regenerative economics a first-class part of the checkout
+flow by allowing every marketplace to reserve a programmable share of each sale
+for a community fund.
 
-## Stack
+## Why Compaki
 
-- **Frontend:** Next.js (App Router, TypeScript strict) + Tailwind CSS in
-  `apps/web` — UI only, no DB or chain access. Proxies `/api/*` to the API
-  app (`rewrites` in `next.config.ts`), so cookies and SSE stay same-origin.
-- **API:** standalone Hono (Node) app in `apps/api` — owns Prisma, the
-  Stellar service layer, and the session cookie
-- **Database:** Supabase/Postgres via Prisma
-- **Blockchain:** Soroban smart contract in Rust (workspace in `contracts/`),
-  deployed to Stellar **testnet**; the API talks to it via
-  `@stellar/stellar-sdk` through `apps/api/src/lib/stellar/` only
-- **Payment asset:** self-issued demo "USDC" on testnet, shown as `$` in the UI
+Traditional marketplace infrastructure is powerful, but often expensive,
+opaque, and disconnected from the communities it serves. Compaki combines a
+familiar marketplace experience with transparent settlement on Stellar/Soroban:
 
-## Project layout
+- Operators can create a branded marketplace and invite vendors.
+- Vendors can sell products and receive their share automatically.
+- Buyers see a clean checkout and a receipt that explains where the money went.
+- Community funds can receive a fixed percentage of every sale.
+- Every settled purchase stores a Stellar transaction hash for independent
+  verification.
 
+This repository currently targets Stellar testnet. The money movement is real
+on testnet and verifiable through stellar.expert, while the product remains an
+MVP implementation with custodial demo accounts and a self-issued test asset
+shown as USD in the UI.
+
+## Regenerative Economy Model
+
+Each marketplace defines its own revenue split in basis points:
+
+- `splitVendorBps`: share paid to the vendor
+- `splitOperatorBps`: share paid to the marketplace operator
+- `splitCommunityBps`: share paid to the community fund
+
+The three values must add up to `10_000`, which represents 100%. For example,
+a `90 / 8 / 2` split sends 90% to the vendor, 8% to the operator, and 2% to the
+community fund.
+
+This matters because the community contribution is not treated as a donation
+after the fact. It is part of the market design itself. When a marketplace
+enables regenerative distribution, every transaction can fund shared resources,
+local initiatives, cooperatives, climate projects, mutual aid pools, or any
+other community account represented by the marketplace.
+
+On-chain, the split is enforced by the Soroban contract. During a purchase, the
+contract transfers the payment atomically to the vendor, operator, and community
+fund. If rounding leaves a tiny remainder, that remainder goes to the community
+fund so no value is lost.
+
+## Core Flows
+
+1. An operator creates a marketplace and chooses the revenue split.
+2. Compaki creates the operator and community fund payment accounts.
+3. The marketplace is registered inside the shared Soroban contract.
+4. Vendors join the marketplace and are registered on-chain by the operator.
+5. Buyers purchase products through the storefront.
+6. The contract settles the payment in one atomic split.
+7. The sale record stores a transaction hash and a frozen split snapshot.
+8. Receipts show the buyer exactly how the payment was distributed.
+
+## Architecture
+
+Compaki is organized as a small monorepo:
+
+```text
+apps/web/                 Next.js frontend app
+  src/app/                App Router pages and UI
+  src/lib/api.ts          Server-side API fetch helper
+
+apps/api/                 Hono API server
+  src/routes/             HTTP routes under /api/*
+  src/lib/db/             Prisma client and shared database types
+  src/lib/stellar/        Stellar and Soroban integration layer
+  prisma/                 Prisma schema and migrations
+  scripts/                Testnet deployment and demo data scripts
+
+contracts/                Rust workspace for Soroban contracts
+  marketplace/            Shared marketplace contract
 ```
-apps/web/                 Next.js frontend app (port 3000)
-  src/app/                Pages (App Router) — data comes from the API app
-  src/lib/api.ts          Server-component fetch helper (forwards the session cookie)
-apps/api/                 Hono API server app (port 4000)
-  src/routes/             HTTP routes (/api/*)
-  src/lib/db/             Prisma client singleton + TS types (Role, SplitSnapshot)
-  src/lib/stellar/        Stellar/Soroban service layer — sole chain touchpoint
-  prisma/                 Supabase/Postgres schema + migrations
-  scripts/                Testnet deploy + demo purchase
-contracts/                Rust workspace for the Soroban marketplace contract
-```
 
-The browser only ever talks to the web app: `apps/web` rewrites `/api/*` to
-`http://localhost:4000` (override with `API_URL`), and server components call
-the API directly with the session cookie forwarded.
+The browser talks to the Next.js app. The web app rewrites `/api/*` requests to
+the standalone Hono API, so browser requests stay same-origin and session
+cookies work without a separate CORS setup.
 
-On-chain: money movement and split config only. Off-chain (DB): users,
-marketplaces, product catalog, sales history. Every sale stores its Stellar
-transaction hash so receipts link to stellar.expert.
+The API owns all database and blockchain access. The frontend does not connect
+directly to Prisma, Stellar, or Soroban.
 
-## Phase 1 — scaffolding + landing page
+## Blockchain Design
 
-### Run it
+Compaki uses one deployed Soroban marketplace contract to support many
+marketplaces. Creating a marketplace does not deploy a new contract. Instead,
+the API calls `create_marketplace`, and the contract stores a new marketplace
+configuration keyed by `marketplace_id`.
+
+Current Stellar testnet marketplace contract:
+[`CCCXYF55U6M44A6RK2WFUXEZDNPMCUI7YDR3YPBBEGWGEO4OSIGZQH2U`](https://stellar.expert/explorer/testnet/contract/CCCXYF55U6M44A6RK2WFUXEZDNPMCUI7YDR3YPBBEGWGEO4OSIGZQH2U)
+
+This address is generated by `npm run deploy:testnet` and can change if the
+testnet contract is redeployed.
+
+The contract is intentionally focused:
+
+- Store the payment token and contract admin.
+- Register marketplace split configuration.
+- Register vendors per marketplace.
+- Execute atomic payment splits.
+- Emit events for marketplace creation, vendor registration, and purchases.
+
+Everything else, including users, sessions, product catalog, images, dashboards,
+and sale history, lives off-chain in Postgres.
+
+## Tech Stack
+
+- Frontend: Next.js, React, TypeScript, Tailwind CSS
+- API: Hono, Node.js, TypeScript
+- Database: PostgreSQL through Prisma
+- Blockchain: Stellar testnet, Soroban smart contracts, `@stellar/stellar-sdk`
+- Contract: Rust with `soroban-sdk`
+
+## Prerequisites
+
+- Node.js 18+
+- npm
+- Rust toolchain
+- PostgreSQL database, such as Supabase Postgres
+- Stellar testnet access
+
+For Soroban contract deployment, install the WASM target once:
 
 ```bash
-cd apps/api
-npm install
-# Add DATABASE_URL + DIRECT_URL in .env or .env.local
-npm run prisma:migrate                       # applies Supabase/Postgres migrations
-npm run dev                                  # API → :4000
-
-cd ../web
-npm install
-npm run dev                                  # Web → :3000
+rustup target add wasm32v1-none
 ```
 
-The frontend and backend are intentionally independent npm apps. Run install,
-build, start, and deploy commands from each app directory.
+## Environment
 
-### What to check
+The API reads environment variables from `apps/api/.env.local` and then
+`apps/api/.env`.
 
-- `http://localhost:3000` — marketing landing page (hero, three feature
-  cards, regenerative-mode callout, CTA). The CTA links to `/onboarding`,
-  which intentionally 404s until the onboarding phase.
-- `npx prisma studio` (in `apps/api`) — inspect the `User`, `Marketplace`, `Product`,
-  and `Sale` tables.
-
-## Phase 2 — Soroban contract + testnet deployment
-
-### The contract (`contracts/marketplace`)
-
-One deployment, many marketplaces: each `create_marketplace` call registers an
-instance (keyed by `marketplace_id`) with its own operator, community fund and
-bps split (must sum to 10 000). `purchase` moves demo USDC from the buyer to
-vendor / operator / community fund **atomically in one invocation** — both
-percentage shares round down and the remainder always goes to the community
-fund, so no dust is ever lost. Every purchase emits an event with all split
-amounts.
+At minimum, provide the database connection variables before running migrations:
 
 ```bash
-cd contracts && cargo test        # 9 unit tests: split math, rounding, auth, validation
+DATABASE_URL="postgresql://..."
+DIRECT_URL="postgresql://..."
 ```
 
-### Deploy to testnet
+The Stellar-related variables are generated by the testnet deployment script:
 
 ```bash
-rustup target add wasm32v1-none   # once; emits MVP wasm Soroban accepts
 cd apps/api
 npm run deploy:testnet
 ```
 
-This creates + funds a demo-USDC issuer via Friendbot, deploys the USDC
-Stellar Asset Contract, builds/uploads/deploys the marketplace contract,
-initializes it, and writes everything to `apps/api/.env.local` (RPC URLs, issuer keys,
-SAC + contract IDs, and a `WALLET_ENCRYPTION_KEY` for custodial secrets —
-preserved across re-deploys). Pure `@stellar/stellar-sdk`; no stellar-cli
-version dependency.
+That script writes values such as:
 
-### Prove it works
+- `STELLAR_RPC_URL`
+- `STELLAR_HORIZON_URL`
+- `STELLAR_NETWORK_PASSPHRASE`
+- `DEMO_USDC_ISSUER_PUBLIC`
+- `DEMO_USDC_ISSUER_SECRET`
+- `DEMO_USDC_SAC_ADDRESS`
+- `MARKETPLACE_CONTRACT_ID`
+- `WALLET_ENCRYPTION_KEY`
+
+The web app proxies API requests to `http://localhost:4000` by default. Override
+it with `API_URL` when needed:
+
+```bash
+API_URL="http://localhost:4000"
+```
+
+## Run Locally
+
+Install and start the API:
+
+```bash
+cd apps/api
+npm install
+npm run prisma:migrate
+npm run dev
+```
+
+In another terminal, install and start the web app:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+The API runs on:
+
+```text
+http://localhost:4000
+```
+
+## Deploy Testnet Contracts
+
+From the API app:
+
+```bash
+cd apps/api
+npm run deploy:testnet
+```
+
+The deployment script:
+
+- Creates and funds a demo asset issuer on Stellar testnet.
+- Deploys the Stellar Asset Contract for the demo asset.
+- Builds, uploads, and deploys the Soroban marketplace contract.
+- Initializes the contract with the admin and payment token.
+- Writes the resulting contract and wallet configuration to `.env.local`.
+
+## Seed Demo Data
+
+Create a complete demo marketplace with vendors, products, sales, receipts, and
+real testnet transactions:
+
+```bash
+cd apps/api
+npm run demo:seed
+```
+
+Run a smaller end-to-end purchase proof:
 
 ```bash
 cd apps/api
 npm run demo:purchase
 ```
 
-Provisions four custodial accounts (operator, community fund, vendor, buyer
-with $100), creates a 90/8/2 marketplace on-chain, registers the vendor,
-executes a $42 purchase and prints resulting balances
-($37.80 / $3.36 / $0.84 / $58.00) plus the stellar.expert receipt link.
+## Useful Commands
 
-### API service layer (`apps/api/src/lib/stellar/`)
+API:
 
-- `contract.ts` — typed wrappers (`createMarketplace`, `registerVendor`,
-  `purchase`, `getMarketplace`): build → simulate → sign with server-held
-  keys → submit → poll. The signer is the tx source, so its signature also
-  covers the token sub-transfers' `require_auth`.
-- `accounts.ts` — `createCustodialAccount()`: keypair → Friendbot →
-  trustline + optional starting balance (single transaction) → AES-encrypted
-  secret for DB storage. Plus `mintDemoUsd` and `getUsdBalance` helpers.
-- `crypto.ts` — AES-256-GCM for custodial secrets (key from env; demo-grade).
-- `retry.ts` — every outbound call retries once on timeout-ish errors
-  (testnet is flaky); deploy adds retries for RPC load-balancer lag.
+```bash
+cd apps/api
+npm run dev
+npm run build
+npm run start
+npm run typecheck
+npm run prisma:migrate
+npm run prisma:studio
+```
 
-## Phase 3 — operator onboarding wizard
+Web:
 
-### Try it
+```bash
+cd apps/web
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run typecheck
+```
 
-With both dev servers running (and `apps/api/.env.local` from `npm run deploy:testnet`):
+Contracts:
 
-1. `http://localhost:3000/onboarding` — 4-step wizard:
-   **About** (name, live-checked URL slug auto-suggested from the name,
-   description, category) → **Revenue split** (three sliders that always sum
-   to 100%; "Enable regenerative mode" sets the community fund to 5% and
-   unlocks its slider) → **Your account** (name + email, no password — a
-   session cookie signs you in) → **Launch**.
-2. The launch screen's progress rows reflect real server-side steps streamed
-   over SSE: custodial payment accounts (operator + community fund, funded +
-   trustlines) → `create_marketplace` on-chain → DB records.
-3. Success screen shows `compaki.app/m/{slug}`, a dashboard button, and a
-   small "verified on-chain" link to the create_marketplace transaction on
-   stellar.expert.
+```bash
+cd contracts
+cargo test
+```
 
-### API
+## Product Surfaces
 
-- `GET /api/marketplaces/check-slug?slug=x` — live slug availability.
-- `POST /api/marketplaces` — launch orchestrator; responds with an SSE stream
-  (`step` events for accounts/deploy/store, then `complete` or `error`).
-  Idempotent on retry: the operator is reused by email, the marketplace + fund
-  account by slug, and the on-chain step is skipped if `contractMarketplaceId`
-  is already set — so a retry never creates duplicates. Sets the demo session
-  cookie (`compaki_uid`).
+- `/onboarding`: operator marketplace creation
+- `/m/{slug}`: public storefront
+- `/m/{slug}/join`: vendor onboarding
+- `/m/{slug}/buy/{productId}`: product checkout
+- `/dashboard/{slug}`: operator dashboard
+- `/vendor/{slug}`: vendor dashboard
+- `/receipt/{saleId}`: public transparent receipt
 
-Schema additions (migration `onboarding_fields`): `Marketplace.category`,
-`Marketplace.createTxHash`, `Marketplace.communityFundId → User` (each
-marketplace gets its own custodial community-fund account, role `COMMUNITY`).
+## Data Model Notes
 
-## Phase 4 — vendor flows + operator dashboard
+- `Marketplace.contractMarketplaceId` links an off-chain marketplace to its
+  on-chain configuration.
+- `Marketplace.createTxHash` stores the transaction that registered the
+  marketplace on-chain.
+- `Marketplace.communityFundId` points to the account receiving the community
+  share.
+- `Sale.txHash` stores the purchase transaction hash.
+- `Sale.splitSnapshot` freezes the exact split used at purchase time, so future
+  marketplace changes do not rewrite historical accounting.
 
-### Vendor journey
+## Current Status
 
-1. Operator shares the invite link (`/m/{slug}/join`, shown in the Vendors tab).
-2. Vendor registers with name / email / "what do you sell". The server
-   provisions their custodial payment account (Friendbot + trustline), calls
-   `register_vendor` on-chain (signed by the operator's custodial key — the
-   invite implies approval), and records a `VendorMembership` (including the
-   registration tx hash). Idempotent on retry.
-3. `/vendor/{slug}` — vendor dashboard: **My products** (create/edit with
-   price, description, image URL *or* emoji picker), **My sales** (per-sale
-   vendor share from the frozen split snapshot), a **live Balance** card
-   polling their REAL on-chain token balance every 5 s, and a **Withdraw**
-   modal that is honest about the demo ("Off-ramp partners coming soon —
-   this demo runs on Stellar testnet").
+Compaki is an MVP designed to demonstrate verifiable marketplace settlement and
+regenerative revenue distribution on Stellar testnet. It is not production
+payment infrastructure yet. Production readiness would require non-testnet
+assets, stronger account custody or wallet-based flows, operational monitoring,
+formal contract review, and compliance work appropriate to the deployment
+jurisdiction.
 
-### Operator dashboard (`/dashboard/{slug}`)
+## Vision
 
-- **Overview** — total sales, gross volume, revenue by recipient
-  (vendors/operator/community, summed from split snapshots), live on-chain
-  balances of the operator + community fund, recent-sales feed with
-  stellar.expert "verify" links.
-- **Vendors** — invite link with copy button, vendor list with on-chain
-  registration links and a demo-only "view their dashboard" session switcher
-  (`/api/demo/impersonate` — the platform is custodial and passwordless, so
-  the presenter can hop between roles in one browser).
-- **Products** — read-only catalog across all vendors.
+Compaki is built for marketplaces where the health of the ecosystem matters as
+much as the transaction itself. A coffee cooperative, a farmers market, a local
+services network, or a creative community should be able to decide not only who
+gets paid, but how every sale strengthens the shared infrastructure around it.
 
-`/dashboard` redirects to the session operator's marketplace.
-
-New APIs: `POST /api/marketplaces/[slug]/vendors`, `POST /api/products`,
-`PATCH /api/products/[id]`, `GET /api/balance?account=G...` (real SAC balance
-lookups feeding every live-balance widget).
-
-## Phase 5 — public storefront + checkout
-
-### Buyer journey
-
-1. `/m/{slug}` — public storefront: marketplace name + description, category,
-   product grid (visual, name, vendor, price, "Buy now"). If regenerative
-   mode is on, a badge shows "♻ {X}% of every sale funds {fund name}".
-2. `/m/{slug}/buy/{productId}` — per-product checkout (no cart for the MVP):
-   order summary + buyer name/email + "Pay $X". The card on-ramp is
-   simulated and the UI says so ("Demo: payment simulated with test funds").
-3. On submit the API (all chain/DB work lives in `apps/api`):
-   - gets-or-creates the buyer user + custodial account — new buyers start
-     pre-funded with demo USDC; returning buyers are topped up if short,
-   - calls the contract's `purchase()` signed by the buyer's custodial key
-     (atomic split to vendor / operator / community fund),
-   - stores the `Sale` row with `txHash` + frozen `splitSnapshot` (same
-     rounding as the contract: shares round down, remainder → community).
-4. Success screen (~5-10 s later): "Payment complete" with an animated
-   breakdown — "→ $10.80 to {vendor} (Vendor) → $0.60 to {operator}
-   (Platform) → $0.60 to {fund} (Community)" — plus "See where your money
-   went →" (the Phase 6 receipt page; 404s until then) and a stellar.expert
-   verify link.
-
-The full loop closes: after a purchase, the vendor's live balance (polls
-every 5 s) ticks up within seconds, and the sale appears in the vendor's
-"My sales" and the operator's overview on next load.
-
-New APIs: `GET /api/marketplaces/[slug]/storefront`,
-`GET /api/products/[id]` (checkout info),
-`POST /api/products/[id]/purchase`.
-
-## Phase 6 — transparent receipt + demo readiness
-
-- `/receipt/{saleId}` — the public, shareable receipt: buyer → split flow
-  with names, roles, amounts and percentages, a "Verified ✓" per recipient
-  linking to the transaction on stellar.expert, and one trust line at the
-  bottom ("settled on the Stellar network in {N} seconds and cannot be
-  altered") — the only place the product ever mentions blockchain. OG tags
-  make the link preview well. `Sale.settleSeconds` (new migration) stores
-  the measured settlement time of each purchase.
-- `npm run demo:seed` from `apps/api` — builds the full pitch scenario on real testnet:
-  "Café de Altura" (regenerative, 85/10/5), operator María, vendors Don
-  Carlos + Finca La Esperanza (5 products), and 5 backdated sales with real
-  on-chain transactions. Idempotent — safe to re-run; prints every demo
-  link (storefront, dashboard, receipts, stellar.expert txs) when done.
-- [DEMO.md](DEMO.md) — the 5-minute SCF runbook: exact click-path, what to
-  say at each step, and a fallback plan if testnet is slow (every claim in
-  the pitch is provable with the seeded links alone).
-- New API: `GET /api/sales/[id]/receipt`.
-
-### Schema notes (v1)
-
-- `User.role` is currently a string (`OPERATOR | VENDOR | BUYER | COMMUNITY`);
-  the `Role` union type in `apps/api/src/lib/db/types.ts` enforces it in code.
-- Splits are stored in **basis points** (`splitVendorBps` etc., summing to
-  10 000) to avoid float drift in money math.
-- `Sale.splitSnapshot` is a JSON string capturing the split *at purchase
-  time*, so later config changes never rewrite history.
-- `Marketplace.contractMarketplaceId` stays `null` until the marketplace is
-  registered in the on-chain contract (later phase).
+That is the role of regenerative commerce: turning distribution rules into a
+living economic design, visible to buyers and enforceable at settlement.
