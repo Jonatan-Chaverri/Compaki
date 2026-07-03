@@ -1,17 +1,25 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { UserMenu } from "./user-menu";
 
-/** Shared app chrome: white top bar with logo, optional right slot, session menu. */
+/** Brand mark: logo image + wordmark. */
+export function Logo() {
+  return (
+    <span className="flex items-center gap-2">
+      <Image src="/logo.png" alt="Compaki logo" width={32} height={32} priority />
+      <span className="text-lg font-semibold tracking-tight text-navy-900">Compaki</span>
+    </span>
+  );
+}
+
+/** Shared app chrome: sticky white top bar with logo, optional right slot, session menu. */
 export function AppHeader({ right }: { right?: React.ReactNode }) {
   return (
-    <header className="border-b border-slate-100 bg-white">
+    <header className="sticky top-0 z-40 border-b border-slate-100 bg-white/90 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-sm font-bold text-white">
-            C
-          </span>
-          <span className="text-lg font-semibold tracking-tight text-slate-900">Compaki</span>
+        <Link href="/">
+          <Logo />
         </Link>
         <span className="flex items-center gap-4">
           {right}

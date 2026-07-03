@@ -12,6 +12,16 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Brand palette sampled from logo.png: teal ring + navy shield. */
+@theme {
+  --color-brand-500: #14c4c2;
+  --color-brand-600: #0fa9a9;
+  --color-brand-700: #0e8e9b;
+  --color-navy-700: #1b4a7d;
+  --color-navy-800: #16406e;
+  --color-navy-900: #123a63;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

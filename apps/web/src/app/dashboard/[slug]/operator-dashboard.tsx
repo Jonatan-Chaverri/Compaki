@@ -90,7 +90,7 @@ export function OperatorDashboard({
               key={t}
               onClick={() => setTab(t)}
               className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition ${
-                tab === t ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"
+                tab === t ? "bg-navy-900 text-white" : "text-slate-500 hover:bg-slate-100"
               }`}
             >
               {t}
@@ -117,7 +117,7 @@ export function OperatorDashboard({
               Revenue by recipient
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <RevenueRow label="Vendors" amount={stats.vendorRevenue} dot="bg-slate-900" />
+              <RevenueRow label="Vendors" amount={stats.vendorRevenue} dot="bg-navy-900" />
               <RevenueRow label="You (operator)" amount={stats.operatorRevenue} dot="bg-slate-400" />
               <RevenueRow label="Community fund" amount={stats.communityRevenue} dot="bg-emerald-500" />
             </div>
@@ -293,7 +293,7 @@ function InviteLink({ slug }: { slug: string }) {
             setCopied(true);
             setTimeout(() => setCopied(false), 1_500);
           }}
-          className="rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-700"
+          className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700"
         >
           {copied ? "Copied ✓" : "Copy link"}
         </button>

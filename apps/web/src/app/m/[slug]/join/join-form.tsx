@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 bg-white";
+  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
 export function JoinForm({
   slug,
@@ -51,7 +51,7 @@ export function JoinForm({
         </p>
         <Link
           href={`/vendor/${slug}`}
-          className="mt-6 inline-block rounded-full bg-slate-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
+          className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
         >
           Go to my products
         </Link>
@@ -107,7 +107,7 @@ export function JoinForm({
       <button
         onClick={() => void submit()}
         disabled={!valid || state === "submitting"}
-        className="w-full rounded-full bg-slate-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {state === "submitting" ? (
           <span className="inline-flex items-center gap-2">

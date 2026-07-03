@@ -41,7 +41,7 @@ export default async function VendorPage(props: { params: Promise<{ slug: string
           </p>
           <Link
             href={`/m/${slug}/join`}
-            className="mt-6 inline-block rounded-full bg-slate-900 px-7 py-3 text-sm font-medium text-white hover:bg-slate-700"
+            className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white hover:bg-navy-700"
           >
             Become a vendor
           </Link>

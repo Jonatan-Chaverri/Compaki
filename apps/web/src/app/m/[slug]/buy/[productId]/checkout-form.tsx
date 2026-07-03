@@ -13,7 +13,7 @@ import { useState } from "react";
 import { formatUsd } from "@/lib/format";
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 bg-white";
+  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
 interface BreakdownRow {
   key: string;
@@ -30,7 +30,7 @@ interface PurchaseResult {
 }
 
 const DOT_COLORS: Record<string, string> = {
-  vendor: "bg-slate-900",
+  vendor: "bg-navy-900",
   platform: "bg-slate-400",
   community: "bg-emerald-500",
 };
@@ -99,7 +99,7 @@ export function CheckoutForm({
         </p>
         <Link
           href={`/login?next=${encodeURIComponent(pathname)}`}
-          className="mt-6 inline-block rounded-full bg-slate-900 px-8 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
+          className="mt-6 inline-block rounded-full bg-navy-900 px-8 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
         >
           Sign in or create account
         </Link>
@@ -149,7 +149,7 @@ export function CheckoutForm({
         <div style={{ animation: "rise-in 0.45s ease-out 1.6s both" }}>
           <Link
             href={result.receiptPath}
-            className="mt-6 inline-block rounded-full bg-slate-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-slate-700"
+            className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
           >
             See where your money went →
           </Link>
@@ -239,7 +239,7 @@ export function CheckoutForm({
       <button
         onClick={submit}
         disabled={!valid || state === "processing"}
-        className="w-full rounded-full bg-slate-900 px-6 py-3.5 text-base font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="w-full rounded-full bg-navy-900 px-6 py-3.5 text-base font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {state === "processing" ? (
           <span className="inline-flex items-center gap-2">

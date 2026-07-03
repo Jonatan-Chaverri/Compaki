@@ -1,19 +1,7 @@
 import Link from "next/link";
 
+import { Logo } from "@/components/shell";
 import { UserMenu } from "@/components/user-menu";
-
-function Logo() {
-  return (
-    <span className="flex items-center gap-2">
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-sm font-bold text-white">
-        C
-      </span>
-      <span className="text-lg font-semibold tracking-tight text-slate-900">
-        Compaki
-      </span>
-    </span>
-  );
-}
 
 const FEATURES = [
   {
@@ -54,11 +42,11 @@ export default function LandingPage() {
     <div className="flex min-h-screen flex-col bg-white text-slate-900">
       {/* Nav */}
       <header className="sticky top-0 z-20 border-b border-slate-100 bg-white/80 backdrop-blur">
-        <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
-          <Link href="/">
+        <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-6">
+          <Link href="/" className="shrink-0">
             <Logo />
           </Link>
-          <div className="hidden items-center gap-8 text-sm font-medium text-slate-600 sm:flex">
+          <div className="hidden items-center gap-8 whitespace-nowrap text-sm font-medium text-slate-600 lg:flex">
             <a href="#features" className="hover:text-slate-900">
               Features
             </a>
@@ -66,11 +54,11 @@ export default function LandingPage() {
               Regenerative mode
             </a>
           </div>
-          <span className="flex items-center gap-4">
+          <span className="flex shrink-0 items-center gap-4">
             <UserMenu />
             <Link
               href="/onboarding"
-              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
+              className="whitespace-nowrap rounded-full bg-navy-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-navy-700"
             >
               Create your marketplace
             </Link>
@@ -81,8 +69,8 @@ export default function LandingPage() {
       <main className="flex-1">
         {/* Hero */}
         <section className="mx-auto w-full max-w-6xl px-6 pb-24 pt-20 text-center sm:pt-28">
-          <p className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <p className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-brand-500/40 bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
             Payments that settle themselves
           </p>
           <h1 className="mx-auto max-w-3xl text-4xl font-semibold tracking-tight text-slate-900 sm:text-6xl">
@@ -95,7 +83,7 @@ export default function LandingPage() {
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
               href="/onboarding"
-              className="rounded-full bg-slate-900 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-slate-700"
+              className="rounded-full bg-navy-900 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-navy-700"
             >
               Create your marketplace
             </Link>
@@ -121,7 +109,7 @@ export default function LandingPage() {
             <ul className="mt-4 space-y-3 text-sm">
               <li className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-slate-600">
-                  <span className="h-2 w-2 rounded-full bg-slate-900" />
+                  <span className="h-2 w-2 rounded-full bg-navy-900" />
                   Vendor — Ana&apos;s Crafts
                 </span>
                 <span className="font-medium text-slate-900">$37.80</span>
@@ -142,7 +130,7 @@ export default function LandingPage() {
               </li>
             </ul>
             <div className="mt-4 flex h-2 overflow-hidden rounded-full">
-              <div className="w-[90%] bg-slate-900" />
+              <div className="w-[90%] bg-navy-900" />
               <div className="w-[8%] bg-slate-400" />
               <div className="w-[2%] bg-emerald-500" />
             </div>
@@ -165,7 +153,7 @@ export default function LandingPage() {
                   key={feature.title}
                   className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
                 >
-                  <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-white">
+                  <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-navy-900 text-white">
                     {feature.icon}
                   </div>
                   <h3 className="text-lg font-semibold text-slate-900">
@@ -242,7 +230,7 @@ export default function LandingPage() {
             </p>
             <Link
               href="/onboarding"
-              className="mt-8 inline-block rounded-full bg-slate-900 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-slate-700"
+              className="mt-8 inline-block rounded-full bg-navy-900 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-navy-700"
             >
               Create your marketplace
             </Link>

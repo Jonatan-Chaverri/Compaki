@@ -28,13 +28,13 @@ interface ReceiptPayload {
 }
 
 const DOT_COLORS: Record<string, string> = {
-  vendor: "bg-slate-900",
+  vendor: "bg-navy-900",
   platform: "bg-slate-400",
   community: "bg-emerald-500",
 };
 
 const BAR_COLORS: Record<string, string> = {
-  vendor: "bg-slate-900",
+  vendor: "bg-navy-900",
   platform: "bg-slate-400",
   community: "bg-emerald-500",
 };

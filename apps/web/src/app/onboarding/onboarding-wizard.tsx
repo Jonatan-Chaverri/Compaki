@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Logo } from "@/components/shell";
 import { slugify } from "@/lib/slug";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -192,13 +193,10 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
 
   return (
     <div className="min-h-screen bg-slate-50/60">
-      <header className="border-b border-slate-100 bg-white">
+      <header className="sticky top-0 z-40 border-b border-slate-100 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900 text-sm font-bold text-white">
-              C
-            </span>
-            <span className="text-lg font-semibold tracking-tight text-slate-900">Compaki</span>
+          <Link href="/">
+            <Logo />
           </Link>
           <span className="text-sm text-slate-500">
             Create your marketplace · signed in as{" "}
@@ -228,7 +226,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
               </Field>
 
               <Field label="Your marketplace URL">
-                <div className="flex items-center overflow-hidden rounded-xl border border-slate-200 focus-within:border-slate-400">
+                <div className="flex items-center overflow-hidden rounded-xl border border-slate-200 focus-within:border-brand-500">
                   <span className="whitespace-nowrap bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
                     compaki.app/m/
                   </span>
@@ -289,7 +287,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 hint="what the seller keeps"
                 value={splits.vendor}
                 onChange={(v) => setSplit("vendor", v)}
-                color="bg-slate-900"
+                color="bg-navy-900"
               />
               <SplitSlider
                 label="You (operator)"
@@ -308,7 +306,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
               />
 
               <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-100">
-                <div className="bg-slate-900 transition-all" style={{ width: `${splits.vendor}%` }} />
+                <div className="bg-navy-900 transition-all" style={{ width: `${splits.vendor}%` }} />
                 <div className="bg-slate-400 transition-all" style={{ width: `${splits.operator}%` }} />
                 <div className="bg-emerald-500 transition-all" style={{ width: `${splits.community}%` }} />
               </div>
@@ -360,7 +358,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                       <p className="text-sm text-red-600">{launchError}</p>
                       <button
                         onClick={() => void launch()}
-                        className="mt-3 rounded-full bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-700"
+                        className="mt-3 rounded-full bg-navy-900 px-5 py-2 text-sm font-medium text-white hover:bg-navy-700"
                       >
                         Retry launch
                       </button>
@@ -385,7 +383,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                   <div className="mt-8">
                     <Link
                       href={result.dashboardPath}
-                      className="rounded-full bg-slate-900 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-slate-700"
+                      className="rounded-full bg-navy-900 px-8 py-3.5 text-base font-medium text-white shadow-sm transition hover:bg-navy-700"
                     >
                       Go to your dashboard
                     </Link>
@@ -415,7 +413,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
 // ─── Small building blocks ───────────────────────────────────────────────
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 bg-white";
+  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
 function ProgressBar({ current }: { current: number }) {
   return (
@@ -424,7 +422,7 @@ function ProgressBar({ current }: { current: number }) {
         <li key={label} className="flex flex-1 flex-col gap-1.5">
           <span
             className={`h-1.5 rounded-full transition-colors ${
-              i <= current ? "bg-slate-900" : "bg-slate-200"
+              i <= current ? "bg-navy-900" : "bg-slate-200"
             }`}
           />
           <span
@@ -496,7 +494,7 @@ function WizardNav({
       <button
         onClick={onNext}
         disabled={nextDisabled}
-        className="rounded-full bg-slate-900 px-7 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+        className="rounded-full bg-navy-900 px-7 py-2.5 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {nextLabel}
       </button>
@@ -510,7 +508,7 @@ function LaunchRow({ label, state }: { label: string; state: LaunchStepState }) 
       <span className="flex h-6 w-6 items-center justify-center">
         {state === "pending" && <span className="h-2 w-2 rounded-full bg-slate-200" />}
         {state === "active" && (
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900" />
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-navy-900" />
         )}
         {state === "done" && <span className="text-emerald-600">✓</span>}
       </span>
@@ -561,7 +559,7 @@ function SplitSlider({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-slate-900"
+        className="w-full accent-brand-600"
       />
     </div>
   );

@@ -27,7 +27,7 @@ export interface SaleRow {
 const EMOJI_CHOICES = ["☕", "🍫", "🧺", "🏺", "🧶", "🎨", "🍯", "🌱", "🥖", "🧼", "📦", "🛠️"];
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400 bg-white";
+  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
 export function VendorDashboard({
   slug,
@@ -85,7 +85,7 @@ export function VendorDashboard({
             </h2>
             <button
               onClick={() => setEditing("new")}
-              className="rounded-full bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-700"
+              className="rounded-full bg-navy-900 px-5 py-2 text-sm font-medium text-white hover:bg-navy-700"
             >
               + Add product
             </button>
@@ -182,7 +182,7 @@ function TabButton({
     <button
       onClick={onClick}
       className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-        active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"
+        active ? "bg-navy-900 text-white" : "text-slate-500 hover:bg-slate-100"
       }`}
     >
       {children}
@@ -193,7 +193,7 @@ function TabButton({
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4"
       onClick={onClose}
     >
       <div
@@ -305,7 +305,7 @@ function ProductModal({
                 key={emoji}
                 onClick={() => setImageUrl(emoji)}
                 className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition hover:bg-slate-100 ${
-                  imageUrl === emoji ? "bg-slate-100 ring-2 ring-slate-900" : ""
+                  imageUrl === emoji ? "bg-slate-100 ring-2 ring-brand-600" : ""
                 }`}
               >
                 {emoji}
@@ -327,7 +327,7 @@ function ProductModal({
         <button
           onClick={() => void save()}
           disabled={!valid || busy}
-          className="rounded-full bg-slate-900 px-6 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-full bg-navy-900 px-6 py-2 text-sm font-medium text-white hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Saving…" : "Save product"}
         </button>
@@ -353,7 +353,7 @@ function WithdrawModal({ onClose }: { onClose: () => void }) {
       <div className="mt-6 flex justify-end">
         <button
           onClick={onClose}
-          className="rounded-full bg-slate-900 px-6 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          className="rounded-full bg-navy-900 px-6 py-2 text-sm font-medium text-white hover:bg-navy-700"
         >
           Got it
         </button>

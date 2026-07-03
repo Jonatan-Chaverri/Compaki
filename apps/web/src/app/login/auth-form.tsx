@@ -2,12 +2,13 @@
 
 // Sign in / create account. One session works across all marketplaces.
 // ?next=/some/path returns the user to where they were after auth.
+// ?mode=register opens the "Create account" tab directly.
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400";
+  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500";
 
 type Mode = "signin" | "register";
 
@@ -16,7 +17,9 @@ export function AuthForm() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
 
-  const [mode, setMode] = useState<Mode>("signin");
+  const [mode, setMode] = useState<Mode>(
+    searchParams.get("mode") === "register" ? "register" : "signin",
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -79,7 +82,7 @@ export function AuthForm() {
             key={m}
             onClick={() => switchMode(m)}
             className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
-              mode === m ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-900"
+              mode === m ? "bg-navy-900 text-white" : "text-slate-500 hover:text-slate-900"
             }`}
           >
             {label}
@@ -151,7 +154,7 @@ export function AuthForm() {
         <button
           onClick={() => void submit()}
           disabled={!valid || busy}
-          className="w-full rounded-full bg-slate-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? (
             <span className="inline-flex items-center gap-2">

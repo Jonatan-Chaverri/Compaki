@@ -16,7 +16,7 @@ export interface StorefrontProduct {
 }
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-400";
+  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500";
 
 /** Accent-insensitive: "cafe" matches "Café". */
 function normalize(text: string): string {
@@ -142,7 +142,7 @@ export function ProductGrid({
               </div>
               <Link
                 href={`/m/${slug}/buy/${product.id}`}
-                className="mt-4 rounded-full bg-slate-900 px-5 py-2.5 text-center text-sm font-medium text-white transition hover:bg-slate-700"
+                className="mt-4 rounded-full bg-navy-900 px-5 py-2.5 text-center text-sm font-medium text-white transition hover:bg-navy-700"
               >
                 Buy now
               </Link>
