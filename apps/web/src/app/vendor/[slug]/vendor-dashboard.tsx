@@ -1,17 +1,19 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { LiveBalance } from "@/components/live-balance";
+import { Modal, ProductModal } from "@/components/product-modal";
 import { ProductVisual } from "@/components/shell";
 import { formatDateTime, formatUsd } from "@/lib/format";
 
 export interface ProductRow {
   id: string;
   name: string;
+  shortDescription: string;
   description: string;
   priceUsd: number;
+  stock: number;
   imageUrl: string | null;
 }
 
@@ -23,11 +25,6 @@ export interface SaleRow {
   txHash: string;
   createdAt: string;
 }
-
-const EMOJI_CHOICES = ["☕", "🍫", "🧺", "🏺", "🧶", "🎨", "🍯", "🌱", "🥖", "🧼", "📦", "🛠️"];
-
-const inputClass =
-  "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
 export function VendorDashboard({
   slug,
@@ -106,13 +103,24 @@ export function VendorDashboard({
                       {formatUsd(p.priceUsd)}
                     </p>
                   </div>
-                  <p className="mt-1 line-clamp-2 min-h-8 text-xs text-slate-500">{p.description}</p>
-                  <button
-                    onClick={() => setEditing(p)}
-                    className="mt-3 text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
-                  >
-                    Edit
-                  </button>
+                  <p className="mt-1 line-clamp-2 min-h-8 text-xs text-slate-500">
+                    {p.shortDescription || p.description}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between">
+                    <button
+                      onClick={() => setEditing(p)}
+                      className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline"
+                    >
+                      Edit
+                    </button>
+                    <span
+                      className={`text-xs font-medium ${
+                        p.stock > 0 ? "text-slate-500" : "text-red-600"
+                      }`}
+                    >
+                      {p.stock > 0 ? `${p.stock} in stock` : "Out of stock"}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -159,7 +167,7 @@ export function VendorDashboard({
 
       {editing !== null && (
         <ProductModal
-          slug={slug}
+          marketplaceSlug={slug}
           product={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
         />
@@ -187,152 +195,6 @@ function TabButton({
     >
       {children}
     </button>
-  );
-}
-
-function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function ProductModal({
-  slug,
-  product,
-  onClose,
-}: {
-  slug: string;
-  product: ProductRow | null;
-  onClose: () => void;
-}) {
-  const router = useRouter();
-  const [name, setName] = useState(product?.name ?? "");
-  const [description, setDescription] = useState(product?.description ?? "");
-  const [price, setPrice] = useState(product ? String(product.priceUsd) : "");
-  const [imageUrl, setImageUrl] = useState(product?.imageUrl ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const valid = name.trim().length >= 2 && Number(price) >= 0.01;
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(product ? `/api/products/${product.id}` : "/api/products", {
-        method: product ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          marketplaceSlug: slug,
-          name,
-          description,
-          priceUsd: Number(price),
-          imageUrl,
-        }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Could not save product");
-      onClose();
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save product");
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal onClose={onClose}>
-      <h2 className="text-lg font-semibold tracking-tight text-slate-900">
-        {product ? "Edit product" : "Add a product"}
-      </h2>
-      <div className="mt-4 space-y-4">
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Hand-roasted coffee, 250g"
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="What makes it special?"
-            rows={2}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Price ($)</label>
-          <input
-            type="number"
-            min="0.01"
-            step="0.01"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="12.50"
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
-            Image URL <span className="font-normal text-slate-400">or pick an emoji</span>
-          </label>
-          <input
-            type="text"
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            placeholder="https://… or an emoji"
-            className={inputClass}
-          />
-          <div className="mt-2 flex flex-wrap gap-1">
-            {EMOJI_CHOICES.map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => setImageUrl(emoji)}
-                className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition hover:bg-slate-100 ${
-                  imageUrl === emoji ? "bg-slate-100 ring-2 ring-brand-600" : ""
-                }`}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-
-      <div className="mt-6 flex justify-end gap-3">
-        <button
-          onClick={onClose}
-          className="rounded-full px-5 py-2 text-sm font-medium text-slate-500 hover:text-slate-900"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => void save()}
-          disabled={!valid || busy}
-          className="rounded-full bg-navy-900 px-6 py-2 text-sm font-medium text-white hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {busy ? "Saving…" : "Save product"}
-        </button>
-      </div>
-    </Modal>
   );
 }
 

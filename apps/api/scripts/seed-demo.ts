@@ -44,20 +44,29 @@ const VENDORS = [
     products: [
       {
         name: "Café Tarrazú, 340g",
-        description: "Washed arabica grown at 1,800m — chocolate and citrus notes.",
+        shortDescription: "Washed arabica — chocolate and citrus notes.",
+        description:
+          "Washed arabica grown at 1,800m in Tarrazú. Hand-picked, sun-dried and roasted in small batches the same week it ships. Expect chocolate and citrus notes with a clean, sweet finish.",
         priceUsd: 14,
+        stock: 25,
         imageUrl: "☕",
       },
       {
         name: "Honey-process microlot, 250g",
-        description: "Limited harvest, sun-dried on raised beds. Sweet and floral.",
+        shortDescription: "Limited harvest, sweet and floral.",
+        description:
+          "Limited harvest microlot, honey-processed and sun-dried on raised beds. Only a few sacks exist each season — sweet, floral, and unmistakably Tarrazú.",
         priceUsd: 18.5,
+        stock: 10,
         imageUrl: "🫘",
       },
       {
         name: "Coffee blossom honey, 300g",
-        description: "From hives that pollinate the coffee plants every spring.",
+        shortDescription: "From hives among the coffee plants.",
+        description:
+          "Raw honey from hives that pollinate the coffee plants every spring. Light, aromatic, and never heated or filtered.",
         priceUsd: 9,
+        stock: 40,
         imageUrl: "🍯",
       },
     ],
@@ -69,14 +78,20 @@ const VENDORS = [
     products: [
       {
         name: "Cascara tea, 200g",
-        description: "Dried coffee cherry husk — brews like hibiscus, tastes like plum.",
+        shortDescription: "Brews like hibiscus, tastes like plum.",
+        description:
+          "Dried coffee cherry husk from our own harvest — brews like hibiscus, tastes like plum. Naturally caffeinated and endlessly re-steepable.",
         priceUsd: 7.5,
+        stock: 30,
         imageUrl: "🍵",
       },
       {
         name: "Cacao nibs, 250g",
-        description: "Fermented and roasted on the farm. Intense, barely bitter.",
+        shortDescription: "Farm-fermented, intense, barely bitter.",
+        description:
+          "Cacao fermented and roasted on the farm. Intense, barely bitter, perfect over yogurt or straight from the bag.",
         priceUsd: 11,
+        stock: 20,
         imageUrl: "🍫",
       },
     ],

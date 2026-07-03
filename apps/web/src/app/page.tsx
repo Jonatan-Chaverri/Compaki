@@ -47,6 +47,9 @@ export default function LandingPage() {
             <Logo />
           </Link>
           <div className="hidden items-center gap-8 whitespace-nowrap text-sm font-medium text-slate-600 lg:flex">
+            <Link href="/marketplaces" className="hover:text-slate-900">
+              Explore marketplaces
+            </Link>
             <a href="#features" className="hover:text-slate-900">
               Features
             </a>
@@ -87,12 +90,12 @@ export default function LandingPage() {
             >
               Create your marketplace
             </Link>
-            <a
-              href="#features"
+            <Link
+              href="/marketplaces"
               className="rounded-full border border-slate-200 px-8 py-3.5 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
             >
-              See how it works
-            </a>
+              Explore marketplaces
+            </Link>
           </div>
 
           {/* Illustrative split receipt */}

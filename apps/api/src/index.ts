@@ -9,6 +9,7 @@ import { balance } from "./routes/balance";
 import { demo } from "./routes/demo";
 import { marketplaces } from "./routes/marketplaces";
 import { me } from "./routes/me";
+import { orders } from "./routes/orders";
 import { products } from "./routes/products";
 import { sales } from "./routes/sales";
 
@@ -23,6 +24,7 @@ app.route("/api/balance", balance);
 app.route("/api/demo", demo);
 app.route("/api/marketplaces", marketplaces);
 app.route("/api/me", me);
+app.route("/api/orders", orders);
 app.route("/api/products", products);
 app.route("/api/sales", sales);
 

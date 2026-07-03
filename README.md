@@ -278,11 +278,15 @@ cargo test
 ## Product Surfaces
 
 - `/onboarding`: operator marketplace creation
+- `/marketplaces`: public directory of every marketplace
 - `/m/{slug}`: public storefront
 - `/m/{slug}/join`: vendor onboarding
-- `/m/{slug}/buy/{productId}`: product checkout
+- `/m/{slug}/p/{productId}`: product detail page
+- `/m/{slug}/cart`: cart (stored in a browser cookie until checkout)
+- `/m/{slug}/checkout/{orderId}`: order checkout (shipping + payment)
+- `/orders`: buyer's orders (pending and completed)
 - `/dashboard/{slug}`: operator dashboard
-- `/vendor/{slug}`: vendor dashboard
+- `/vendor/{slug}`: vendor dashboard (products and sales)
 - `/receipt/{saleId}`: public transparent receipt
 
 ## Data Model Notes

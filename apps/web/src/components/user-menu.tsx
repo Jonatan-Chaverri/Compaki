@@ -15,6 +15,11 @@ interface SessionUser {
   email: string | null;
 }
 
+interface VendorMarketplace {
+  slug: string;
+  name: string;
+}
+
 function UserIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -47,6 +52,7 @@ export function UserMenu() {
   const router = useRouter();
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [vendorMarketplaces, setVendorMarketplaces] = useState<VendorMarketplace[]>([]);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -54,11 +60,14 @@ export function UserMenu() {
     let cancelled = false;
     fetch("/api/me")
       .then((res) => res.json())
-      .then((data: { user: SessionUser | null }) => {
-        if (cancelled) return;
-        setUser(data.user);
-        setState(data.user ? "in" : "out");
-      })
+      .then(
+        (data: { user: SessionUser | null; vendorMarketplaces?: VendorMarketplace[] }) => {
+          if (cancelled) return;
+          setUser(data.user);
+          setVendorMarketplaces(data.vendorMarketplaces ?? []);
+          setState(data.user ? "in" : "out");
+        },
+      )
       .catch(() => {
         if (!cancelled) setState("out");
       });
@@ -138,10 +147,61 @@ export function UserMenu() {
                   )}
                 </span>
               </div>
+              <Link
+                role="menuitem"
+                href="/orders"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4 text-slate-400"
+                >
+                  <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4H6z" />
+                  <path d="M3 6h18M16 10a4 4 0 0 1-8 0" />
+                </svg>
+                My orders
+              </Link>
+              {vendorMarketplaces.map((marketplace) => (
+                <Link
+                  key={marketplace.slug}
+                  role="menuitem"
+                  href={`/vendor/${marketplace.slug}`}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-4 w-4 shrink-0 text-slate-400"
+                  >
+                    <path d="M3 9l1.5-5h15L21 9" />
+                    <path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0" />
+                    <path d="M5 11.5V21h14v-9.5M9 21v-6h6v6" />
+                  </svg>
+                  <span className="min-w-0">
+                    Vendor dashboard
+                    {vendorMarketplaces.length > 1 && (
+                      <span className="block truncate text-xs text-slate-400">
+                        {marketplace.name}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              ))}
               <button
                 role="menuitem"
                 onClick={() => void signOut()}
-                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                className="flex w-full items-center gap-2 border-t border-slate-100 px-4 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
               >
                 <svg
                   viewBox="0 0 24 24"

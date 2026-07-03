@@ -34,6 +34,7 @@ model User {
   communityFundFor Marketplace[]      @relation("MarketplaceCommunityFund")
   products         Product[]          @relation("ProductVendor")
   purchases        Sale[]             @relation("SaleBuyer")
+  orders           Order[]            @relation("OrderBuyer")
   vendorMemberships VendorMembership[]
 }
 
@@ -61,6 +62,7 @@ model Marketplace {
   communityFund   User?  @relation("MarketplaceCommunityFund", fields: [communityFundId], references: [id])
   products   Product[]
   vendors    VendorMembership[]
+  orders     Order[]
 }
 
 // A vendor's membership in one marketplace (a vendor may have no products yet).
@@ -82,8 +84,13 @@ model VendorMembership {
 model Product {
   id          String   @id @default(cuid())
   name        String
+  // Short description shown on storefront cards; the long one lives on the
+  // product detail page.
+  shortDescription String @default("")
   description String   @default("")
   priceUsd    Float // demo-grade; Decimal(12,2) when off-chain accounting needs exact math
+  // Units the vendor has for sale. Decremented when an order item settles.
+  stock       Int      @default(0)
   imageUrl    String?
   createdAt   DateTime @default(now())
 
@@ -92,11 +99,52 @@ model Product {
   vendorId      String
   vendor        User        @relation("ProductVendor", fields: [vendorId], references: [id])
   sales         Sale[]
+  orderItems    OrderItem[]
+}
+
+// A buyer's order, created when they proceed to payment from the cart. Orders
+// start PENDING with a 10-minute expiry; paying settles every item on-chain
+// and flips the order to COMPLETED. Expiry is applied lazily on read/pay.
+model Order {
+  id       String   @id @default(cuid())
+  status   String   @default("PENDING") // "PENDING" | "COMPLETED" | "EXPIRED"
+  totalUsd Float
+  // Pending orders die at this instant; only COMPLETED settles stock/money.
+  expiresAt DateTime
+  // Shipping address captured at checkout (null until paid).
+  shipAddress    String?
+  shipCity       String?
+  shipPostalCode String?
+  shipCountry    String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+  buyerId       String
+  buyer         User        @relation("OrderBuyer", fields: [buyerId], references: [id])
+  items         OrderItem[]
+}
+
+model OrderItem {
+  id           String @id @default(cuid())
+  quantity     Int
+  // Price frozen when the order was created, so later product edits don't
+  // reprice a pending checkout.
+  unitPriceUsd Float
+
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  sale      Sale?
 }
 
 model Sale {
   id            String   @id @default(cuid())
+  // Gross amount for the line (unit price × quantity).
   amountUsd     Float
+  quantity      Int      @default(1)
   // Stellar transaction hash — links the UI receipt to stellar.expert.
   txHash        String   @unique
   // JSON snapshot of the split applied at purchase time, e.g.
@@ -116,4 +164,7 @@ model Sale {
   product   Product @relation(fields: [productId], references: [id])
   buyerId   String
   buyer     User    @relation("SaleBuyer", fields: [buyerId], references: [id])
+  // Cart checkouts settle one sale per order item; null for legacy one-click sales.
+  orderItemId String?    @unique
+  orderItem   OrderItem? @relation(fields: [orderItemId], references: [id])
 }

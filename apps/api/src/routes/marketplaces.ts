@@ -92,6 +92,34 @@ marketplaces.get("/check-slug", async (c) => {
   });
 });
 
+// ── GET /directory — public list of every marketplace on Compaki ───────────
+// Registered before /:slug so the static path wins.
+
+marketplaces.get("/directory", async (c) => {
+  const rows = await prisma.marketplace.findMany({
+    include: {
+      communityFund: { select: { name: true } },
+      _count: { select: { products: true, vendors: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return c.json({
+    marketplaces: rows.map((m) => ({
+      name: m.name,
+      slug: m.slug,
+      description: m.description,
+      category: m.category,
+      regenerativeEnabled: m.regenerativeEnabled,
+      splitCommunityBps: m.splitCommunityBps,
+      communityFundName: m.communityFund?.name ?? null,
+      productCount: m._count.products,
+      vendorCount: m._count.vendors,
+      createdAt: m.createdAt.toISOString(),
+    })),
+  });
+});
+
 // ── POST / — the launch orchestrator ───────────────────────────────────────
 //
 // Streams progress as Server-Sent Events while it: provisions custodial
@@ -315,8 +343,9 @@ marketplaces.get("/:slug/storefront", async (c) => {
     products: marketplace.products.map((p) => ({
       id: p.id,
       name: p.name,
-      description: p.description,
+      shortDescription: p.shortDescription,
       priceUsd: p.priceUsd,
+      stock: p.stock,
       imageUrl: p.imageUrl,
       vendorName: p.vendor.name,
     })),
@@ -411,6 +440,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       name: p.name,
       description: p.description,
       priceUsd: p.priceUsd,
+      stock: p.stock,
       imageUrl: p.imageUrl,
       vendorName: p.vendor.name,
     })),
@@ -463,8 +493,10 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
     products: products.map((p) => ({
       id: p.id,
       name: p.name,
+      shortDescription: p.shortDescription,
       description: p.description,
       priceUsd: p.priceUsd,
+      stock: p.stock,
       imageUrl: p.imageUrl,
     })),
     sales: sales.map((s) => {
