@@ -47,3 +47,5 @@ apps/api/prisma/dev.db-journal
 
 # Rust build artifacts
 contracts/target/
+
+DEMO.md
