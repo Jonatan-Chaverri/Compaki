@@ -1,8 +1,9 @@
 "use client";
 
 // Session widget for every top bar: a user icon with the name beneath it that
-// opens a dropdown. The dropdown shows "Sign in / Create account" when logged
-// out and the account details + "Sign out" when logged in. One session works
+// opens a dropdown. The dropdown shows "Sign in or create account" (one flow:
+// new users just add a name at the end) when logged out and the account
+// details + "Sign out" when logged in. One session works
 // across all marketplaces (the cookie is scoped to the whole site).
 
 import Link from "next/link";
@@ -264,28 +265,7 @@ export function UserMenu() {
                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-800 transition hover:bg-slate-50"
               >
                 <UserIcon className="h-4 w-4 text-slate-400" />
-                Sign in
-              </Link>
-              <Link
-                role="menuitem"
-                href={`/login?mode=register&next=${next}`}
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-2 border-t border-slate-100 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-4 w-4 text-slate-400"
-                >
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M19 8v6M22 11h-6" />
-                </svg>
-                Create account
+                Sign in or create account
               </Link>
             </>
           )}

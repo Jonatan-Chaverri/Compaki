@@ -10,7 +10,7 @@
 //      wallet → /api/wallet/setup + /api/tx/:id.
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { connectStellarWallet, signWithStellarWallet } from "@/lib/stellar-wallets";
 import { followSignatures, readResult } from "@/lib/wallet-signing";
@@ -20,7 +20,7 @@ const inputClass =
 
 type Step = "start" | "working" | "profile";
 
-export function StellarWalletLogin() {
+export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boolean) => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -32,6 +32,8 @@ export function StellarWalletLogin() {
   const [country, setCountry] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { onBusyChange?.(busy || step !== "start"); }, [busy, step, onBusyChange]);
 
   const fail = (err: unknown, back: Step) => {
     setError(err instanceof Error ? err.message : "Something went wrong");
@@ -112,10 +114,10 @@ export function StellarWalletLogin() {
   };
 
   return (
-    <div className="auth-form mt-4">
+    <div className="login-wallet-form">
       {step === "start" && (
         <>
-          <p className="text-sm font-medium text-slate-800">Already have a Stellar wallet?</p>
+          <p className="login-wallet-label">For people with an existing wallet</p>
           <p className="mt-1 text-xs text-slate-500">
             Freighter, xBull, Albedo, Lobstr and more. Switch it to <strong>Testnet</strong> first.
           </p>
@@ -123,7 +125,7 @@ export function StellarWalletLogin() {
             type="button"
             onClick={() => void connect()}
             disabled={busy}
-            className="mt-4 w-full rounded-full border border-slate-200 bg-white px-7 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            className="login-submit mt-5"
           >
             Connect a Stellar wallet
           </button>
@@ -157,7 +159,7 @@ export function StellarWalletLogin() {
           <button
             type="submit"
             disabled={busy || name.trim().length < 2 || country.trim().length < 2}
-            className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
+            className="login-submit"
           >
             {busy ? "One moment…" : "Continue"}
           </button>
@@ -165,7 +167,7 @@ export function StellarWalletLogin() {
       )}
 
       {error && (
-        <p role="alert" className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
+        <p role="alert" className="login-error">
           {error}
         </p>
       )}

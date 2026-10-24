@@ -5,12 +5,12 @@
 // ?next=/some/path returns the user to where they were after auth.
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500";
 
-export function AuthForm() {
+export function AuthForm({ onBusyChange }: { onBusyChange?: (busy: boolean) => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -18,7 +18,10 @@ export function AuthForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
 
   const valid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) && password.length > 0;
 
@@ -33,7 +36,7 @@ export function AuthForm() {
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Something went wrong");
-      router.push(next.startsWith("/") ? next : "/");
+      router.push(next.startsWith("/") && !next.startsWith("//") ? next : "/");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -43,13 +46,13 @@ export function AuthForm() {
 
   return (
     <form
-      className="auth-fields mt-4"
+      className="login-password-form"
       onSubmit={(event) => {
         event.preventDefault();
         if (valid && !busy) void submit();
       }}
     >
-      <div className="mb-4">
+      <div className="login-field">
         <label htmlFor="auth-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
         <input
           id="auth-email"
@@ -62,28 +65,28 @@ export function AuthForm() {
           disabled={busy}
         />
       </div>
-      <div className="mb-4">
+      <div className="login-field">
         <label htmlFor="auth-password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
-        <input
+        <div className="login-password-input"><input
           id="auth-password"
           autoComplete="current-password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Your password"
           className={inputClass}
           disabled={busy}
-        />
+        /><button type="button" onClick={() => setShowPassword(!showPassword)} disabled={busy} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword}>{showPassword ? "Hide" : "Show"}</button></div>
       </div>
       {error && (
-        <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
+        <p role="alert" className="login-error">
           {error}
         </p>
       )}
       <button
         type="submit"
         disabled={!valid || busy}
-        className="w-full rounded-full border border-slate-200 bg-white px-7 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        className="login-submit"
       >
         {busy ? "Signing in…" : "Sign in with password"}
       </button>

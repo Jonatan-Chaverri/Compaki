@@ -65,18 +65,12 @@ export function JoinForm({
           Sign in or create a Compaki account first — you&apos;ll join {marketplaceName} as that
           account.
         </p>
-        <div className="mt-5 flex justify-center gap-3">
+        <div className="mt-5 flex justify-center">
           <Link
             href={`/login?next=${next}`}
             className="rounded-full bg-navy-900 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-navy-700"
           >
-            Sign in
-          </Link>
-          <Link
-            href={`/login?mode=register&next=${next}`}
-            className="rounded-full border border-slate-200 px-6 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            Create account
+            Sign in or create account
           </Link>
         </div>
       </div>

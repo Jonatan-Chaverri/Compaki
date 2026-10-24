@@ -39,7 +39,7 @@ function readAndClear(key: string): string | null {
   }
 }
 
-export function CavosLogin() {
+export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: boolean) => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -67,6 +67,10 @@ export function CavosLogin() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onProgressChange?.(busy || step !== "email");
+  }, [busy, step, onProgressChange]);
 
   const fail = (err: unknown, back: Step) => {
     setError(err instanceof Error ? err.message : "Something went wrong");
@@ -253,148 +257,48 @@ export function CavosLogin() {
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
 
   return (
-    <div className="auth-form">
-      <h1 className="text-center text-2xl font-semibold tracking-tight text-slate-900">
-        {step === "profile" ? "Tell us about you" : "Sign in to Compaki"}
-      </h1>
-      <p className="mt-2 text-center text-sm text-slate-500">
-        {step === "profile"
-          ? "Just once — this is how vendors and communities will see you."
-          : "No password. Continue with Google or get a code by email — we open your own wallet."}
+    <section className="login-primary">
+      <p className="login-eyebrow">{step === "code" ? "You’re one step away" : step === "profile" ? "A quick introduction" : "Your community is waiting"}</p>
+      <h1 tabIndex={-1}>{step === "code" ? "Check your inbox." : step === "profile" ? "Let’s make it yours." : step === "working" ? "Making you at home…" : step === "device" ? "One quick check." : "Make yourself at home."}</h1>
+      <p className="login-intro">
+        {step === "profile" ? "Tell us your name and where you’re based. You only need to do this once." : step === "code" ? <>Enter the sign-in code sent to <strong>{email}</strong>.</> : step === "working" ? "We’re getting your account ready. Keep this page open for a moment." : step === "device" ? "Approve this browser to securely access your account." : "Sign in or get started. Your next good find is waiting."}
       </p>
-
-      <form
-        className="auth-fields mt-6"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (busy) return;
-          if (step === "email" && emailValid) void submitEmail();
-          if (step === "code" && code.trim().length >= 6) void submitCode();
-          if (step === "profile" && name.trim().length >= 2 && country.trim().length >= 2) void submitProfile();
-        }}
-      >
-        {step === "email" && (
-          <>
-            <button
-              type="button"
-              onClick={() => void startGoogle()}
-              disabled={busy}
-              className="flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-7 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden className="h-4 w-4">
-                <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
-                <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
-                <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
-                <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
-              </svg>
-              Continue with Google
-            </button>
-            <p className="my-5 flex items-center gap-3 text-xs text-slate-400">
-              <span className="h-px flex-1 bg-slate-200" />
-              or get a code by email
-              <span className="h-px flex-1 bg-slate-200" />
-            </p>
-          </>
-        )}
-
-        {(step === "email" || step === "code") && (
-          <div className="mb-5">
-            <label htmlFor="cavos-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
-            <input
-              id="cavos-email"
-              autoComplete="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="ana@example.com"
-              className={inputClass}
-              disabled={busy || step === "code"}
-            />
-          </div>
-        )}
-
-        {step === "code" && (
-          <div className="mb-5">
-            <label htmlFor="cavos-code" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Code from your email
-            </label>
-            <input
-              id="cavos-code"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="9-character code"
-              className={`${inputClass} font-mono tracking-widest`}
-              disabled={busy}
-            />
-            <p className="mt-1.5 text-xs text-slate-500">
-              Sent by no-reply@cavos.xyz — it expires in 5 minutes.{" "}
-              <button type="button" onClick={startOver} className="font-medium underline underline-offset-2">
-                Use another email
-              </button>
-            </p>
-          </div>
-        )}
-
-        {step === "profile" && (
-          <>
-            <div className="mb-5">
-              <label htmlFor="cavos-name" className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
-              <input id="cavos-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ana Retana" className={inputClass} disabled={busy} />
-            </div>
-            <div className="mb-5">
-              <label htmlFor="cavos-country" className="mb-1.5 block text-sm font-medium text-slate-700">Country of residence</label>
-              <input id="cavos-country" autoComplete="country-name" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Costa Rica" className={inputClass} disabled={busy} />
-            </div>
-          </>
-        )}
-
-        {step === "device" && (
-          <div className="mb-5 rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
-            Your wallet already exists but this browser isn&apos;t authorized to use it yet.
-            <button
-              type="button"
-              onClick={() => void submitDevice()}
-              disabled={busy}
-              className="mt-3 block w-full rounded-full bg-navy-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-navy-700 disabled:opacity-40"
-            >
-              Authorize this device
-            </button>
-          </div>
-        )}
-
-        {step === "working" && (
-          <p role="status" className="mb-5 flex items-center gap-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
-            <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-200 border-t-navy-900" />
-            {progress}
-          </p>
-        )}
-
-        {error && (
-          <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
-            {error}
-          </p>
-        )}
-
-        {(step === "email" || step === "code" || step === "profile") && (
-          <button
-            type="submit"
-            disabled={
-              busy ||
-              (step === "email" && !emailValid) ||
-              (step === "code" && code.trim().length < 6) ||
-              (step === "profile" && (name.trim().length < 2 || country.trim().length < 2))
-            }
-            className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy ? "One moment…" : step === "email" ? "Email me a code" : step === "code" ? "Sign in" : "Continue"}
+      <form className="login-primary-fields" onSubmit={(event) => {
+        event.preventDefault();
+        if (busy) return;
+        if (step === "email" && emailValid) void submitEmail();
+        if (step === "code" && code.trim().length >= 6) void submitCode();
+        if (step === "profile" && name.trim().length >= 2 && country.trim().length >= 2) void submitProfile();
+      }}>
+        {step === "email" && <>
+          <button type="button" onClick={() => void startGoogle()} disabled={busy} className="login-google">
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+              <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
+              <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
+              <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
+              <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
+            </svg>
+            Continue with Google
           </button>
-        )}
+          <div className="login-divider"><span />or continue with email<span /></div>
+          <div className="login-field"><label htmlFor="cavos-email">Your email</label><input id="cavos-email" autoComplete="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass} disabled={busy} aria-describedby="login-email-hint" /></div>
+        </>}
+        {step === "code" && <>
+          <div className="login-field"><label htmlFor="cavos-code">Sign-in code</label><input id="cavos-code" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter your code" className={`${inputClass} login-code-input`} disabled={busy} aria-describedby="login-code-hint" /></div>
+          <p id="login-code-hint" className="login-field-hint">Look for an email from no-reply@cavos.xyz. The code expires in 5 minutes.</p>
+        </>}
+        {step === "profile" && <>
+          <div className="login-field"><label htmlFor="cavos-name">Your name</label><input id="cavos-name" autoComplete="name" required minLength={2} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ana Retana" className={inputClass} disabled={busy} /></div>
+          <div className="login-field"><label htmlFor="cavos-country">Country of residence</label><input id="cavos-country" autoComplete="country-name" required minLength={2} value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Costa Rica" className={inputClass} disabled={busy} /></div>
+        </>}
+        {step === "device" && <div className="login-service-notice"><p>This account is already connected to a wallet. Approve this device to continue.</p><button type="button" onClick={() => void submitDevice()} disabled={busy} className="login-submit mt-4">{busy ? "Approving device…" : "Approve this device"}</button></div>}
+        {step === "working" && <p role="status" className="login-progress"><span className="login-spinner" />{progress}</p>}
+        {error && <p role="alert" className="login-error">{error}</p>}
+        {(step === "email" || step === "code" || step === "profile") && <button type="submit" disabled={busy || (step === "code" && code.trim().length < 6) || (step === "profile" && (name.trim().length < 2 || country.trim().length < 2))} className="login-submit">{busy ? <><span className="login-spinner" />One moment…</> : <>{step === "email" ? "Continue with email" : step === "code" ? "Verify & continue" : "Let’s get started"}<span aria-hidden="true">→</span></>}</button>}
+        {step === "email" && <p id="login-email-hint" className="login-field-hint login-hint-centered">We’ll email you a sign-in code. No password needed.</p>}
+        {step === "code" && <button type="button" onClick={startOver} disabled={busy} className="login-change-email">← Use a different email</button>}
       </form>
-      <p className="mt-5 text-xs leading-relaxed text-slate-500">
-        Your wallet is created by Cavos and stays yours: Compaki never holds its key. You approve
-        every payment and claim from this browser. Testnet demo money only.
-      </p>
-    </div>
+      <details className="login-account-details"><summary>How your account works</summary><p>Your payment wallet is created by Cavos. Compaki never holds its key. You approve payments and reward collections from your browser. This demo uses test funds only.</p></details>
+    </section>
   );
 }

@@ -1,5 +1,4 @@
-// "My profile" — the signed-in user's name, their wallet address and its
-// demo-dollar balance (read live from Stellar testnet).
+// Personal details and everyday account actions, with payment references on demand.
 
 import { AppHeader, EmptyState, PageHeading } from "@/components/shell";
 import { apiFetch } from "@/lib/api";
@@ -20,8 +19,8 @@ export default async function ProfilePage() {
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
           <EmptyState
             icon="shield"
-            title="Your profile and wallet live here."
-            description="Sign in to see your balance, your wallet address and how others see you on Compaki."
+            title="Make yourself at home."
+            description="Sign in to manage your profile, check your balance and find your purchases and rewards."
             href="/login?next=/profile"
             action="Sign in"
           />
@@ -33,11 +32,11 @@ export default async function ProfilePage() {
   return (
     <div className="min-h-screen bg-slate-50/60">
       <AppHeader />
-      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-3xl px-6 py-12">
+      <main id="main-content" tabIndex={-1} className="profile-page">
         <PageHeading
           eyebrow="Your Compaki"
           title="My profile"
-          description="Your wallet, your balance, and how vendors and communities see you."
+          description="A space for you, your purchases and your community."
         />
         <ProfileView user={user} />
       </main>
