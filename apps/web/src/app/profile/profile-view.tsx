@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useCompakiWallet } from "@/components/cavos-provider";
-import { formatAmount } from "@/lib/rewards";
+import { formatAmount, txUrl } from "@/lib/rewards";
 import { followSignatures, readResult } from "@/lib/wallet-signing";
 
 export interface ProfileUser {
@@ -50,6 +50,8 @@ export function ProfileView({ user }: { user: ProfileUser }) {
   const [version, setVersion] = useState(0);
   const [copied, setCopied] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [minting, setMinting] = useState(false);
+  const [mintResult, setMintResult] = useState<{ ok: boolean; message: string; txHash?: string } | null>(null);
 
   const [name, setName] = useState(user.name);
   const [saving, setSaving] = useState(false);
@@ -100,6 +102,23 @@ export function ProfileView({ user }: { user: ProfileUser }) {
     }
   };
 
+  const mint = async () => {
+    setMinting(true);
+    setMintResult(null);
+    try {
+      const res = await readResult<{ txHash: string; amountUsd: number; balanceUsd: number }>(
+        await fetch("/api/wallet/mint", { method: "POST" }),
+      );
+      if (res.status !== 200) throw new Error(res.body.error ?? "Could not mint demo money");
+      setMintResult({ ok: true, message: `Minted ${formatAmount(res.body.amountUsd)} of demo money.`, txHash: res.body.txHash });
+      setWallet((w) => (w ? { ...w, balanceUsd: res.body.balanceUsd } : w));
+    } catch (err) {
+      setMintResult({ ok: false, message: err instanceof Error ? err.message : "Could not mint demo money" });
+    } finally {
+      setMinting(false);
+    }
+  };
+
   const saveName = async () => {
     setSaving(true);
     setSaveState(null);
@@ -124,6 +143,7 @@ export function ProfileView({ user }: { user: ProfileUser }) {
   const nameChanged = name.trim() !== user.name && name.trim().length >= 2;
   const needsActivation = wallet !== null && wallet.cavosAddress !== null && !wallet.cavosReady;
   const label = wallet ? PROVIDER_LABEL[wallet.provider] : null;
+  const canMint = wallet !== null && wallet.provider !== "none" && !needsActivation;
 
   return (
     <div className="mt-6 space-y-4">
@@ -145,14 +165,41 @@ export function ProfileView({ user }: { user: ProfileUser }) {
               Testnet demo dollars — not real money and not Circle USDC.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setVersion((v) => v + 1)}
-            className="rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Refresh
-          </button>
+          <div className="flex gap-2">
+            {canMint && (
+              <button
+                type="button"
+                onClick={() => void mint()}
+                disabled={minting}
+                className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700 disabled:opacity-40"
+              >
+                {minting ? "Minting…" : "Mint $20"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setVersion((v) => v + 1)}
+              className="rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+        {mintResult && (
+          <p role="status" className={`mt-3 text-sm ${mintResult.ok ? "text-emerald-700" : "text-red-600"}`}>
+            {mintResult.message}{" "}
+            {mintResult.txHash && (
+              <a
+                href={txUrl(mintResult.txHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-dotted underline-offset-2"
+              >
+                View transaction ↗
+              </a>
+            )}
+          </p>
+        )}
 
         <div className="mt-6 border-t border-slate-100 pt-5">
           <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Wallet address</p>

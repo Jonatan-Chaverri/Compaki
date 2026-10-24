@@ -7,6 +7,9 @@
 //                 account exists), then returns the trustline + starting
 //                 demo-balance transaction for the wallet to sign. When it is
 //                 already set up, just marks it ready.
+//   POST /mint    testnet faucet: the demo-asset issuer sends $20 of demo
+//                 money (self-issued test token, not Circle USDC) to the
+//                 user's wallet. Testnet only, capped balance, short cooldown.
 
 import { Hono } from "hono";
 
@@ -17,15 +20,22 @@ import {
   demoTrustlineState,
   fundWithFriendbot,
   getUsdBalance,
+  mintDemoUsd,
   prepareTrustlineSetup,
   sleep,
   stellarConfig,
 } from "@/lib/stellar";
-import { personalWallet } from "@/lib/wallets";
+import { cavosWalletPending, personalWallet } from "@/lib/wallets";
 
 export const wallet = new Hono();
 
 const STARTING_DEMO_USD = 100;
+const FAUCET_USD = 20;
+/** No faucet top-ups above this balance (demo money still costs issuer fees). */
+const FAUCET_MAX_BALANCE_USD = 1_000;
+const FAUCET_COOLDOWN_MS = 10_000;
+const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
+const lastMintAt = new Map<string, number>();
 
 wallet.get("/", async (c) => {
   const user = await getSessionUser(c);
@@ -80,6 +90,42 @@ wallet.post("/setup", async (c) => {
   } catch (error) {
     console.error("[wallet-setup] failed:", error);
     return c.json({ error: "Could not set up your wallet — please try again." }, 500);
+  }
+});
+
+wallet.post("/mint", async (c) => {
+  if (stellarConfig.networkPassphrase !== TESTNET_PASSPHRASE) {
+    return c.json({ error: "The demo faucet only exists on testnet" }, 403);
+  }
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Not signed in" }, 401);
+  if (cavosWalletPending(user)) {
+    return c.json({ error: "Activate your wallet first", code: "WALLET_SETUP" }, 409);
+  }
+  const personal = personalWallet(user);
+  if (personal.kind === "none") {
+    return c.json({ error: "You don't have a wallet yet" }, 409);
+  }
+  const last = lastMintAt.get(user.id) ?? 0;
+  if (Date.now() - last < FAUCET_COOLDOWN_MS) {
+    return c.json({ error: "Give it a few seconds before minting again" }, 429);
+  }
+  lastMintAt.set(user.id, Date.now());
+
+  try {
+    const balance = await getUsdBalance(personal.address);
+    if (balance >= FAUCET_MAX_BALANCE_USD) {
+      return c.json({ error: `You already have $${FAUCET_MAX_BALANCE_USD} or more in demo money` }, 409);
+    }
+    const txHash = await mintDemoUsd(personal.address, FAUCET_USD);
+    return c.json({
+      txHash,
+      amountUsd: FAUCET_USD,
+      balanceUsd: await getUsdBalance(personal.address).catch(() => balance + FAUCET_USD),
+    });
+  } catch (error) {
+    console.error("[wallet-mint] failed:", error);
+    return c.json({ error: "Could not mint demo money — please try again." }, 500);
   }
 });
 
