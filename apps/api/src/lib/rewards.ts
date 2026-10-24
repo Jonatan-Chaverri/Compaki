@@ -70,6 +70,8 @@ export interface RewardsView {
   bound: boolean;
   contractId: string;
   contractUrl: string;
+  /** Code of the self-issued testnet demo asset (never Circle USDC). */
+  assetCode: string;
   communityBps: number;
   ledgerTime: number | null;
   treasury: { contributedUsd: number; claimedUsd: number; heldUsd: number } | null;
@@ -104,6 +106,7 @@ export async function loadRewardsView(marketplace: {
     bound: false,
     contractId,
     contractUrl: stellarExpertContractUrl(contractId),
+    assetCode: stellarConfig.usdcCode,
     communityBps: marketplace.splitCommunityBps,
     ledgerTime: null,
     treasury: null,
