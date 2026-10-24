@@ -4,318 +4,378 @@
 
 # Compaki
 
-Compaki is a multi-vendor marketplace platform for communities, local producers,
-and purpose-driven commerce. It lets an operator launch a marketplace, onboard
-vendors, list products, accept purchases, and distribute each payment
-automatically between the seller, the marketplace operator, and an optional
-community fund.
+Compaki is a multi-vendor marketplace platform for communities, local producers
+and purpose-driven commerce, built on Stellar and Soroban. An operator launches
+a marketplace, onboards vendors and sells products. Each payment is split
+automatically between the **vendor**, the **marketplace operator** and a
+**community fund**.
 
-The project is built around a simple premise: digital commerce should not only
-extract value from a community, it should be able to circulate value back into
-it. Compaki makes regenerative economics a first-class part of the checkout
-flow by allowing every marketplace to reserve a programmable share of each sale
-for a community fund.
+**Community Rewards** (added for the Stellar ideathon, Scale track) turns that
+community fund into a protected on-chain treasury. A fixed share of every sale
+is held by the Soroban contract, booked to a time-boxed **period**, and paid out
+to registered members according to percentages that are fixed before the period
+starts. Neither the operator nor Compaki can withdraw that money or change a
+running period's rules.
 
-## Why Compaki
+> **Testnet only.** All money is a self-issued demo asset on Stellar testnet
+> (`CPKUSD` on fresh deployments; older deployments used the code `USDC` with
+> a Compaki-issued issuer). It is **not** Circle's USDC and has no value.
+> Accounts are **custodial**; see [Guarantees and limitations](#guarantees-and-limitations).
 
-Traditional marketplace infrastructure is powerful, but often expensive,
-opaque, and disconnected from the communities it serves. Compaki combines a
-familiar marketplace experience with transparent settlement on Stellar/Soroban:
+- [How Community Rewards works](#how-community-rewards-works)
+- [Contract architecture](#contract-architecture)
+- [From purchase to claim](#from-purchase-to-claim)
+- [Guarantees and limitations](#guarantees-and-limitations)
+- [Run locally](#run-locally) · [Testnet](#stellar-testnet) · [Tests](#tests)
+- [Example transactions](#example-transactions)
+- [What existed before vs. what the ideathon added](#before-and-during-the-ideathon)
+- [Judges' demo guide](docs/judges-demo.md)
 
-- Operators can create a branded marketplace and invite vendors.
-- Vendors can sell products and receive their share automatically.
-- Buyers see a clean checkout and a receipt that explains where the money went.
-- Community funds can receive a fixed percentage of every sale.
-- Every settled purchase stores a Stellar transaction hash for independent
-  verification.
+## How Community Rewards works
 
-This repository currently targets Stellar testnet. The money movement is real
-on testnet and verifiable through stellar.expert, while the product remains an
-MVP implementation with custodial demo accounts and a self-issued test asset
-shown as USD in the UI.
+1. **Opt-in at launch.** When an operator launches a marketplace with Community
+   Rewards on, it is registered with `create_rewards_marketplace`. The mode is
+   fixed on-chain and can't be switched later. Classic marketplaces keep
+   working exactly as before: their community share goes straight to a fund
+   account.
+2. **Open a period.** The operator commits the rules: up to **20 members**,
+   each with a share in basis points (`10_000 = 100%`, must sum to exactly
+   10 000, no duplicates, no zero shares, the operator can't list itself), plus
+   an end time in **ledger time**. A new period can only be opened once the
+   previous one has ended.
+3. **Sales fund it.** Each purchase transfers the vendor share to the vendor
+   and the operator share to the operator. The community share goes to the
+   **contract itself**, booked to `(marketplace, period)`. All of this happens
+   in one atomic invocation.
+4. **Close.** Once the ledger passes the end time, **anyone** can close the
+   period. Closing computes every member's final entitlement once, so the
+   operator can't hold rewards hostage by never closing.
+5. **Claim.** Each member claims their own entitlement once, with their own
+   authorization, and it is paid only to their address.
 
-## Regenerative Economy Model
+**No active period?** A purchase on a rewards marketplace is **rejected
+atomically** (`NoActivePeriod`): no money moves, and the API answers 409 with a
+clear message. There is no fallback that silently sends the community share to
+an operator-controlled account. The trade-off is that sales pause between
+periods, and operators should open the next period as soon as one ends.
 
-Each marketplace defines its own revenue split in basis points:
+**Rounding.** Each member gets `floor(total × share / 10_000)`. The few
+leftover stroops (always fewer than the number of members) go one each to the
+first members in list order. Entitlements always sum to exactly the period
+total, so nothing is over-paid and no dust is stranded. A property test checks
+this over many totals and uneven splits.
 
-- `splitVendorBps`: share paid to the vendor
-- `splitOperatorBps`: share paid to the marketplace operator
-- `splitCommunityBps`: share paid to the community fund
+## Contract architecture
 
-The three values must add up to `10_000`, which represents 100%. For example,
-a `90 / 8 / 2` split sends 90% to the vendor, 8% to the operator, and 2% to the
-community fund.
+One deployment (`contracts/marketplace`) serves every marketplace, keyed by
+`marketplace_id`. Funds of all rewards marketplaces sit in the contract's
+single token balance. Accounting is kept per marketplace and per period, and
+claims can only debit the entitlement of the `(marketplace, period, member)`
+they name.
 
-This matters because the community contribution is not treated as a donation
-after the fact. It is part of the market design itself. When a marketplace
-enables regenerative distribution, every transaction can fund shared resources,
-local initiatives, cooperatives, climate projects, mutual aid pools, or any
-other community account represented by the marketplace.
+| Function | Auth | Purpose |
+| --- | --- | --- |
+| `initialize(admin, token)` | admin | One-time: payment token. The admin has **no** privileged functions. |
+| `create_marketplace(operator, fund, v, o, c)` | operator | Classic marketplace (unchanged behaviour). |
+| `create_rewards_marketplace(operator, v, o, c)` | operator | Rewards marketplace; `community_fund` = the contract. |
+| `register_vendor(id, vendor)` | operator | Unchanged. |
+| `purchase(id, buyer, vendor, amount) -> Option<u32>` | buyer | Atomic split; returns the period the community share was booked to. |
+| `open_period(id, members, shares_bps, end_ts) -> u32` | operator | Commits rules; only after the previous period ended. |
+| `close_period(id, period) -> i128` | none | After `end_ts`; fixes entitlements. |
+| `claim(id, period, member) -> i128` | member | Pays the member's entitlement once. |
+| `rewards_status`, `get_period`, `get_entitlement(s)`, `get_marketplace` | none | Views (`rewards_status` also returns ledger time). |
 
-On-chain, the split is enforced by the Soroban contract. During a purchase, the
-contract transfers the payment atomically to the vendor, operator, and community
-fund. If rounding leaves a tiny remainder, that remainder goes to the community
-fund so no value is lost.
+There is **no** withdraw, sweep, admin-transfer or upgrade function. The only
+path out of the treasury is `claim`.
 
-## Core Flows
+Storage (`DataKey`): `Config(id)`, `Vendor(id, addr)`, `Rewards(id)`
+(period count + lifetime contributed/claimed), `Period(id, p)` (members,
+shares, start/end, totals, closed), `Entitlement(id, p, member)` (written at
+close). Every entry a call touches has its TTL extended to about 30 days.
+Archived persistent entries can be restored on Soroban, never deleted.
+Arithmetic uses checked operations, and `overflow-checks` stays on in release.
+Events: `market`, `vendor`, `purchase`, `contrib`, `p_open`, `p_close`, `claim`.
 
-1. An operator creates a marketplace and chooses the revenue split.
-2. Compaki creates the operator and community fund payment accounts.
-3. The marketplace is registered inside the shared Soroban contract.
-4. Vendors join the marketplace and are registered on-chain by the operator.
-5. Buyers purchase products through the storefront.
-6. The contract settles the payment in one atomic split.
-7. The sale record stores a transaction hash and a frozen split snapshot.
-8. Receipts show the buyer exactly how the payment was distributed.
+Errors are explicit (`NoActivePeriod`, `PeriodActive`, `PeriodNotEnded`,
+`PeriodNotClosed`, `NotBeneficiary`, `AlreadyClaimed`, `InvalidBeneficiaries`,
+…); the full list is `Error` in `contracts/marketplace/src/lib.rs`.
 
-## Architecture
-
-Compaki is organized as a small monorepo:
+## From purchase to claim
 
 ```text
-apps/web/                 Next.js frontend app
-  src/app/                App Router pages and UI
-  src/lib/api.ts          Server-side API fetch helper
-
-apps/api/                 Hono API server
-  src/routes/             HTTP routes under /api/*
-  src/lib/db/             Prisma client and shared database types
-  src/lib/stellar/        Stellar and Soroban integration layer
-  prisma/                 Prisma schema and migrations
-  scripts/                Testnet deployment and demo data scripts
-
-contracts/                Rust workspace for Soroban contracts
-  marketplace/            Shared marketplace contract
+buyer ──purchase──▶ contract ──┬─▶ vendor      (vendor_bps)
+                               ├─▶ operator    (operator_bps)
+                               └─▶ contract treasury (community_bps + rounding dust)
+                                     booked to Period(marketplace, current)
+ledger time ≥ end_ts ──close_period (anyone)──▶ Entitlement(member) = fixed amounts
+member ──claim (member auth)──▶ contract ──▶ member address   (once)
 ```
 
-The browser talks to the Next.js app. The web app rewrites `/api/*` requests to
-the standalone Hono API, so browser requests stay same-origin and session
-cookies work without a separate CORS setup.
+On the app side:
 
-The API owns all database and blockchain access. The frontend does not connect
-directly to Prisma, Stellar, or Soroban.
+- **Checkout** (`POST /api/orders/:id/pay`) still settles **one `purchase`
+  transaction per cart item**. Each item's split is atomic, but the cart as a
+  whole is not. A failure midway leaves earlier items settled, and retrying
+  resumes from the first unsettled item.
+- **Operator:** Dashboard → *Community rewards* shows the treasury, the current
+  period with a countdown, members, shares, projected and final rewards, claim
+  status, the open-period form, the close button, period history with explorer
+  links, and a *Try to break the rules* panel.
+- **Members:** `/rewards` (*My rewards* in the account menu) lists their
+  periods across marketplaces, with on-chain amounts and a *Claim* button that
+  shows pending, confirmed (with explorer link) and error states.
 
-## Blockchain Design
+**On-chain vs. Postgres.** Treasury totals, periods, members, shares,
+entitlements and claim status are **always read from the contract**
+(`src/lib/rewards.ts`). Postgres stores only auxiliary data: transaction
+hashes for explorer links (`RewardsPeriod`, `RewardClaim`), member names, and
+which sale fed which period (`Sale.splitSnapshot.rewardsPeriodId`). No balance
+or claim right is derived from the database.
 
-Compaki uses one deployed Soroban marketplace contract to support many
-marketplaces. Creating a marketplace does not deploy a new contract. Instead,
-the API calls `create_marketplace`, and the contract stores a new marketplace
-configuration keyed by `marketplace_id`.
+API (`apps/api/src/routes/rewards.ts`):
 
-Current Stellar testnet marketplace contract:
-[`CCCXYF55U6M44A6RK2WFUXEZDNPMCUI7YDR3YPBBEGWGEO4OSIGZQH2U`](https://stellar.expert/explorer/testnet/contract/CCCXYF55U6M44A6RK2WFUXEZDNPMCUI7YDR3YPBBEGWGEO4OSIGZQH2U)
+| Endpoint | Who |
+| --- | --- |
+| `GET /api/rewards/marketplace/:slug` | public (on-chain view + tx links) |
+| `POST /api/rewards/marketplace/:slug/periods` | operator: `{ durationMinutes, beneficiaries: [{ email \| address, shareBps }] }` |
+| `POST /api/rewards/marketplace/:slug/periods/:id/close` | operator or a member of that period |
+| `POST /api/rewards/marketplace/:slug/periods/:id/claim` | the signed-in member (claims for themself only) |
+| `POST /api/rewards/marketplace/:slug/guarantees` | operator: `{ kind: "change-rules" \| "withdraw" }` |
+| `GET /api/rewards/me` | signed-in user's periods |
 
-This address is generated by `npm run deploy:testnet` and can change if the
-testnet contract is redeployed.
+The guarantee checks simulate the forbidden action against the live contracts
+with the operator's real authorization attached, in enforced-auth mode, which
+is exactly what the network would execute. Nothing is submitted. Each check
+also runs a **positive control** through the same harness, so a rejection
+can't be an artefact of the simulation.
 
-The contract is intentionally focused:
+## Guarantees and limitations
 
-- Store the payment token and contract admin.
-- Register marketplace split configuration.
-- Register vendors per marketplace.
-- Execute atomic payment splits.
-- Emit events for marketplace creation, vendor registration, and purchases.
+**Enforced on-chain by the contract:**
 
-Everything else, including users, sessions, product catalog, images, dashboards,
-and sale history, lives off-chain in Postgres.
+- The community share of a rewards marketplace leaves the buyer and enters the
+  contract in the same atomic invocation as the vendor and operator legs.
+- Each contribution is booked to exactly one `(marketplace, period)`. Other
+  marketplaces' and other periods' funds can't be claimed.
+- A period's members and shares can't change once it is opened. A new period
+  can't be opened while one is running, and closed periods can't be re-closed
+  or re-allocated.
+- Periods close only after their ledger end time. Claims require a closed
+  period, a registered member, the **member's** authorization, and no previous
+  claim. Payouts go only to the member's own address.
+- Total claims can never exceed what was contributed (by construction, plus an
+  explicit check).
+- No admin, operator or Compaki function can move treasury funds. The token
+  contract also refuses transfers out of the contract that the contract
+  itself didn't authorize (tested in Rust and on testnet).
 
-## Tech Stack
+**Not enforced by the contract (be precise about these):**
 
-- Frontend: Next.js, React, TypeScript, Tailwind CSS
-- API: Hono, Node.js, TypeScript
-- Database: PostgreSQL through Prisma
-- Blockchain: Stellar testnet, Soroban smart contracts, `@stellar/stellar-sdk`
-- Contract: Rust with `soroban-sdk`
+- **Custody.** Every user's Stellar key is generated and held by the Compaki
+  backend (AES-256-GCM, key in `WALLET_ENCRYPTION_KEY`), and the backend signs
+  every transaction. `require_auth()` therefore proves "the backend signed for
+  this user", not "the user personally approved". In particular:
+  - The backend holds the operator key, so it can do anything the operator can
+    (open periods, register vendors). It still **cannot** withdraw the
+    treasury or change running periods: the contract forbids that for everyone.
+  - Members' payouts land in **custodial** accounts that Compaki's backend can
+    sign for. The contract guarantees the money reaches the member's address;
+    after that, custody is Compaki's. Compaki is **not** a non-custodial system.
+- **Who the members are** is the operator's choice. The contract stops the
+  operator from listing its own address but can't detect other addresses the
+  operator controls. The guarantee is that the rules are public and frozen
+  before the money arrives, not identity verification.
+- **Liveness:** sales pause when no period is open, and unclaimed rewards stay
+  claimable indefinitely (there is deliberately no sweep).
+- **Token issuer powers** are outside the contract. The demo issuer is created
+  with no clawback or revocation flags, but with real USDC the issuer (Circle)
+  could freeze or claw back balances.
+- **No upgrades.** The contract is immutable by design: an upgrade function
+  would let its admin replace the rules. Shipping a contract change means a
+  new deployment plus `marketplaces:rebind`. Funds left in an old deployment
+  stay claimable there via `stellar contract invoke`, but the API only talks
+  to the configured contract.
+- Checkout is per item (see above). The API's timeout retry can resubmit a
+  transaction whose confirmation timed out; that was pre-existing behaviour and
+  is safe for `claim` (`AlreadyClaimed`), but it is not idempotent for
+  `purchase`.
+- `/api/rewards/me` scans rewards marketplaces' recent periods
+  (12 per marketplace, 25 marketplaces). That's fine for a demo; production
+  would index the contract's `p_open` events.
 
-## Prerequisites
+**Security fixes made in this release:**
 
-- Node.js 18+
-- npm
-- Rust toolchain
-- PostgreSQL database, such as Supabase Postgres
-- Stellar testnet access
+- `/api/demo/impersonate` is **off by default**. It only works with
+  `ENABLE_DEMO_IMPERSONATION=true`, **never** when `NODE_ENV=production`, and
+  only for an operator switching into one of their own vendors.
+- Registering with the email of an existing passwordless (legacy) account
+  **no longer claims it**. Admins set a password with
+  `npm run users:set-password -- <email>`.
+- Vendor registration (`POST /api/marketplaces/:slug/vendors`) used to upsert
+  a user **by the email in the request body and return that user's session
+  cookie**, which let anyone take over any account. It now always registers
+  the signed-in user.
+- The operator dashboard API (vendor emails, accounts) now requires the
+  operator's session.
 
-For Soroban contract deployment, install the WASM target once:
+## Run locally
 
-```bash
-rustup target add wasm32v1-none
-```
-
-## Environment
-
-The API reads environment variables from `apps/api/.env.local` and then
-`apps/api/.env`.
-
-At minimum, provide the database connection variables before running migrations:
-
-```bash
-DATABASE_URL="postgresql://..."
-DIRECT_URL="postgresql://..."
-```
-
-The Stellar-related variables are generated by the testnet deployment script:
-
-```bash
-cd apps/api
-npm run deploy:testnet
-```
-
-That script writes values such as:
-
-- `STELLAR_RPC_URL`
-- `STELLAR_HORIZON_URL`
-- `STELLAR_NETWORK_PASSPHRASE`
-- `DEMO_USDC_ISSUER_PUBLIC`
-- `DEMO_USDC_ISSUER_SECRET`
-- `DEMO_USDC_SAC_ADDRESS`
-- `MARKETPLACE_CONTRACT_ID`
-- `WALLET_ENCRYPTION_KEY`
-
-The web app proxies API requests to `http://localhost:4000` by default. Override
-it with `API_URL` when needed:
-
-```bash
-API_URL="http://localhost:4000"
-```
-
-## Run Locally
-
-Install and start the API:
+Prerequisites: Node.js 18+, Rust with `rustup target add wasm32v1-none`,
+PostgreSQL (e.g. Supabase), Stellar testnet access.
 
 ```bash
 cd apps/api
 npm install
-npm run prisma:migrate
-npm run dev
+# create apps/api/.env with DATABASE_URL and DIRECT_URL (Postgres)
+npm run deploy:testnet # issuer + CPKUSD token + contract → .env.local
+npm run prisma:migrate:deploy
+DEMO_SEED_PASSWORD='choose-a-demo-password' npm run demo:seed
+npm run dev            # http://localhost:4000
 ```
-
-In another terminal, install and start the web app:
 
 ```bash
 cd apps/web
 npm install
-npm run dev
+npm run dev            # http://localhost:3000 (proxies /api → API_URL, default :4000)
 ```
 
-Open:
+The seed creates **Café de Altura** as a Community Rewards marketplace with
+operator `maria@cafedealtura.example`, two vendors, members
+`escuela@cafedealtura.example` (50%), `brigada@cafedealtura.example` (30%) and
+`lucia@example.com` (20%), a 10-minute period (`SEED_PERIOD_MINUTES`), and 5
+real purchases. All seeded users get `DEMO_SEED_PASSWORD`.
+
+Environment variables used by this release:
+
+| Variable | Where | Meaning |
+| --- | --- | --- |
+| `MARKETPLACE_CONTRACT_ID` | API | Contract the API talks to (written by deploy). |
+| `DEMO_USDC_CODE` / `_ISSUER_*` / `_SAC_ADDRESS` | API | Demo asset (historical names; the asset is not USDC). |
+| `WALLET_ENCRYPTION_KEY`, `SESSION_SECRET` | API | Custodial key encryption; session HMAC (falls back to the wallet key). |
+| `ENABLE_DEMO_IMPERSONATION` | API | `true` to allow the local demo switcher (ignored in production). |
+| `DEMO_SEED_PASSWORD`, `SEED_PERIOD_MINUTES` | seed | Demo logins; seeded period length. |
+| `DEMO_ASSET_CODE`, `DEPLOY_ENV_FILE` | deploy | Asset code for fresh deploys (default `CPKUSD`); alternative env file. |
+| `DEMO_PERIOD_SECONDS` | `demo:rewards` | Period length for the CLI proof (default 45). |
+
+## Stellar testnet
+
+```bash
+cd apps/api
+npm run deploy:testnet                     # full: new issuer, CPKUSD token, contract
+npm run deploy:testnet -- --contract-only  # new contract, keep issuer/token/accounts
+npm run demo:rewards                       # on-chain proof of the whole flow (no DB)
+npm run demo:purchase                      # classic marketplace proof (unchanged)
+```
+
+### Migrating an existing deployment
+
+Contract WASM changes never reach a deployed contract, and the pre-ideathon
+contract has no rewards functions, so existing installs need a new contract
+and a rebind. On-chain marketplace ids are only valid inside one deployment.
+`Marketplace.contractId` records which deployment a row belongs to, and the
+API **refuses** (fails safe) any marketplace whose `contractId` isn't the
+configured `MARKETPLACE_CONTRACT_ID`.
+
+```bash
+cd apps/api
+npm run prisma:migrate:deploy                       # additive; existing rows get contractId = NULL
+npm run deploy:testnet -- --contract-only           # rewrites MARKETPLACE_CONTRACT_ID only
+npm run marketplaces:rebind -- --dry-run
+npm run marketplaces:rebind -- --rewards cafe-de-altura   # re-registers marketplaces + vendors
+# No redeploy? Bind existing rows to the current contract instead:
+npm run marketplaces:rebind -- --adopt
+```
+
+Until `rebind`/`--adopt` runs, every marketplace answers "not ready for
+purchases", so run the migration, deploy and rebind together. Sale history,
+receipts and balances already paid out are untouched. Old community-fund
+accounts keep their funds.
+
+## Tests
+
+```bash
+cd contracts && cargo test                         # 26 tests (9 pre-existing + 17 rewards)
+cd apps/api && npm run typecheck && npm run build
+cd apps/web && npm run typecheck && npm run lint && npm run build
+```
+
+The rewards tests cover: the 3-way split into the treasury; accumulation;
+close; fixed-share allocation; claims; double claim; claim before close;
+premature close; changing committed shares; admin and operator withdrawal
+attempts (including a direct token transfer out of the contract); isolation
+between marketplaces and between periods; rounding (exact cases plus a sweep);
+invalid configurations; and the exact `require_auth` set of every entry point.
+Happy paths assert `env.auths()`. Negative auth tests run in strict mode
+(`set_auths(&[])` / targeted `mock_auths`) rather than `mock_all_auths`, with
+positive controls. Nine mutations of the contract's guards (removing auth,
+time, double-claim, duplicate, rounding checks…) were each caught by the
+suite.
+
+## Example transactions
+
+From `npm run demo:rewards` on testnet, contract
+[`CC46HNM74RDUX3ZEPA5VISKDJK5H5EIDETDXZDBE24FQ6S2BPIHUB3RI`](https://stellar.expert/explorer/testnet/contract/CC46HNM74RDUX3ZEPA5VISKDJK5H5EIDETDXZDBE24FQ6S2BPIHUB3RI)
+(90/5/5 split; members 50/30/20; purchases of $42.00 and $18.50):
+
+| Step | Transaction |
+| --- | --- |
+| create_rewards_marketplace | [bdef43b0e9…](https://stellar.expert/explorer/testnet/tx/bdef43b0e952ed635c4a363ca5b3c869570f7c8ba20c780c448e59fa0e13ed5c) |
+| register_vendor | [58de406537…](https://stellar.expert/explorer/testnet/tx/58de4065374f96ee32a40f69cc4ce72b90afdb9864003d67c254530ef5480f53) |
+| open_period (period 0) | [fef4ab5696…](https://stellar.expert/explorer/testnet/tx/fef4ab569625644be9220dd58ef7f560841a13a906d230803abc9b0a989d6af0) |
+| purchase $42.00 → period 0 | [fd284a2437…](https://stellar.expert/explorer/testnet/tx/fd284a2437718a30cef5fc45a0f574b86a78ac37ae1723052813686ac2edeec7) |
+| purchase $18.50 → period 0 | [1fbd374f76…](https://stellar.expert/explorer/testnet/tx/1fbd374f76534a5e4d78afd6b9ad5d720250e77e0fbacbc9848be9aa5a027991) |
+| close_period (total $3.025) | [c7df8ef711…](https://stellar.expert/explorer/testnet/tx/c7df8ef711a9d9cc22b2e2c81b3326067d3e7994c4ad053714b6261d9c33ef20) |
+| claim member A (50% → $1.5125) | [ac91d054db…](https://stellar.expert/explorer/testnet/tx/ac91d054db15f2689168e2111b81432fb8e25b06842f28623d0797a6c511e021) |
+| claim member B (30% → $0.9075) | [b596d13f6e…](https://stellar.expert/explorer/testnet/tx/b596d13f6e81c84f97709388f81595de620894bf2896dc04af07061dee9adcca) |
+| claim member C (20% → $0.605) | [142fe40acc…](https://stellar.expert/explorer/testnet/tx/142fe40acccbab40b029d877c0d3f6159030144e26c2b162f0bf7985b73a66aa) |
+
+| Rejected action | Contract answer |
+| --- | --- |
+| purchase before any period | `NoActivePeriod` |
+| close before end | `PeriodNotEnded` |
+| claim before close | `PeriodNotClosed` |
+| operator redirects the running period (operator auth accepted) | `PeriodActive` |
+| operator withdraws the treasury via the token (own-funds control accepted) | `Unauthorized` |
+| second claim by member A | `AlreadyClaimed` |
+
+That contract is a reference deployment made with a fresh `CPKUSD` asset. The
+pre-ideathon contract
+[`CCCXYF55…QH2U`](https://stellar.expert/explorer/testnet/contract/CCCXYF55U6M44A6RK2WFUXEZDNPMCUI7YDR3YPBBEGWGEO4OSIGZQH2U)
+has no Community Rewards; see [Migrating](#migrating-an-existing-deployment).
+
+## Before and during the ideathon
+
+**Already in Compaki before the ideathon:** Next.js frontend and Hono +
+Prisma/Postgres API; Soroban contract with marketplace creation, vendor
+registration and atomic 3-way split purchases; marketplace launch wizard;
+vendor onboarding and products; cart and per-item checkout; verifiable
+receipts linking to stellar.expert; operator and vendor dashboards; custodial
+testnet accounts; 9 contract tests.
+
+**Added during the ideathon (Community Rewards v1):**
+
+- Contract: rewards marketplaces, protected treasury, per-marketplace and
+  per-period accounting, periods with frozen fixed-share members,
+  permissionless close with exact rounding, one-time member claims, views,
+  events, TTL management, and 17 new tests.
+- API: rewards endpoints, on-chain read model, contract error mapping,
+  guarantee checks, period booking at checkout, `contractId` binding, and the
+  `marketplaces:rebind`, `deploy --contract-only`, `demo:rewards` and
+  `users:set-password` scripts.
+- Web: the *Community rewards* operator tab, the `/rewards` member page, and a
+  Community Rewards option in the launch wizard.
+- Security: the impersonation, legacy-claim and vendor-join takeover fixes
+  above, plus operator-only dashboard data.
+- Fixes found along the way: the API retried every failed Stellar call (the
+  timeout check matched its own stack frame), and `deploy:testnet` crashed
+  under ESM (`__dirname`).
+
+## Project layout
 
 ```text
-http://localhost:3000
+apps/web/      Next.js app (App Router)      apps/api/      Hono API + Prisma
+  src/app/dashboard/[slug]/rewards-panel.tsx   src/lib/stellar/   only module talking to the chain
+  src/app/rewards/                             src/lib/rewards.ts on-chain read model
+contracts/marketplace/  Soroban contract + tests
+docs/judges-demo.md     5-minute demo script
 ```
-
-The API runs on:
-
-```text
-http://localhost:4000
-```
-
-## Deploy Testnet Contracts
-
-From the API app:
-
-```bash
-cd apps/api
-npm run deploy:testnet
-```
-
-The deployment script:
-
-- Creates and funds a demo asset issuer on Stellar testnet.
-- Deploys the Stellar Asset Contract for the demo asset.
-- Builds, uploads, and deploys the Soroban marketplace contract.
-- Initializes the contract with the admin and payment token.
-- Writes the resulting contract and wallet configuration to `.env.local`.
-
-## Seed Demo Data
-
-Create a complete demo marketplace with vendors, products, sales, receipts, and
-real testnet transactions:
-
-```bash
-cd apps/api
-npm run demo:seed
-```
-
-Run a smaller end-to-end purchase proof:
-
-```bash
-cd apps/api
-npm run demo:purchase
-```
-
-## Useful Commands
-
-API:
-
-```bash
-cd apps/api
-npm run dev
-npm run build
-npm run start
-npm run typecheck
-npm run prisma:migrate
-npm run prisma:studio
-```
-
-Web:
-
-```bash
-cd apps/web
-npm run dev
-npm run build
-npm run start
-npm run lint
-npm run typecheck
-```
-
-Contracts:
-
-```bash
-cd contracts
-cargo test
-```
-
-## Product Surfaces
-
-- `/onboarding`: operator marketplace creation
-- `/marketplaces`: public directory of every marketplace
-- `/m/{slug}`: public storefront
-- `/m/{slug}/join`: vendor onboarding
-- `/m/{slug}/p/{productId}`: product detail page
-- `/m/{slug}/cart`: cart (stored in a browser cookie until checkout)
-- `/m/{slug}/checkout/{orderId}`: order checkout (shipping + payment)
-- `/orders`: buyer's orders (pending and completed)
-- `/dashboard/{slug}`: operator dashboard
-- `/vendor/{slug}`: vendor dashboard (products and sales)
-- `/receipt/{saleId}`: public transparent receipt
-
-## Data Model Notes
-
-- `Marketplace.contractMarketplaceId` links an off-chain marketplace to its
-  on-chain configuration.
-- `Marketplace.createTxHash` stores the transaction that registered the
-  marketplace on-chain.
-- `Marketplace.communityFundId` points to the account receiving the community
-  share.
-- `Sale.txHash` stores the purchase transaction hash.
-- `Sale.splitSnapshot` freezes the exact split used at purchase time, so future
-  marketplace changes do not rewrite historical accounting.
-
-## Current Status
-
-Compaki is an MVP designed to demonstrate verifiable marketplace settlement and
-regenerative revenue distribution on Stellar testnet. It is not production
-payment infrastructure yet. Production readiness would require non-testnet
-assets, stronger account custody or wallet-based flows, operational monitoring,
-formal contract review, and compliance work appropriate to the deployment
-jurisdiction.
-
-## Vision
-
-Compaki is built for marketplaces where the health of the ecosystem matters as
-much as the transaction itself. A coffee cooperative, a farmers market, a local
-services network, or a creative community should be able to decide not only who
-gets paid, but how every sale strengthens the shared infrastructure around it.
-
-That is the role of regenerative commerce: turning distribution rules into a
-living economic design, visible to buyers and enforceable at settlement.
