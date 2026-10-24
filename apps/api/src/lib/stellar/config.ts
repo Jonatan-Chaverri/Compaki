@@ -1,6 +1,8 @@
 // Server-side Stellar configuration, populated by `npm run deploy:testnet`
 // (which writes .env.local). Never import this from client components.
 
+import { StrKey } from "@stellar/stellar-sdk";
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -56,6 +58,11 @@ export function usdToStroops(amountUsd: number): bigint {
 
 export function stroopsToUsd(stroops: bigint): number {
   return Number(stroops) / 10 ** USDC_DECIMALS;
+}
+
+/** True for a well-formed classic account address (G..., ed25519). */
+export function isValidAccountAddress(value: string): boolean {
+  return StrKey.isValidEd25519PublicKey(value);
 }
 
 export function stellarExpertTxUrl(txHash: string): string {

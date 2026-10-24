@@ -11,6 +11,7 @@ import { marketplaces } from "./routes/marketplaces";
 import { me } from "./routes/me";
 import { orders } from "./routes/orders";
 import { products } from "./routes/products";
+import { rewards } from "./routes/rewards";
 import { sales } from "./routes/sales";
 
 // All routes live under /api so the web app can proxy /api/* here verbatim.
@@ -26,6 +27,7 @@ app.route("/api/marketplaces", marketplaces);
 app.route("/api/me", me);
 app.route("/api/orders", orders);
 app.route("/api/products", products);
+app.route("/api/rewards", rewards);
 app.route("/api/sales", sales);
 
 app.get("/health", (c) => c.json({ ok: true }));

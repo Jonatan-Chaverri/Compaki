@@ -16,6 +16,12 @@ export interface SplitSnapshot {
   vendorAmountUsd: number;
   operatorAmountUsd: number;
   communityAmountUsd: number;
+  /**
+   * Community Rewards marketplaces: the on-chain period the community share
+   * was booked to (returned by the purchase transaction). Absent for classic
+   * marketplaces and for sales predating Community Rewards.
+   */
+  rewardsPeriodId?: number | null;
 }
 
 export function parseSplitSnapshot(raw: string): SplitSnapshot {

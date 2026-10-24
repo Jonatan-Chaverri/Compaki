@@ -10,6 +10,8 @@ import { prisma } from "@/lib/db";
 import { parseProductInput } from "@/lib/products";
 import { getSessionUser } from "@/lib/session";
 
+import { communityFundLabel } from "./marketplaces";
+
 export const products = new Hono();
 
 products.post("/", async (c) => {
@@ -73,8 +75,9 @@ products.get("/:id", async (c) => {
       name: product.marketplace.name,
       slug: product.marketplace.slug,
       regenerativeEnabled: product.marketplace.regenerativeEnabled,
+      rewardsEnabled: product.marketplace.rewardsEnabled,
       splitCommunityBps: product.marketplace.splitCommunityBps,
-      communityFundName: product.marketplace.communityFund?.name ?? null,
+      communityFundName: communityFundLabel(product.marketplace),
     },
   });
 });

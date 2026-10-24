@@ -1,10 +1,17 @@
 /**
- * Demo seed — builds the full SCF pitch scenario against REAL testnet:
+ * Demo seed — builds the full pitch scenario against REAL testnet:
  *
- *   Marketplace "Café de Altura" (regenerative, 85/10/5 split)
+ *   Marketplace "Café de Altura" (Community Rewards, 85/10/5 split)
  *   ├─ operator María Castillo
  *   ├─ vendors Don Carlos (coffee) and Finca La Esperanza (2-3 products each)
- *   └─ 5 historical sales with real on-chain transactions
+ *   ├─ community members Escuela Verde (50%), Brigada de Reforestación (30%)
+ *   │  and Lucía Fernández (20%), in an open rewards period
+ *   └─ 5 historical sales with real on-chain transactions (their community
+ *      share is booked to that period in the contract treasury)
+ *
+ * DEMO_SEED_PASSWORD=<pw> gives every seeded user that password (only users
+ * that have none yet), so the presenter can sign in as operator, vendor or
+ * member. SEED_PERIOD_MINUTES (default 10) sets the period length.
  *
  * Idempotent: users are reused by email, the marketplace by slug, on-chain
  * steps are skipped when their tx hash is already stored, and sales are only
@@ -19,12 +26,18 @@ import "./load-env";
 import { PrismaClient, type User } from "@prisma/client";
 
 import type { SplitSnapshot } from "../src/lib/db/types";
+import { hashPassword } from "../src/lib/passwords";
+import { boundOnChainId } from "../src/lib/rewards";
 import {
   createCustodialAccount,
-  createMarketplace,
+  createRewardsMarketplace,
   decryptSecret,
+  getRewardsPeriod,
+  getRewardsStatus,
+  openRewardsPeriod,
   purchase,
   registerVendor,
+  stellarConfig,
   stellarExpertTxUrl,
   stroopsToUsd,
   usdToStroops,
@@ -35,6 +48,14 @@ const prisma = new PrismaClient();
 const SLUG = "cafe-de-altura";
 const SPLITS = { vendorBps: 8_500, operatorBps: 1_000, communityBps: 500 };
 const SALES_TARGET = 5;
+const PERIOD_MINUTES = Number(process.env.SEED_PERIOD_MINUTES ?? 10);
+const DEMO_PASSWORD = process.env.DEMO_SEED_PASSWORD ?? "";
+
+const MEMBERS = [
+  { name: "Escuela Verde de Tarrazú", email: "escuela@cafedealtura.example", shareBps: 5_000 },
+  { name: "Brigada de Reforestación", email: "brigada@cafedealtura.example", shareBps: 3_000 },
+  { name: "Lucía Fernández", email: "lucia@example.com", shareBps: 2_000 },
+] as const;
 
 const VENDORS = [
   {
@@ -116,6 +137,12 @@ async function ensureUser(params: {
     update: { name: params.name },
     create: { email: params.email, name: params.name, role: params.role },
   });
+  if (DEMO_PASSWORD && !user.passwordHash) {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await hashPassword(DEMO_PASSWORD) },
+    });
+  }
   if (!user.stellarPublicKey || !user.stellarSecretEncrypted) {
     const account = await createCustodialAccount({ startingUsd: params.startingUsd });
     user = await prisma.user.update({
@@ -131,8 +158,11 @@ async function ensureUser(params: {
 
 async function main(): Promise<void> {
   console.log("── Compaki demo seed: Café de Altura (testnet) ─────────");
+  if (DEMO_PASSWORD && DEMO_PASSWORD.length < 8) {
+    throw new Error("DEMO_SEED_PASSWORD must be at least 8 characters");
+  }
 
-  // ── 1. Operator + community fund + marketplace ────────────────────────
+  // ── 1. Operator + marketplace (Community Rewards) ─────────────────────
   console.log("Operator María + payment accounts...");
   const operator = await ensureUser({
     name: "María Castillo",
@@ -152,53 +182,32 @@ async function main(): Promise<void> {
       splitOperatorBps: SPLITS.operatorBps,
       splitCommunityBps: SPLITS.communityBps,
       regenerativeEnabled: true,
+      rewardsEnabled: true,
       operatorId: operator.id,
     },
-    include: { communityFund: true },
   });
 
-  let fund = marketplace.communityFund;
-  if (!fund?.stellarPublicKey) {
-    const account = await createCustodialAccount();
-    fund = fund
-      ? await prisma.user.update({
-          where: { id: fund.id },
-          data: {
-            stellarPublicKey: account.publicKey,
-            stellarSecretEncrypted: account.secretEncrypted,
-          },
-        })
-      : await prisma.user.create({
-          data: {
-            name: "Escuela Verde de Tarrazú",
-            role: "COMMUNITY",
-            stellarPublicKey: account.publicKey,
-            stellarSecretEncrypted: account.secretEncrypted,
-          },
-        });
-    marketplace = await prisma.marketplace.update({
-      where: { id: marketplace.id },
-      data: { communityFundId: fund.id },
-      include: { communityFund: true },
-    });
+  if (marketplace.contractMarketplaceId && boundOnChainId(marketplace) === null) {
+    throw new Error(
+      `${SLUG} is registered in another contract deployment. Run \`npm run marketplaces:rebind -- --rewards ${SLUG}\` first.`,
+    );
   }
-
   if (!marketplace.contractMarketplaceId) {
-    console.log("Registering marketplace on-chain (85/10/5)...");
-    const result = await createMarketplace({
+    console.log("Registering Community Rewards marketplace on-chain (85/10/5)...");
+    const result = await createRewardsMarketplace({
       operatorSecret: decryptSecret(operator.stellarSecretEncrypted as string),
-      communityFundPublicKey: fund.stellarPublicKey as string,
       ...SPLITS,
     });
     marketplace = await prisma.marketplace.update({
       where: { id: marketplace.id },
       data: {
         contractMarketplaceId: result.marketplaceId.toString(),
+        contractId: stellarConfig.marketplaceContractId,
         createTxHash: result.txHash,
+        rewardsEnabled: true,
       },
-      include: { communityFund: true },
     });
-    console.log(`  create_marketplace tx ${result.txHash.slice(0, 8)}…`);
+    console.log(`  create_rewards_marketplace tx ${result.txHash.slice(0, 8)}…`);
   }
   const contractMarketplaceId = BigInt(marketplace.contractMarketplaceId as string);
 
@@ -245,7 +254,41 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── 3. Historical sales (real on-chain purchases) ─────────────────────
+  // ── 3. Community members + an open rewards period ─────────────────────
+  if (marketplace.rewardsEnabled) {
+    const members: User[] = [];
+    for (const m of MEMBERS) {
+      members.push(await ensureUser({ name: m.name, email: m.email, role: "BUYER", startingUsd: 100 }));
+    }
+    const status = await getRewardsStatus(contractMarketplaceId);
+    const latest =
+      status.periodCount > 0
+        ? await getRewardsPeriod(contractMarketplaceId, status.periodCount - 1)
+        : null;
+    if (!latest || status.ledgerTime >= latest.endTs) {
+      console.log(`Opening a ${PERIOD_MINUTES}-minute rewards period (50/30/20)...`);
+      const opened = await openRewardsPeriod({
+        operatorSecret: decryptSecret(operator.stellarSecretEncrypted as string),
+        marketplaceId: contractMarketplaceId,
+        beneficiaries: members.map((m) => m.stellarPublicKey as string),
+        sharesBps: MEMBERS.map((m) => m.shareBps),
+        endTs: status.ledgerTime + PERIOD_MINUTES * 60,
+      });
+      await prisma.rewardsPeriod.create({
+        data: {
+          marketplaceId: marketplace.id,
+          contractId: stellarConfig.marketplaceContractId,
+          periodId: opened.periodId,
+          openTxHash: opened.txHash,
+        },
+      });
+      console.log(`  open_period #${opened.periodId} tx ${opened.txHash.slice(0, 8)}…`);
+    } else {
+      console.log(`Rewards period #${status.periodCount - 1} is already running.`);
+    }
+  }
+
+  // ── 4. Historical sales (real on-chain purchases) ─────────────────────
   const existingSales = await prisma.sale.count({
     where: { product: { marketplaceId: marketplace.id } },
   });
@@ -275,7 +318,7 @@ async function main(): Promise<void> {
 
     const amountStroops = usdToStroops(product.priceUsd);
     const settleStart = Date.now();
-    const { txHash } = await purchase({
+    const { txHash, rewardsPeriodId } = await purchase({
       buyerSecret: decryptSecret(buyer.stellarSecretEncrypted as string),
       marketplaceId: contractMarketplaceId,
       vendorPublicKey: product.vendor.stellarPublicKey as string,
@@ -292,6 +335,7 @@ async function main(): Promise<void> {
       vendorAmountUsd: stroopsToUsd(vendorStroops),
       operatorAmountUsd: stroopsToUsd(operatorStroops),
       communityAmountUsd: stroopsToUsd(amountStroops - vendorStroops - operatorStroops),
+      rewardsPeriodId,
     };
 
     // Backdate so the dashboard reads like an operating store, not a fresh seed.
@@ -311,7 +355,7 @@ async function main(): Promise<void> {
     console.log(`    settled in ${settleSeconds}s · tx ${txHash.slice(0, 8)}…`);
   }
 
-  // ── 4. Summary for the presenter ──────────────────────────────────────
+  // ── 5. Summary for the presenter ──────────────────────────────────────
   const allSales = await prisma.sale.findMany({
     where: { product: { marketplaceId: marketplace.id } },
     orderBy: { createdAt: "desc" },
@@ -322,6 +366,11 @@ async function main(): Promise<void> {
   console.log(`  Storefront:         http://localhost:3000/m/${SLUG}`);
   console.log(`  Operator dashboard: http://localhost:3000/dashboard/${SLUG}`);
   console.log(`  Vendor invite:      http://localhost:3000/m/${SLUG}/join`);
+  console.log(`  Member rewards:     http://localhost:3000/rewards`);
+  console.log(
+    `  Sign-ins:           ${operator.email} (operator), ${MEMBERS.map((m) => m.email).join(", ")} (members)` +
+      (DEMO_PASSWORD ? " — password from DEMO_SEED_PASSWORD" : " — set DEMO_SEED_PASSWORD to enable"),
+  );
   for (const s of allSales) {
     console.log(
       `  Receipt · ${s.product.name}: http://localhost:3000/receipt/${s.id}`,

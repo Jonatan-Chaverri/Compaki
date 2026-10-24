@@ -4,9 +4,12 @@
 //   POST /login      email, password → user + session cookie
 //   POST /logout     clears the session cookie
 //
-// Legacy users (created by the passwordless demo flows) have no passwordHash;
-// registering with their email claims the account and keeps its payment
-// account, marketplaces and purchase history.
+// Legacy users (created by the old passwordless demo flows and the seed
+// script) have no passwordHash. Registering with their email does NOT claim
+// them: knowing an email address is not proof of owning the account (and its
+// custodial payment key). An administrator sets their password out of band
+// with `npm run users:set-password -- <email>` (or DEMO_SEED_PASSWORD for
+// seeded demo users).
 
 import { Hono } from "hono";
 
@@ -47,16 +50,20 @@ auth.post("/register", async (c) => {
   if (existing?.passwordHash) {
     return c.json({ error: "That email is already registered — sign in instead" }, 409);
   }
+  if (existing) {
+    return c.json(
+      {
+        error:
+          "An account with this email already exists but has no password yet. For security it can't be claimed by email alone — ask the Compaki administrator to set a password for it.",
+      },
+      409,
+    );
+  }
 
   const passwordHash = await hashPassword(password);
-  const user = existing
-    ? await prisma.user.update({
-        where: { id: existing.id },
-        data: { name, country, passwordHash },
-      })
-    : await prisma.user.create({
-        data: { name, email, country, passwordHash, role: "BUYER" },
-      });
+  const user = await prisma.user.create({
+    data: { name, email, country, passwordHash, role: "BUYER" },
+  });
 
   c.header("Set-Cookie", sessionCookieHeader(user.id));
   return c.json({ user: publicUser(user) }, 201);

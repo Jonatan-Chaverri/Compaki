@@ -59,7 +59,10 @@ sales.get("/:id/receipt", async (c) => {
           {
             key: "community",
             role: "Community",
-            recipient: marketplace.communityFund?.name ?? "Community fund",
+            recipient:
+              snapshot.rewardsPeriodId !== undefined && snapshot.rewardsPeriodId !== null
+                ? `Community Rewards treasury · period #${snapshot.rewardsPeriodId}`
+                : marketplace.communityFund?.name ?? "Community fund",
             amountUsd: snapshot.communityAmountUsd,
             percent: snapshot.communityBps / 100,
           },

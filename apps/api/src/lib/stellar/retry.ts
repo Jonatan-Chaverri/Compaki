@@ -13,8 +13,10 @@ const TIMEOUT_PATTERNS = [
 ];
 
 export function isTimeoutish(error: unknown): boolean {
+  // Message (and cause) only: stack traces always contain "withTimeoutRetry",
+  // which would make every error look like a timeout.
   const message =
-    error instanceof Error ? `${error.message} ${error.stack ?? ""}` : String(error);
+    error instanceof Error ? `${error.message} ${String(error.cause ?? "")}` : String(error);
   return TIMEOUT_PATTERNS.some((p) => message.toLowerCase().includes(p.toLowerCase()));
 }
 

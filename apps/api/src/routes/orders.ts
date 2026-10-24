@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 
 import { prisma, type SplitSnapshot } from "@/lib/db";
+import { boundOnChainId, describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 import {
   createCustodialAccount,
@@ -196,9 +197,15 @@ orders.get("/:id", async (c) => {
 // ── POST /:id/pay — shipping + payment ──────────────────────────────────────
 //
 // Settles one on-chain split purchase per order item (each item can belong to
-// a different vendor). Designed to be resumable: items that already settled
-// (they have a Sale row) are skipped, so a retry after a mid-order failure
-// doesn't double-charge.
+// a different vendor) — the cart is NOT one atomic transaction; each item's
+// split is. Designed to be resumable: items that already settled (they have
+// a Sale row) are skipped, so a retry after a mid-order failure doesn't
+// double-charge.
+//
+// Community Rewards marketplaces: each item's community share is booked to
+// the active period on-chain. With no active period the contract rejects the
+// purchase (no money moves) and the API answers 409 — items settled earlier
+// in the same order stay settled.
 
 orders.post("/:id/pay", async (c) => {
   const sessionUser = await getSessionUser(c);
@@ -256,7 +263,8 @@ orders.post("/:id/pay", async (c) => {
   }
 
   const marketplace = order.marketplace;
-  if (!marketplace.contractMarketplaceId) {
+  const onChainId = boundOnChainId(marketplace);
+  if (onChainId === null) {
     return c.json({ error: "This marketplace is not ready for purchases yet" }, 409);
   }
   const unsettled = order.items.filter((item) => !item.sale);
@@ -304,9 +312,9 @@ orders.post("/:id/pay", async (c) => {
       const lineUsd = Math.round(item.unitPriceUsd * item.quantity * 100) / 100;
       const amountStroops = usdToStroops(lineUsd);
       const settleStart = Date.now();
-      const { txHash } = await purchase({
+      const { txHash, rewardsPeriodId } = await purchase({
         buyerSecret,
-        marketplaceId: BigInt(marketplace.contractMarketplaceId),
+        marketplaceId: onChainId,
         vendorPublicKey: item.product.vendor.stellarPublicKey as string,
         amountStroops,
       });
@@ -324,6 +332,7 @@ orders.post("/:id/pay", async (c) => {
         vendorAmountUsd: stroopsToUsd(vendorStroops),
         operatorAmountUsd: stroopsToUsd(operatorStroops),
         communityAmountUsd: stroopsToUsd(communityStroops),
+        rewardsPeriodId,
       };
       await prisma.$transaction([
         prisma.sale.create({
@@ -386,6 +395,10 @@ orders.post("/:id/pay", async (c) => {
         })),
     });
   } catch (error) {
+    const known = describeContractError(error);
+    if (known) {
+      return c.json({ error: known.message, code: known.code }, known.status);
+    }
     console.error("[order-pay] failed:", error);
     return c.json(
       { error: "Payment could not be completed — please try again." },

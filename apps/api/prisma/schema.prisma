@@ -49,10 +49,18 @@ model Marketplace {
   splitOperatorBps     Int      @default(1000)
   splitCommunityBps    Int      @default(0)
   // ID of this marketplace inside the shared Soroban contract (null until registered on-chain).
-  contractMarketplaceId String? @unique
+  contractMarketplaceId String?
+  // Soroban contract instance that contractMarketplaceId belongs to. Ids are
+  // only meaningful within one deployment; API routes refuse a marketplace
+  // whose contractId differs from MARKETPLACE_CONTRACT_ID (run
+  // `npm run marketplaces:rebind` after a contract redeploy).
+  contractId           String?
   // Hash of the create_marketplace transaction — the "verified on-chain" link.
   createTxHash         String?
   regenerativeEnabled  Boolean  @default(false)
+  // Community Rewards: the community share is held by the contract and
+  // distributed per period. Fixed when the marketplace is registered on-chain.
+  rewardsEnabled       Boolean  @default(false)
   createdAt            DateTime @default(now())
 
   operatorId String
@@ -63,6 +71,9 @@ model Marketplace {
   products   Product[]
   vendors    VendorMembership[]
   orders     Order[]
+  rewardsPeriods RewardsPeriod[]
+
+  @@unique([contractId, contractMarketplaceId])
 }
 
 // A vendor's membership in one marketplace (a vendor may have no products yet).
@@ -167,4 +178,41 @@ model Sale {
   // Cart checkouts settle one sale per order item; null for legacy one-click sales.
   orderItemId String?    @unique
   orderItem   OrderItem? @relation(fields: [orderItemId], references: [id])
+}
+
+// Community Rewards — auxiliary, off-chain records only. Beneficiaries,
+// shares, totals, entitlements and claim status are confirmed state in the
+// Soroban contract and are always read from it; these rows only keep the
+// transaction hashes the contract doesn't store, for explorer links.
+model RewardsPeriod {
+  id          String   @id @default(cuid())
+  // Period id inside the contract (per marketplace, starting at 0).
+  periodId    Int
+  // Contract instance the period lives in (see Marketplace.contractId).
+  contractId  String
+  // Null when the period was opened outside the API (e.g. stellar-cli).
+  openTxHash  String?
+  closeTxHash String?
+  createdAt   DateTime @default(now())
+
+  marketplaceId String
+  marketplace   Marketplace   @relation(fields: [marketplaceId], references: [id])
+  claims        RewardClaim[]
+
+  @@unique([marketplaceId, contractId, periodId])
+}
+
+model RewardClaim {
+  id            String   @id @default(cuid())
+  // Stellar address that received the payout.
+  memberAddress String
+  // Amount returned by the confirmed claim transaction.
+  amountUsd     Float
+  txHash        String   @unique
+  createdAt     DateTime @default(now())
+
+  periodRowId String
+  period      RewardsPeriod @relation(fields: [periodRowId], references: [id])
+
+  @@unique([periodRowId, memberAddress])
 }

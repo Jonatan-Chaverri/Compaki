@@ -3,22 +3,26 @@
 //   GET  /check-slug?slug=x        live slug availability for the wizard
 //   POST /                         launch orchestrator (SSE stream)
 //   GET  /:slug                    public info (join page)
-//   GET  /:slug/dashboard          operator dashboard payload
+//   GET  /:slug/dashboard          operator dashboard payload (operator only)
 //   GET  /:slug/vendor-dashboard   session vendor's dashboard payload
-//   POST /:slug/vendors            vendor registration
+//   POST /:slug/vendors            vendor registration (session user)
 
 import { Hono } from "hono";
 
 import { prisma, parseSplitSnapshot } from "@/lib/db";
+import { boundOnChainId } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
-import { getSessionUser, sessionCookieHeader } from "@/lib/session";
+import { getSessionUser } from "@/lib/session";
 import {
   createCustodialAccount,
   createMarketplace,
+  createRewardsMarketplace,
   decryptSecret,
   registerVendor,
+  stellarConfig,
   stellarExpertTxUrl,
 } from "@/lib/stellar";
+import { demoImpersonationEnabled } from "./demo";
 
 export const marketplaces = new Hono();
 
@@ -33,6 +37,16 @@ interface LaunchInput {
   operatorBps: number;
   communityBps: number;
   regenerativeEnabled: boolean;
+  rewardsEnabled: boolean;
+}
+
+/** Display name of where the community share goes. */
+export function communityFundLabel(m: {
+  rewardsEnabled: boolean;
+  communityFund: { name: string } | null;
+}): string | null {
+  if (m.rewardsEnabled) return "Community Rewards treasury (on-chain)";
+  return m.communityFund?.name ?? null;
 }
 
 function parseInput(body: unknown): LaunchInput | string {
@@ -63,6 +77,11 @@ function parseInput(body: unknown): LaunchInput | string {
     return "Revenue split must sum to 100%";
   }
 
+  const rewardsEnabled = b.rewardsEnabled === true;
+  if (rewardsEnabled && communityBps === 0) {
+    return "Community Rewards needs a community share above 0%";
+  }
+
   return {
     name,
     slug,
@@ -72,6 +91,7 @@ function parseInput(body: unknown): LaunchInput | string {
     operatorBps,
     communityBps,
     regenerativeEnabled: Boolean(b.regenerativeEnabled) || communityBps > 0,
+    rewardsEnabled,
   };
 }
 
@@ -111,8 +131,9 @@ marketplaces.get("/directory", async (c) => {
       description: m.description,
       category: m.category,
       regenerativeEnabled: m.regenerativeEnabled,
+      rewardsEnabled: m.rewardsEnabled,
       splitCommunityBps: m.splitCommunityBps,
-      communityFundName: m.communityFund?.name ?? null,
+      communityFundName: communityFundLabel(m),
       productCount: m._count.products,
       vendorCount: m._count.vendors,
       createdAt: m.createdAt.toISOString(),
@@ -123,8 +144,10 @@ marketplaces.get("/directory", async (c) => {
 // ── POST / — the launch orchestrator ───────────────────────────────────────
 //
 // Streams progress as Server-Sent Events while it: provisions custodial
-// payment accounts (operator + community fund), registers the marketplace
-// on-chain (create_marketplace), and writes the DB records. Designed to be
+// payment accounts (operator, plus a community fund account for classic
+// marketplaces), registers the marketplace on-chain (create_marketplace, or
+// create_rewards_marketplace when Community Rewards is on — the community
+// share is then held by the contract), and writes the DB records. Designed to be
 // retried: every step reuses whatever a previous attempt already created
 // (operator by email, marketplace + fund by slug, on-chain id if present).
 
@@ -150,7 +173,7 @@ marketplaces.post("/", async (c) => {
   // If the slug belongs to someone else's marketplace, fail fast.
   const existing = await prisma.marketplace.findUnique({
     where: { slug: input.slug },
-    select: { operatorId: true },
+    select: { operatorId: true, contractMarketplaceId: true },
   });
   if (existing && existing.operatorId !== sessionUser.id) {
     return c.json({ error: "That URL is already taken" }, 409);
@@ -187,33 +210,37 @@ marketplaces.post("/", async (c) => {
         }
 
         // Marketplace row early (contract id null) so retries can resume.
+        // Once registered on-chain, the split and rewards mode are frozen
+        // there, so a re-submit must not change them off-chain either.
+        const onChainFields = {
+          splitVendorBps: input.vendorBps,
+          splitOperatorBps: input.operatorBps,
+          splitCommunityBps: input.communityBps,
+          regenerativeEnabled: input.regenerativeEnabled,
+          rewardsEnabled: input.rewardsEnabled,
+        };
         let marketplace = await prisma.marketplace.upsert({
           where: { slug: input.slug },
           update: {
             name: input.name,
             description: input.description,
             category: input.category,
-            splitVendorBps: input.vendorBps,
-            splitOperatorBps: input.operatorBps,
-            splitCommunityBps: input.communityBps,
-            regenerativeEnabled: input.regenerativeEnabled,
+            ...(existing?.contractMarketplaceId ? {} : onChainFields),
           },
           create: {
             name: input.name,
             slug: input.slug,
             description: input.description,
             category: input.category,
-            splitVendorBps: input.vendorBps,
-            splitOperatorBps: input.operatorBps,
-            splitCommunityBps: input.communityBps,
-            regenerativeEnabled: input.regenerativeEnabled,
+            ...onChainFields,
             operatorId: operatorUser.id,
           },
           include: { communityFund: true },
         });
 
+        // Rewards marketplaces need no fund account: the contract holds it.
         let fundUser = marketplace.communityFund;
-        if (!fundUser?.stellarPublicKey) {
+        if (!marketplace.rewardsEnabled && !fundUser?.stellarPublicKey) {
           const account = await createCustodialAccount();
           fundUser = fundUser
             ? await prisma.user.update({
@@ -243,19 +270,32 @@ marketplaces.post("/", async (c) => {
         stepStart("deploy");
         let contractMarketplaceId = marketplace.contractMarketplaceId;
         let createTxHash = marketplace.createTxHash;
+        let contractId = marketplace.contractId;
         if (contractMarketplaceId === null) {
-          if (!operatorUser.stellarSecretEncrypted || !fundUser.stellarPublicKey) {
+          if (!operatorUser.stellarSecretEncrypted) {
             throw new Error("Payment accounts missing after provisioning");
           }
-          const result = await createMarketplace({
+          const split = {
             operatorSecret: decryptSecret(operatorUser.stellarSecretEncrypted),
-            communityFundPublicKey: fundUser.stellarPublicKey,
-            vendorBps: input.vendorBps,
-            operatorBps: input.operatorBps,
-            communityBps: input.communityBps,
-          });
+            vendorBps: marketplace.splitVendorBps,
+            operatorBps: marketplace.splitOperatorBps,
+            communityBps: marketplace.splitCommunityBps,
+          };
+          let result;
+          if (marketplace.rewardsEnabled) {
+            result = await createRewardsMarketplace(split);
+          } else {
+            if (!fundUser?.stellarPublicKey) {
+              throw new Error("Payment accounts missing after provisioning");
+            }
+            result = await createMarketplace({
+              ...split,
+              communityFundPublicKey: fundUser.stellarPublicKey,
+            });
+          }
           contractMarketplaceId = result.marketplaceId.toString();
           createTxHash = result.txHash;
+          contractId = stellarConfig.marketplaceContractId;
         }
         stepDone("deploy");
 
@@ -263,7 +303,7 @@ marketplaces.post("/", async (c) => {
         stepStart("store");
         marketplace = await prisma.marketplace.update({
           where: { id: marketplace.id },
-          data: { contractMarketplaceId, createTxHash },
+          data: { contractMarketplaceId, createTxHash, contractId },
           include: { communityFund: true },
         });
         stepDone("store");
@@ -337,8 +377,9 @@ marketplaces.get("/:slug/storefront", async (c) => {
       description: marketplace.description,
       category: marketplace.category,
       regenerativeEnabled: marketplace.regenerativeEnabled,
+      rewardsEnabled: marketplace.rewardsEnabled,
       splitCommunityBps: marketplace.splitCommunityBps,
-      communityFundName: marketplace.communityFund?.name ?? null,
+      communityFundName: communityFundLabel(marketplace),
     },
     products: marketplace.products.map((p) => ({
       id: p.id,
@@ -356,6 +397,9 @@ marketplaces.get("/:slug/storefront", async (c) => {
 
 marketplaces.get("/:slug/dashboard", async (c) => {
   const slug = c.req.param("slug");
+  // Vendor emails and payment accounts are operator-only information.
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Sign in as the operator" }, 401);
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug },
     include: {
@@ -374,6 +418,9 @@ marketplaces.get("/:slug/dashboard", async (c) => {
     },
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+  if (marketplace.operatorId !== user.id) {
+    return c.json({ error: "Only the marketplace operator can view this dashboard" }, 403);
+  }
 
   const sales = await prisma.sale.findMany({
     where: { product: { marketplaceId: marketplace.id } },
@@ -402,13 +449,19 @@ marketplaces.get("/:slug/dashboard", async (c) => {
     name: marketplace.name,
     slug: marketplace.slug,
     regenerativeEnabled: marketplace.regenerativeEnabled,
+    rewardsEnabled: marketplace.rewardsEnabled,
+    demoImpersonation: demoImpersonationEnabled(),
     splits: {
       vendorBps: marketplace.splitVendorBps,
       operatorBps: marketplace.splitOperatorBps,
       communityBps: marketplace.splitCommunityBps,
     },
     operatorAccount: marketplace.operator.stellarPublicKey,
-    communityAccount: marketplace.communityFund?.stellarPublicKey ?? null,
+    // Rewards marketplaces hold the community share in the contract; the
+    // Community Rewards tab reads that treasury from chain instead.
+    communityAccount: marketplace.rewardsEnabled
+      ? null
+      : marketplace.communityFund?.stellarPublicKey ?? null,
     stats: {
       totalSales: sales.length,
       grossVolume: sales.reduce((acc, s) => acc + s.amountUsd, 0),
@@ -520,13 +573,19 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
 
 // ── POST /:slug/vendors — vendor registration ──────────────────────────────
 //
-// Creates/reuses the vendor user, provisions their custodial payment account,
-// registers them on-chain (register_vendor, signed by the operator's
+// Registers the SESSION user as a vendor: provisions their custodial payment
+// account, registers them on-chain (register_vendor, signed by the operator's
 // custodial key — the invite link implies operator approval), and records the
-// membership. Idempotent: re-submitting the same email resumes/returns.
+// membership. Idempotent: re-submitting resumes/returns.
+//
+// The vendor is always the signed-in user. (Earlier versions upserted a user
+// by the email in the request body and returned that user's session cookie,
+// which let anyone take over any account by knowing its email.)
 
 marketplaces.post("/:slug/vendors", async (c) => {
   const slug = c.req.param("slug");
+  const sessionUser = await getSessionUser(c);
+  if (!sessionUser) return c.json({ error: "Sign in to join as a vendor" }, 401);
 
   let body: unknown;
   try {
@@ -535,19 +594,14 @@ marketplaces.post("/:slug/vendors", async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
   const b = (body ?? {}) as Record<string, unknown>;
-  const name = typeof b.name === "string" ? b.name.trim() : "";
-  const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
   const sells = typeof b.sells === "string" ? b.sells.trim().slice(0, 200) : "";
-  if (name.length < 2) return c.json({ error: "Please tell us your name" }, 400);
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    return c.json({ error: "Invalid email address" }, 400);
-  }
 
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug },
     include: { operator: true },
   });
-  if (!marketplace || !marketplace.contractMarketplaceId) {
+  const onChainId = marketplace ? boundOnChainId(marketplace) : null;
+  if (!marketplace || onChainId === null) {
     return c.json({ error: "Marketplace not found" }, 404);
   }
   if (!marketplace.operator.stellarSecretEncrypted) {
@@ -555,12 +609,8 @@ marketplaces.post("/:slug/vendors", async (c) => {
   }
 
   try {
-    // 1. Vendor user + custodial payment account.
-    let vendor = await prisma.user.upsert({
-      where: { email },
-      update: { name },
-      create: { email, name, role: "VENDOR" },
-    });
+    // 1. Custodial payment account for the session user.
+    let vendor = sessionUser;
     if (!vendor.stellarPublicKey) {
       const account = await createCustodialAccount();
       vendor = await prisma.user.update({
@@ -589,7 +639,7 @@ marketplaces.post("/:slug/vendors", async (c) => {
     if (!membership.registerTxHash) {
       const { txHash } = await registerVendor({
         operatorSecret: decryptSecret(marketplace.operator.stellarSecretEncrypted),
-        marketplaceId: BigInt(marketplace.contractMarketplaceId),
+        marketplaceId: onChainId,
         vendorPublicKey: vendor.stellarPublicKey as string,
       });
       membership = await prisma.vendorMembership.update({
@@ -598,7 +648,6 @@ marketplaces.post("/:slug/vendors", async (c) => {
       });
     }
 
-    c.header("Set-Cookie", sessionCookieHeader(vendor.id));
     return c.json({
       vendor: { id: vendor.id, name: vendor.name },
       marketplace: { name: marketplace.name, slug: marketplace.slug },
