@@ -63,12 +63,12 @@ export function AuthForm() {
   };
 
   return (
-    <div>
+    <div className="auth-form">
       <h1 className="text-center text-2xl font-semibold tracking-tight text-slate-900">
         {mode === "signin" ? "Welcome back" : "Create your account"}
       </h1>
       <p className="mt-2 text-center text-sm text-slate-500">
-        One account for everything — buy, sell, or run a marketplace.
+        Your favorite communities, all in one place.
       </p>
 
       <div className="mt-6 flex rounded-full border border-slate-200 bg-white p-1">
@@ -81,6 +81,8 @@ export function AuthForm() {
           <button
             key={m}
             onClick={() => switchMode(m)}
+            aria-pressed={mode === m}
+            disabled={busy}
             className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
               mode === m ? "bg-navy-900 text-white" : "text-slate-500 hover:text-slate-900"
             }`}
@@ -90,11 +92,13 @@ export function AuthForm() {
         ))}
       </div>
 
-      <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <form className="auth-fields mt-6" onSubmit={(event) => { event.preventDefault(); if (valid && !busy) void submit(); }}>
         {mode === "register" && (
           <div className="mb-5">
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
+            <label htmlFor="auth-name" className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
             <input
+              id="auth-name"
+              autoComplete="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -106,8 +110,10 @@ export function AuthForm() {
         )}
 
         <div className="mb-5">
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+          <label htmlFor="auth-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
           <input
+            id="auth-email"
+            autoComplete="email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -118,8 +124,10 @@ export function AuthForm() {
         </div>
 
         <div className="mb-5">
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
+          <label htmlFor="auth-password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
           <input
+            id="auth-password"
+            autoComplete={mode === "register" ? "new-password" : "current-password"}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -131,10 +139,12 @@ export function AuthForm() {
 
         {mode === "register" && (
           <div className="mb-5">
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="auth-country" className="mb-1.5 block text-sm font-medium text-slate-700">
               Country of residence
             </label>
             <input
+              id="auth-country"
+              autoComplete="country-name"
               type="text"
               value={country}
               onChange={(e) => setCountry(e.target.value)}
@@ -146,13 +156,13 @@ export function AuthForm() {
         )}
 
         {error && (
-          <p className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
+          <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
             {error}
           </p>
         )}
 
         <button
-          onClick={() => void submit()}
+          type="submit"
           disabled={!valid || busy}
           className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -167,7 +177,8 @@ export function AuthForm() {
             "Create account"
           )}
         </button>
-      </div>
+      </form>
+      <p className="mt-5 text-xs leading-relaxed text-slate-500">Just your email and password. We set up your payment account for you.</p>
     </div>
   );
 }

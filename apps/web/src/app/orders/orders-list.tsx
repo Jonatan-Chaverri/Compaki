@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { ProductVisual } from "@/components/shell";
+import { ProductVisual, EmptyState } from "@/components/shell";
 import { formatDateTime, formatUsd } from "@/lib/format";
 
 export interface OrderRow {
@@ -38,6 +38,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
         active ? "bg-navy-900 text-white" : "text-slate-500 hover:bg-slate-100"
       }`}
@@ -97,7 +98,7 @@ function OrderCard({ order }: { order: OrderRow }) {
       <ul className="mt-4 space-y-2">
         {order.items.map((item) => (
           <li key={item.id} className="flex items-center gap-3 text-sm">
-            <div className="w-8 shrink-0">
+            <div className="w-14 shrink-0">
               <ProductVisual imageUrl={item.imageUrl} size="sm" />
             </div>
             <span className="min-w-0 flex-1 truncate text-slate-700">
@@ -129,14 +130,14 @@ function OrderCard({ order }: { order: OrderRow }) {
 }
 
 export function OrdersList({ orders }: { orders: OrderRow[] }) {
-  const [tab, setTab] = useState<"PENDING" | "COMPLETED">("PENDING");
+  const [tab, setTab] = useState<"PENDING" | "COMPLETED">(orders.some(o => o.status === "PENDING") ? "PENDING" : "COMPLETED");
   const pending = orders.filter((o) => o.status === "PENDING");
   const completed = orders.filter((o) => o.status === "COMPLETED");
   const shown = tab === "PENDING" ? pending : completed;
 
   return (
     <div className="mt-6">
-      <div className="flex gap-2">
+      <div className="dashboard-tabs">
         <TabButton active={tab === "PENDING"} onClick={() => setTab("PENDING")}>
           Pending ({pending.length})
         </TabButton>
@@ -146,11 +147,7 @@ export function OrdersList({ orders }: { orders: OrderRow[] }) {
       </div>
 
       {shown.length === 0 ? (
-        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
-          {tab === "PENDING"
-            ? "No pending orders — add something to a cart and proceed to payment."
-            : "No completed orders yet."}
-        </div>
+        <div className="mt-4"><EmptyState title={tab === "PENDING" ? "You’re all caught up." : "Your first good find is waiting."} description={tab === "PENDING" ? "No checkouts to finish. Explore a marketplace and discover something special." : "Once you complete an order, you’ll find it here along with a clear receipt for each purchase."} href="/marketplaces" action="Explore marketplaces" /></div>
       ) : (
         <div className="mt-4 space-y-4">
           {shown.map((order) => (

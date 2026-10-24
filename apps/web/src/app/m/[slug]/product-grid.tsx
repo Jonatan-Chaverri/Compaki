@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { AddToCartControls } from "@/components/cart";
+import { Icon } from "@/components/icon";
+import { EmptyState } from "@/components/shell";
 import { ProductVisual } from "@/components/shell";
 import { formatUsd } from "@/lib/format";
 
@@ -62,11 +64,12 @@ export function ProductGrid({
   };
 
   return (
-    <div className="mt-10">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <div className="mt-9">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-medium tracking-tight">Find your next favorite.</h2><span className="text-xs text-slate-500">Made, grown or chosen with care.</span></div>
+      <div className="catalog-toolbar flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
-            🔍
+            <Icon name="search" className="h-4 w-4" />
           </span>
           <input
             type="search"
@@ -78,6 +81,7 @@ export function ProductGrid({
           />
         </div>
         <div className="flex items-center gap-2">
+          <span className="mr-1 text-xs text-slate-500">Price</span>
           <input
             type="number"
             min="0"
@@ -103,7 +107,7 @@ export function ProductGrid({
       </div>
 
       {hasFilters && (
-        <p className="mt-3 flex items-center gap-3 text-xs text-slate-500">
+        <p role="status" className="mt-3 flex items-center gap-3 text-xs text-slate-500">
           <span>
             {filtered.length} of {products.length} product{products.length === 1 ? "" : "s"}
           </span>
@@ -117,21 +121,19 @@ export function ProductGrid({
       )}
 
       {filtered.length === 0 ? (
-        <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
-          No products match your search.
-        </div>
+        <div className="mt-6"><EmptyState icon="search" title="Let’s find something you’ll love." description="No products match these filters. Try a different search or price range." /><button className="button-secondary mt-4" onClick={clearFilters}>Clear all filters</button></div>
       ) : (
         <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((product) => (
             <div
               key={product.id}
-              className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+              className="product-card flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
             >
               <Link href={`/m/${slug}/p/${product.id}`} className="group">
                 <ProductVisual imageUrl={product.imageUrl} />
                 <div className="mt-4">
                   <div className="flex items-start justify-between gap-3">
-                    <h2 className="font-semibold text-slate-900 group-hover:underline">
+                    <h2 className="font-semibold text-slate-900 group-hover:text-brand-700">
                       {product.name}
                     </h2>
                     <p className="whitespace-nowrap font-semibold text-slate-900">
@@ -143,7 +145,7 @@ export function ProductGrid({
               </Link>
               <div className="flex-1">
                 {product.shortDescription && (
-                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                  <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-slate-600">
                     {product.shortDescription}
                   </p>
                 )}

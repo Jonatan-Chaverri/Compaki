@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import { Icon } from "@/components/icon";
+import { PageHeading } from "@/components/shell";
 import { useState } from "react";
 
 import { LiveBalance } from "@/components/live-balance";
@@ -46,15 +49,12 @@ export function VendorDashboard({
   const [withdrawOpen, setWithdrawOpen] = useState(false);
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-8">
+    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-6 py-8">
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="sm:col-span-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">My store</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            You keep {vendorBps / 100}% of every sale on {marketplaceName} — paid to your
-            balance in seconds.
-          </p>
-          <div className="mt-4 flex gap-2">
+          <PageHeading eyebrow="Made by you. Shared with your community." title="Your seller studio" description={`Your products and sales on ${marketplaceName}. You keep ${vendorBps / 100}% of every sale.`} />
+          <Link href={`/m/${slug}`} className="text-link mb-5">View marketplace<Icon name="arrow" className="h-4 w-4" /></Link>
+          <div className="dashboard-tabs">
             <TabButton active={tab === "products"} onClick={() => setTab("products")}>
               My products
             </TabButton>
@@ -64,12 +64,12 @@ export function VendorDashboard({
           </div>
         </div>
         <div className="flex flex-col gap-2">
-          <LiveBalance account={vendorAccount} label="Balance" accent />
+          <LiveBalance account={vendorAccount} label="Your demo balance" accent />
           <button
             onClick={() => setWithdrawOpen(true)}
             className="rounded-full border border-slate-200 bg-white px-5 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
           >
-            Withdraw
+            About withdrawals
           </button>
         </div>
       </div>
@@ -135,7 +135,7 @@ export function VendorDashboard({
               No sales yet. When someone buys, your share lands here within seconds.
             </div>
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="scroll-table rounded-2xl border border-slate-200 bg-white shadow-sm">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
@@ -189,6 +189,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
         active ? "bg-navy-900 text-white" : "text-slate-500 hover:bg-slate-100"
       }`}
@@ -200,16 +201,15 @@ function TabButton({
 
 function WithdrawModal({ onClose }: { onClose: () => void }) {
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={onClose} label="About withdrawals">
       <h2 className="text-lg font-semibold tracking-tight text-slate-900">Withdraw your balance</h2>
       <p className="mt-2 text-sm leading-relaxed text-slate-600">
-        Your money, your way — bank transfer, mobile money, or local cash-out partners.
+        Withdrawals will let sellers move earnings out of Compaki. This feature is not available in the demo.
       </p>
       <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        <p className="font-medium">Off-ramp partners coming soon</p>
+        <p className="font-medium">Demo funds cannot be withdrawn</p>
         <p className="mt-1">
-          This demo runs on Stellar testnet, so withdrawals aren&apos;t live yet. Your balance is
-          real on-chain value you can verify — the cash-out rails are the next step.
+          This demo uses a test asset on Stellar testnet. Your displayed balance has no monetary value and cannot be converted to cash.
         </p>
       </div>
       <div className="mt-6 flex justify-end">

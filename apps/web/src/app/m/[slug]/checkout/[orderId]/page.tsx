@@ -26,7 +26,7 @@ export default async function CheckoutPage(props: {
 
   if (order.status === "EXPIRED") {
     return (
-      <main className="mx-auto w-full max-w-xl px-6 py-16 text-center">
+      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-16 text-center">
         <p className="text-3xl">⌛</p>
         <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
           This order expired
@@ -46,7 +46,7 @@ export default async function CheckoutPage(props: {
   }
 
   return (
-    <main className="mx-auto w-full max-w-xl px-6 py-12">
+    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-12">
       <OrderCheckout order={order} user={user} />
     </main>
   );

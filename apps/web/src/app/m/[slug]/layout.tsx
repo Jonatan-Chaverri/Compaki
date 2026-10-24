@@ -19,9 +19,9 @@ export default async function MarketplaceLayout(props: {
             <>
               <Link
                 href={`/m/${slug}/join`}
-                className="text-sm text-slate-500 transition hover:text-slate-700"
+                className="text-xs font-medium text-slate-500 transition hover:text-slate-700"
               >
-                Sell here →
+                Become a seller
               </Link>
               <HeaderCartLink />
             </>

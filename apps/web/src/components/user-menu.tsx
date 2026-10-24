@@ -112,8 +112,8 @@ export function UserMenu() {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={loggedIn ? `Account: ${user.name}` : "Account"}
-        className="flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition hover:bg-slate-50"
+        aria-label={loggedIn ? `Account: ${user.name}` : "Sign in or create an account"}
+        className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 transition hover:bg-slate-50"
       >
         <span
           className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${
@@ -122,8 +122,8 @@ export function UserMenu() {
         >
           {loggedIn ? initialsOf(user.name) : <UserIcon className="h-4 w-4" />}
         </span>
-        <span className="max-w-[7rem] truncate text-[11px] font-medium leading-none text-slate-600">
-          {loggedIn ? user.name.split(/\s+/)[0] : "Account"}
+        <span className="hidden max-w-[7rem] truncate text-xs font-medium leading-none text-slate-600 sm:block">
+          {loggedIn ? user.name.split(/\s+/)[0] : "Sign in"}
         </span>
       </button>
 
@@ -147,6 +147,7 @@ export function UserMenu() {
                   )}
                 </span>
               </div>
+              <Link role="menuitem" href="/dashboard" onClick={() => setOpen(false)} className="block px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50">Manage my marketplace</Link>
               <Link
                 role="menuitem"
                 href="/orders"

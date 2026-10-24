@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { EmptyState } from "@/components/shell";
 import { TxBanner, type TxState } from "@/components/tx-banner";
 import {
   STATUS_STYLE,
@@ -84,12 +85,8 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
 
   if (data.marketplaces.length === 0) {
     return (
-      <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-        You aren&apos;t a member of any rewards period yet. A marketplace operator adds members
-        when they open a period.
-        {data.address && (
-          <p className="mt-2 font-mono text-xs text-slate-400">Your payment account: {data.address}</p>
-        )}
+      <div className="mt-8"><EmptyState icon="leaf" title="Your next chapter of shared good." description="You haven’t been added to a rewards period yet. A marketplace organizer can invite you when they open one." href="/marketplaces" action="Explore your communities" />
+        {data.address && <details className="mt-4 rounded-xl border border-slate-200 p-4 text-xs text-slate-500"><summary className="cursor-pointer">Your payment account details</summary><p className="mt-3 break-all font-mono">{data.address}</p></details>}
       </div>
     );
   }
@@ -141,14 +138,14 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-xs uppercase tracking-wider text-slate-400">
-                          {p.amountUsd === null ? "Projected" : "Your reward"}
+                          {p.amountUsd === null ? "Growing reward" : "Your reward"}
                         </p>
                         <p className="text-xl font-semibold tabular-nums text-emerald-600">
                           {formatAmount(amount)}
                         </p>
                       </div>
                       {status === "active" && (
-                        <span className="text-xs text-slate-400">claimable after close</span>
+                        <span className="text-xs text-slate-400">Available after the period closes</span>
                       )}
                       {status === "ended" && (
                         <button
@@ -168,7 +165,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                       )}
                       {status === "closed" && p.claimed && (
                         <span className="text-xs font-medium text-emerald-700">
-                          ✓ Claimed
+                          ✓ Collected
                           {p.claimTxHash && (
                             <a
                               href={txUrl(p.claimTxHash)}
@@ -176,7 +173,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                               rel="noopener noreferrer"
                               className="ml-2 font-normal text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-700"
                             >
-                              tx ↗
+                              View payment ↗
                             </a>
                           )}
                         </span>
@@ -194,11 +191,11 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                           disabled={busy !== null}
                           className="rounded-full bg-navy-900 px-5 py-2 text-sm font-medium text-white hover:bg-navy-700 disabled:opacity-40"
                         >
-                          {busy === key ? "Claiming…" : "Claim"}
+                          {busy === key ? "Collecting…" : "Collect reward"}
                         </button>
                       )}
                       {status === "closed" && !p.claimed && (p.amountUsd ?? 0) === 0 && (
-                        <span className="text-xs text-slate-400">nothing to claim</span>
+                        <span className="text-xs text-slate-400">No reward this period</span>
                       )}
                     </div>
                   </div>
@@ -208,11 +205,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
           </section>
         );
       })}
-      <p className="text-xs text-slate-400">
-        Amounts, shares and claim status are read from the Soroban contract. Compaki holds your
-        payment account&apos;s key (custodial) and signs the claim for you; the contract only ever
-        pays the member address itself.
-      </p>
+      <details className="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed text-slate-500"><summary className="cursor-pointer font-medium text-slate-700">How your rewards and payment account work</summary><p className="mt-3">Amounts and shares are verified on Stellar. Each period’s rules are fixed when it starts. Compaki manages your payment account and signs collection requests for you; rewards can only be paid to the registered member’s address. Demo rewards have no monetary value.</p></details>
     </div>
   );
 }

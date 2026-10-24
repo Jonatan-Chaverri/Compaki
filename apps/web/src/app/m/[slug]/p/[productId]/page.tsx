@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { AddToCartControls } from "@/components/cart";
 import { ProductVisual } from "@/components/shell";
 import { apiFetch } from "@/lib/api";
-import { formatUsd } from "@/lib/format";
+import { formatUsd, communityFundLabel } from "@/lib/format";
 
 interface ProductPayload {
   product: {
@@ -41,7 +41,7 @@ export default async function ProductPage(props: {
   const inStock = product.stock > 0;
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-12">
+    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-5xl px-6 py-12">
       <Link
         href={`/m/${marketplace.slug}`}
         className="text-sm text-slate-500 transition hover:text-slate-700"
@@ -50,14 +50,15 @@ export default async function ProductPage(props: {
       </Link>
 
       <div className="mt-4 grid gap-8 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm sm:grid-cols-2">
-        <div>
+        <div className="product-detail-visual">
           <ProductVisual imageUrl={product.imageUrl} />
         </div>
         <div className="flex flex-col">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+          <h1 className="text-3xl font-medium tracking-tight text-slate-900">
             {product.name}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">by {product.vendorName}</p>
+          <p className="mt-2 text-sm text-slate-500">Made available by <strong className="font-medium text-slate-700">{product.vendorName}</strong></p>
+          <p className="mt-4 text-sm leading-relaxed text-slate-500">{product.shortDescription}</p>
           <p className="mt-4 text-2xl font-semibold text-slate-900">
             {formatUsd(product.priceUsd)}
           </p>
@@ -92,7 +93,7 @@ export default async function ProductPage(props: {
       {marketplace.regenerativeEnabled && marketplace.splitCommunityBps > 0 && (
         <p className="mt-4 text-center text-xs text-emerald-700">
           ♻ {marketplace.splitCommunityBps / 100}% of this purchase funds{" "}
-          {marketplace.communityFundName ?? "the community fund"}
+          {communityFundLabel(marketplace.communityFundName)}. <Link href={`/m/${marketplace.slug}/community`} className="font-medium underline underline-offset-4">See the community benefits →</Link>
         </p>
       )}
     </main>

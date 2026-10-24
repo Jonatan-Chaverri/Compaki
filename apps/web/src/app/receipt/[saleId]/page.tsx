@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { Icon } from "@/components/icon";
 import { AppHeader } from "@/components/shell";
 import { apiFetch } from "@/lib/api";
 import { formatDateTime, formatUsd } from "@/lib/format";
@@ -82,9 +83,11 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
   return (
     <div className="min-h-screen bg-slate-50/60">
       <AppHeader right={<span className="text-sm text-slate-500">Transparent receipt</span>} />
-      <main className="mx-auto w-full max-w-xl px-4 py-10 sm:px-6">
+      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-4 py-10 sm:px-6">
         <div className="text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+          <span className="empty-icon"><Icon name="leaf" className="h-7 w-7" /></span>
+          <p className="eyebrow mb-3">A purchase with purpose</p>
+          <h1 className="text-3xl font-medium tracking-tight text-slate-900">
             Where your money went
           </h1>
           <p className="mt-1 text-sm text-slate-500">
@@ -158,7 +161,7 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
         <p className="mt-5 text-center text-xs leading-relaxed text-slate-500">
           This payment was settled on the Stellar network in{" "}
           {sale.settleSeconds !== null ? `${sale.settleSeconds} seconds` : "seconds"} and cannot
-          be altered.{" "}
+          be altered. This receipt uses demo funds with no monetary value.{" "}
           <a
             href={verifyUrl}
             target="_blank"

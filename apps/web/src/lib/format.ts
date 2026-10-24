@@ -13,3 +13,9 @@ export function formatDateTime(iso: string): string {
     minute: "2-digit",
   });
 }
+
+/** Translate the legacy system-generated fund label into customer language. */
+export function communityFundLabel(name: string | null): string {
+  if (!name) return "the community";
+  return name === "Community Rewards treasury (on-chain)" ? "community rewards" : name;
+}

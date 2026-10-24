@@ -1,3 +1,8 @@
+import { communityFundLabel } from "@/lib/format";
+import Link from "next/link";
+import { Icon } from "@/components/icon";
+import { MarketArt } from "@/components/market-art";
+import { PageHeading, EmptyState } from "@/components/shell";
 import { notFound } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
@@ -13,6 +18,7 @@ interface StorefrontPayload {
     regenerativeEnabled: boolean;
     splitCommunityBps: number;
     communityFundName: string | null;
+    communityPurpose: string;
   };
   products: StorefrontProduct[];
 }
@@ -30,29 +36,23 @@ export default async function StorefrontPage(props: { params: Promise<{ slug: st
     marketplace.regenerativeEnabled && marketplace.splitCommunityBps > 0;
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-12">
-      <div className="text-center">
-        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-          {marketplace.category}
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
-          {marketplace.name}
-        </h1>
-        {marketplace.description && (
-          <p className="mx-auto mt-3 max-w-xl text-slate-600">{marketplace.description}</p>
-        )}
-        {showRegenerativeBadge && (
-          <p className="mx-auto mt-4 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-            ♻ {marketplace.splitCommunityBps / 100}% of every sale funds{" "}
-            {marketplace.communityFundName ?? "the community fund"}
-          </p>
-        )}
-      </div>
+    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-6 py-12">
+      <Link href="/marketplaces" className="storefront-breadcrumb">← All marketplaces</Link>
+      <section className="storefront-hero">
+        <div>
+          <PageHeading eyebrow={marketplace.category} title={marketplace.name} description={marketplace.description || "Thoughtful products. Independent people. A community worth discovering."} />
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs text-slate-500">{products.length} products · Shop from independent sellers</span>
+            {showRegenerativeBadge && <span className="community-badge"><Icon name="leaf" className="h-3 w-3" />{marketplace.splitCommunityBps / 100}% of every sale supports {communityFundLabel(marketplace.communityFundName)}</span>}
+          </div>
+        </div>
+        <MarketArt variant={/coffee|agri/i.test(marketplace.category) ? "coffee" : /craft/i.test(marketplace.category) ? "craft" : "grow"} />
+      </section>
+
+      {showRegenerativeBadge && <section className="community-teaser"><span className="community-teaser-icon"><Icon name="leaf" className="h-6 w-6" /></span><div><p className="eyebrow">Your purchase makes a difference</p><h2>{marketplace.splitCommunityBps / 100}% of every sale supports this community.</h2><p>{marketplace.communityPurpose || "Find out where contributions go, who receives them, and how this marketplace shares its impact."}</p></div><Link href={`/m/${marketplace.slug}/community`} className="button-secondary button-small">See the community benefits<Icon name="arrow" className="h-4 w-4" /></Link></section>}
 
       {products.length === 0 ? (
-        <div className="mt-12 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
-          No products yet — check back soon.
-        </div>
+        <div className="mt-8"><EmptyState icon="store" title="Something good is on its way." description="The sellers here are getting their shelves ready. Come back soon, or explore another community in the meantime." href="/marketplaces" action="Explore marketplaces" /></div>
       ) : (
         <ProductGrid slug={marketplace.slug} products={products} />
       )}

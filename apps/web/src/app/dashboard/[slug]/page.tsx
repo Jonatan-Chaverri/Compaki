@@ -1,3 +1,4 @@
+import type { CommunityDetails } from "@/lib/community";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -19,6 +20,7 @@ interface DashboardPayload {
   regenerativeEnabled: boolean;
   rewardsEnabled: boolean;
   demoImpersonation: boolean;
+  community: CommunityDetails;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
   operatorAccount: string | null;
   communityAccount: string | null;
@@ -34,15 +36,15 @@ interface DashboardPayload {
   catalog: CatalogRow[];
 }
 
-export default async function OperatorPage(props: { params: Promise<{ slug: string }> }) {
-  const { slug } = await props.params;
+export default async function OperatorPage(props: { params: Promise<{ slug: string }>; searchParams: Promise<{ tab?: string }> }) {
+  const [{ slug }, query] = await Promise.all([props.params, props.searchParams]);
   const res = await apiFetch(`/api/marketplaces/${encodeURIComponent(slug)}/dashboard`);
   if (res.status === 404) notFound();
   if (res.status === 401 || res.status === 403) {
     return (
       <div className="min-h-screen bg-slate-50/60">
         <AppHeader />
-        <main className="mx-auto w-full max-w-xl px-6 py-20 text-center">
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
           <p className="text-3xl">🔐</p>
           <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
             {res.status === 401
@@ -64,15 +66,10 @@ export default async function OperatorPage(props: { params: Promise<{ slug: stri
 
   return (
     <div className="min-h-screen bg-slate-50/60">
-      <AppHeader
-        right={
-          <span className="text-sm text-slate-500">
-            Operator dashboard ·{" "}
-            <span className="font-medium text-slate-700">{data.name}</span>
-          </span>
-        }
-      />
+      <AppHeader />
       <OperatorDashboard
+        community={data.community}
+        initialTab={query.tab === "community" ? "community" : "overview"}
         name={data.name}
         slug={data.slug}
         regenerativeEnabled={data.regenerativeEnabled}

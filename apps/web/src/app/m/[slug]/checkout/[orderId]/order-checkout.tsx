@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { ProductVisual } from "@/components/shell";
+import { ProductVisual, CheckoutSteps } from "@/components/shell";
 import { formatUsd } from "@/lib/format";
 
 const inputClass =
@@ -149,6 +149,7 @@ export function OrderCheckout({
   if (state === "done") {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <CheckoutSteps current="done" />
         <p
           className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-2xl text-emerald-600"
           style={{ animation: "rise-in 0.4s ease-out both" }}
@@ -165,8 +166,7 @@ export function OrderCheckout({
           className="mt-1 text-sm text-slate-600"
           style={{ animation: "rise-in 0.4s ease-out 0.2s both" }}
         >
-          Your {formatUsd(order.totalUsd)} order from {order.marketplace.name} settled
-          on-chain:
+          Your {formatUsd(order.totalUsd)} demo order from {order.marketplace.name} is confirmed. See how each purchase was shared:
         </p>
 
         <ul className="mt-5 space-y-2.5 text-left text-sm">
@@ -222,6 +222,9 @@ export function OrderCheckout({
 
   return (
     <div>
+      <CheckoutSteps current="payment" />
+      <h1 className="mb-2 text-3xl font-medium tracking-tight text-slate-900">One step closer to something good.</h1>
+      <p className="mb-6 text-sm leading-relaxed text-slate-500">Check your order, add delivery details, and try your payment with demo funds.</p>
       <Link
         href={`/m/${order.marketplace.slug}/cart`}
         className="text-sm text-slate-500 transition hover:text-slate-700"
@@ -261,18 +264,21 @@ export function OrderCheckout({
         <Countdown expiresAt={order.expiresAt} onExpire={() => setState("expired")} />
       </div>
 
-      <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <form className="mt-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" onSubmit={(event) => { event.preventDefault(); if (valid && state !== "processing") void submit(); }}>
+        <h2 className="mb-4 text-lg font-medium tracking-tight">Where should your order go?</h2>
         <p className="mb-5 rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
           Buying as <span className="font-medium text-slate-900">{user.name}</span>
           {user.email ? ` (${user.email})` : ""}
         </p>
 
         <div className="mb-5">
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="shipping-address" className="mb-1.5 block text-sm font-medium text-slate-700">
             Shipping address
           </label>
           <input
             type="text"
+            id="shipping-address"
+            autoComplete="street-address"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             placeholder="Street, number, apartment…"
@@ -282,9 +288,11 @@ export function OrderCheckout({
         </div>
         <div className="mb-5 grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">City</label>
+            <label htmlFor="shipping-city" className="mb-1.5 block text-sm font-medium text-slate-700">City</label>
             <input
               type="text"
+              id="shipping-city"
+              autoComplete="address-level2"
               value={city}
               onChange={(e) => setCity(e.target.value)}
               placeholder="San José"
@@ -293,11 +301,13 @@ export function OrderCheckout({
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="shipping-postalCode" className="mb-1.5 block text-sm font-medium text-slate-700">
               Postal code <span className="font-normal text-slate-400">(optional)</span>
             </label>
             <input
               type="text"
+              id="shipping-postalCode"
+              autoComplete="postal-code"
               value={postalCode}
               onChange={(e) => setPostalCode(e.target.value)}
               placeholder="10101"
@@ -307,9 +317,11 @@ export function OrderCheckout({
           </div>
         </div>
         <div className="mb-6">
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Country</label>
+          <label htmlFor="shipping-country" className="mb-1.5 block text-sm font-medium text-slate-700">Country</label>
           <input
             type="text"
+            id="shipping-country"
+            autoComplete="country-name"
             value={country}
             onChange={(e) => setCountry(e.target.value)}
             placeholder="Costa Rica"
@@ -319,13 +331,13 @@ export function OrderCheckout({
         </div>
 
         {error && (
-          <p className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+          <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700">
             {error}
           </p>
         )}
 
         <button
-          onClick={() => void submit()}
+          type="submit"
           disabled={!valid || state === "processing"}
           className="w-full rounded-full bg-navy-900 px-6 py-3.5 text-base font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -335,16 +347,16 @@ export function OrderCheckout({
               Processing payment…
             </span>
           ) : (
-            `Pay ${formatUsd(order.totalUsd)}`
+            `Pay ${formatUsd(order.totalUsd)} with demo funds`
           )}
         </button>
 
         <p className="mt-3 text-center text-xs text-slate-400">
           {state === "processing"
-            ? "Settling on-chain — this can take a few seconds per item."
-            : "🔒 Demo: payment simulated with test funds."}
+            ? "Confirming your order. This can take a few seconds per item."
+            : "Demo funds only. No real money will be charged."}
         </p>
-      </div>
+      </form>
     </div>
   );
 }

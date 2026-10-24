@@ -9,7 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AddToCartControls, useCart } from "@/components/cart";
-import { ProductVisual } from "@/components/shell";
+import { ProductVisual, CheckoutSteps, EmptyState } from "@/components/shell";
 import { formatUsd } from "@/lib/format";
 
 export interface CartProduct {
@@ -69,30 +69,17 @@ export function CartView({
     }
   };
 
-  if (!ready) return null;
+  if (!ready) return <div role="status" className="empty-state">Getting your cart ready…</div>;
 
   if (lines.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
-        <p className="text-3xl">🛒</p>
-        <h1 className="mt-3 text-lg font-semibold tracking-tight text-slate-900">
-          Your cart is empty
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Add products from {marketplaceName} and they&apos;ll show up here.
-        </p>
-        <Link
-          href={`/m/${slug}`}
-          className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-2.5 text-sm font-medium text-white transition hover:bg-navy-700"
-        >
-          Browse products
-        </Link>
-      </div>
+      <EmptyState title="A little room for something good." description={`Your cart is empty. Discover what the people at ${marketplaceName} have made for you.`} href={`/m/${slug}`} action="Find your next favorite" />
     );
   }
 
   return (
     <div>
+      <CheckoutSteps current="cart" />
       <Link
         href={`/m/${slug}`}
         className="text-sm text-slate-500 transition hover:text-slate-700"
@@ -108,7 +95,7 @@ export function CartView({
         {lines.map(({ product, quantity }) => (
           <li
             key={product.id}
-            className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            className="cart-line flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
           >
             <div className="w-16 shrink-0">
               <ProductVisual imageUrl={product.imageUrl} size="sm" />
@@ -130,10 +117,10 @@ export function CartView({
                 Remove
               </button>
             </div>
-            <div className="w-36 shrink-0">
+            <div className="cart-quantity w-36 shrink-0">
               <AddToCartControls productId={product.id} stock={product.stock} />
             </div>
-            <p className="w-20 shrink-0 text-right font-semibold tabular-nums text-slate-900">
+            <p className="cart-total w-20 shrink-0 text-right font-semibold tabular-nums text-slate-900">
               {formatUsd(product.priceUsd * quantity)}
             </p>
           </li>
@@ -148,7 +135,7 @@ export function CartView({
       </div>
 
       {error && (
-        <p className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700">
+        <p role="alert" className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700">
           {error}
         </p>
       )}

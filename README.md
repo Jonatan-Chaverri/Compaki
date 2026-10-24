@@ -149,6 +149,48 @@ is exactly what the network would execute. Nothing is submitted. Each check
 also runs a **positive control** through the same harness, so a rejection
 can't be an artefact of the simulation.
 
+## Public community benefits and transparency
+
+Community-enabled marketplaces now publish a dedicated page at
+`/m/:slug/community`, linked from their storefront. On creation, organizers must
+explain their purpose, intended beneficiaries, and how and when contributions
+are used or shared. An optional USD fundraising target shows progress against
+recorded completed sales. Existing organizers can add or edit these fields in
+**Dashboard → Community story**. The metadata is public and does not change the
+contract's split, period rules or beneficiary wallets.
+
+The page shows:
+
+- Revenue percentages, cumulative recorded sales and recipient earnings, full
+  public recipient wallets, and explorer links; no emails, buyer information or
+  private keys are included.
+- Classic community funds: cumulative recorded community contributions and the
+  live fund-account balance, explicitly separated. Further use or redistribution
+  is organizer-managed and is not verified by Compaki.
+- Community Rewards: current-contract contribution, held and collected totals;
+  the most recent period and recent history; end dates, member names, full
+  recipient addresses, fixed shares, projected/final rewards and payment links.
+  A period must end and be closed before members can collect individually;
+  its end time is not an automatic payout date.
+- Clear missing-information and verification-error states. A failed balance
+  lookup is never substituted with zero. Fund totals cover the current contract;
+  historical recorded sales can include earlier deployments, and are labeled
+  separately. Fundraising targets do not trigger payouts.
+
+New API routes: `GET /api/marketplaces/:slug/community` (public), and
+`PATCH /api/marketplaces/:slug/community` (organizer only). The public view refreshes
+every 30 seconds and indicates when it was last read. Rewards history currently
+includes up to 12 periods; current-contract totals include every period.
+
+Apply the additive database migration before deploying the updated API:
+
+```bash
+cd apps/api
+npm run prisma:migrate:deploy
+npm run prisma:generate
+npm run test:community
+```
+
 ## Guarantees and limitations
 
 **Enforced on-chain by the contract:**

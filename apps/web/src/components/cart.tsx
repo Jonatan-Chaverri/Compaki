@@ -140,7 +140,7 @@ export function AddToCartControls({
 }) {
   const { items, add, remove } = useCart();
   const quantity = items[productId] ?? 0;
-  const heightClass = size === "lg" ? "h-12 text-base" : "h-10 text-sm";
+  const heightClass = size === "lg" ? "h-12 text-base" : "h-11 text-sm";
 
   if (quantity === 0) {
     return (
@@ -168,8 +168,8 @@ export function AddToCartControls({
       >
         −
       </button>
-      <span className="flex flex-1 items-center justify-center font-semibold tabular-nums text-slate-900">
-        {quantity} in cart
+      <span aria-label={`${quantity} in cart`} role="status" className="flex flex-1 items-center justify-center whitespace-nowrap font-semibold tabular-nums text-slate-900">
+        {quantity}
       </span>
       <button
         onClick={() => add(productId, stock)}

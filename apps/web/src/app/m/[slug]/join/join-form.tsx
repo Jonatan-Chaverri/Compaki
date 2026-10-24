@@ -45,7 +45,7 @@ export function JoinForm({
           You&apos;re in — add your first product
         </h2>
         <p className="mt-2 text-sm text-slate-600">
-          Your payment account is ready. Money from every sale lands in it within seconds.
+          Your payment account is ready. Your share of each demo sale will appear in your balance.
         </p>
         <Link
           href={`/vendor/${slug}`}
@@ -90,10 +90,11 @@ export function JoinForm({
         {user.email && <span className="text-slate-400"> · {user.email}</span>}
       </p>
       <div className="mb-6">
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">
+        <label htmlFor="seller-story" className="mb-1.5 block text-sm font-medium text-slate-700">
           What do you sell?
         </label>
         <input
+          id="seller-story"
           type="text"
           value={sells}
           onChange={(e) => setSells(e.target.value)}
@@ -125,7 +126,7 @@ export function JoinForm({
         )}
       </button>
       <p className="mt-3 text-center text-xs text-slate-400">
-        We create your payment account automatically — no bank details needed to start.
+        We set up your demo payment account for you. No bank details or crypto setup needed.
       </p>
     </div>
   );

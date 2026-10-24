@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Logo } from "@/components/shell";
+import { CommunityFields } from "@/components/community-fields";
+import { emptyCommunityDraft, communityDraftValid, communitySubmission } from "@/lib/community";
+import { AppHeader } from "@/components/shell";
+import { MarketArt } from "@/components/market-art";
 import { slugify } from "@/lib/slug";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -32,11 +35,11 @@ interface LaunchResult {
 
 const LAUNCH_STEPS: { id: LaunchStepId; label: string }[] = [
   { id: "accounts", label: "Creating your payment accounts..." },
-  { id: "deploy", label: "Deploying your marketplace..." },
+  { id: "deploy", label: "Preparing your marketplace..." },
   { id: "store", label: "Setting up your store..." },
 ];
 
-const WIZARD_STEPS = ["About", "Revenue split", "Launch"];
+const WIZARD_STEPS = ["Your community", "Share the good", "Open your doors"];
 
 // ─── Wizard ──────────────────────────────────────────────────────────────
 //
@@ -63,6 +66,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
   const [splits, setSplits] = useState<Splits>({ vendor: 90, operator: 10, community: 0 });
   const [regenerative, setRegenerative] = useState(false);
   const [rewards, setRewards] = useState(false);
+  const [community, setCommunity] = useState(emptyCommunityDraft);
 
   // Step 3 (launch)
   const [launchStates, setLaunchStates] = useState<Record<LaunchStepId, LaunchStepState>>({
@@ -141,6 +145,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           communityBps: splits.community * 100,
           regenerativeEnabled: regenerative,
           rewardsEnabled: regenerative && rewards,
+          ...communitySubmission(community),
         }),
       });
 
@@ -182,7 +187,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
     } finally {
       launchInFlight.current = false;
     }
-  }, [name, slug, description, category, splits, regenerative, rewards]);
+  }, [name, slug, description, category, splits, regenerative, rewards, community]);
 
   const startLaunch = () => {
     setStep(2);
@@ -191,30 +196,21 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
 
   // ── Per-step validity ──
   const step1Valid =
-    name.trim().length >= 2 && (slugStatus === "available" || slugStatus === "checking");
+    name.trim().length >= 2 && (slugStatus === "available");
 
   return (
     <div className="min-h-screen bg-slate-50/60">
-      <header className="sticky top-0 z-40 border-b border-slate-100 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-6">
-          <Link href="/">
-            <Logo />
-          </Link>
-          <span className="text-sm text-slate-500">
-            Create your marketplace · signed in as{" "}
-            <span className="font-medium text-slate-700">{operatorName}</span>
-          </span>
-        </div>
-      </header>
-
-      <main className="mx-auto w-full max-w-3xl px-6 py-10">
+      <AppHeader />
+      <main id="main-content" tabIndex={-1} className="wizard-layout">
+        <aside className="wizard-aside"><p className="eyebrow">Bring your people together</p><h2>Big things start with a small community.</h2><p>Hi {operatorName.split(" ")[0]}, let’s make a home for your sellers and the things that make your community special.</p><MarketArt variant="grow" /><p><strong className="text-slate-700">A simple start.</strong><br />Give it a name. Choose how sales are shared. Then invite your first sellers.</p></aside>
+        <div>
         <ProgressBar current={step} />
 
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
           {step === 0 && (
             <StepCard
-              title="About your marketplace"
-              subtitle="What are you building? You can change all of this later."
+              title="Tell your community’s story"
+              subtitle="Give your marketplace a name and help people know what they’ll find."
             >
               <Field label="Marketplace name">
                 <input
@@ -281,18 +277,18 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
 
           {step === 1 && (
             <StepCard
-              title="Revenue split"
-              subtitle="Every sale splits automatically, the moment it happens."
+              title="Make every sale work for everyone"
+              subtitle="Choose what sellers keep, your marketplace fee, and an optional community contribution. The total always adds up to 100%."
             >
               <SplitSlider
-                label="Vendors"
+                label="Sellers"
                 hint="what the seller keeps"
                 value={splits.vendor}
                 onChange={(v) => setSplit("vendor", v)}
                 color="bg-navy-900"
               />
               <SplitSlider
-                label="You (operator)"
+                label="Your marketplace"
                 hint="your marketplace fee"
                 value={splits.operator}
                 onChange={(v) => setSplit("operator", v)}
@@ -300,7 +296,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
               />
               <SplitSlider
                 label="Community fund"
-                hint={regenerative ? "goes to your community fund" : "enable regenerative mode below"}
+                hint={regenerative ? "goes to your community fund" : "turn on community contributions below"}
                 value={splits.community}
                 onChange={(v) => setSplit("community", v)}
                 color="bg-emerald-500"
@@ -320,7 +316,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 <label className="flex cursor-pointer items-center justify-between">
                   <span>
                     <span className="text-sm font-medium text-slate-900">
-                      Enable regenerative mode
+                      Give a share back to your community
                     </span>
                     {regenerative && (
                       <span className="mt-1 block text-xs text-slate-600">
@@ -339,13 +335,10 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                   <label className="mt-4 flex cursor-pointer items-start justify-between gap-4 border-t border-emerald-100 pt-4">
                     <span>
                       <span className="text-sm font-medium text-slate-900">
-                        Community Rewards (on-chain treasury)
+                        Share community rewards with members
                       </span>
                       <span className="mt-1 block text-xs text-slate-600">
-                        The community share is held by the smart contract and split between
-                        members you register per period, with shares that can&apos;t be changed
-                        once a period starts. Sales pause while no period is open. This can&apos;t
-                        be changed after launch.
+                        Save the community contribution in a protected fund and share it with members you choose. Each period has fixed shares. You must open a rewards period before accepting sales. This choice is permanent after launch.
                       </span>
                     </span>
                     <input
@@ -357,17 +350,19 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                   </label>
                 )}
               </div>
+              {regenerative && <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/50 p-5"><CommunityFields value={community} onChange={setCommunity} rewardsEnabled={rewards} /></div>}
               {regenerative && rewards && splits.community === 0 && (
                 <p className="mt-2 text-xs text-amber-700">
                   Community Rewards needs a community share above 0%.
                 </p>
               )}
 
+              <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-medium text-slate-700">For every $100 in sales</p><div className="mt-3 flex flex-wrap justify-between gap-3 text-xs text-slate-500"><span>Sellers <strong className="text-slate-900">${splits.vendor.toFixed(2)}</strong></span><span>Your marketplace <strong className="text-slate-900">${splits.operator.toFixed(2)}</strong></span><span>Community <strong className="text-slate-900">${splits.community.toFixed(2)}</strong></span></div><p className="mt-3 text-[11px] text-slate-500">Launching <strong>{name}</strong> · These percentages are fixed when you launch.</p></div>
               <WizardNav
                 onBack={() => setStep(0)}
                 onNext={startLaunch}
                 nextLabel="Launch my marketplace"
-                nextDisabled={regenerative && rewards && splits.community === 0}
+                nextDisabled={(regenerative && rewards && splits.community === 0) || (splits.community > 0 && !communityDraftValid(community))}
               />
             </StepCard>
           )}
@@ -375,7 +370,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           {step === 2 && (
             <StepCard
               title={result ? "" : "Launching your marketplace"}
-              subtitle={result ? "" : "This takes about half a minute — real payment rails are being set up."}
+              subtitle={result ? "" : "This takes about half a minute. We’re preparing your demo store and payment accounts."}
             >
               {!result && (
                 <div className="space-y-4 py-2">
@@ -434,6 +429,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
             </StepCard>
           )}
         </div>
+        </div>
       </main>
     </div>
   );
@@ -448,7 +444,7 @@ function ProgressBar({ current }: { current: number }) {
   return (
     <ol className="flex items-center gap-2">
       {WIZARD_STEPS.map((label, i) => (
-        <li key={label} className="flex flex-1 flex-col gap-1.5">
+        <li key={label} aria-current={i === current ? "step" : undefined} className="flex flex-1 flex-col gap-2">
           <span
             className={`h-1.5 rounded-full transition-colors ${
               i <= current ? "bg-navy-900" : "bg-slate-200"
@@ -457,7 +453,7 @@ function ProgressBar({ current }: { current: number }) {
           <span
             className={`text-xs font-medium ${i <= current ? "text-slate-900" : "text-slate-400"}`}
           >
-            {label}
+            {i + 1}. {label}
           </span>
         </li>
       ))}
@@ -491,8 +487,7 @@ function StepCard({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-5">
-      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
-      {children}
+      <label className="block"><span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>{children}</label>
     </div>
   );
 }
@@ -583,6 +578,7 @@ function SplitSlider({
       </div>
       <input
         type="range"
+        aria-label={label}
         min={0}
         max={100}
         value={value}

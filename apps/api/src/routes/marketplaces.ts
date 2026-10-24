@@ -10,7 +10,8 @@
 import { Hono } from "hono";
 
 import { prisma, parseSplitSnapshot } from "@/lib/db";
-import { boundOnChainId } from "@/lib/rewards";
+import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails } from "@/lib/community";
+import { boundOnChainId, loadRewardsView, PERIOD_HISTORY_LIMIT } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
 import { getSessionUser } from "@/lib/session";
 import {
@@ -18,6 +19,7 @@ import {
   createMarketplace,
   createRewardsMarketplace,
   decryptSecret,
+  getUsdBalance,
   registerVendor,
   stellarConfig,
   stellarExpertTxUrl,
@@ -28,7 +30,7 @@ export const marketplaces = new Hono();
 
 const CATEGORIES = ["Coffee & agriculture", "Crafts", "Services", "Other"] as const;
 
-interface LaunchInput {
+interface LaunchInput extends CommunityDetails {
   name: string;
   slug: string;
   description: string;
@@ -82,6 +84,9 @@ function parseInput(body: unknown): LaunchInput | string {
     return "Community Rewards needs a community share above 0%";
   }
 
+  const community = parseCommunityDetails(b, communityBps > 0);
+  if (typeof community === "string") return community;
+
   return {
     name,
     slug,
@@ -92,8 +97,88 @@ function parseInput(body: unknown): LaunchInput | string {
     communityBps,
     regenerativeEnabled: Boolean(b.regenerativeEnabled) || communityBps > 0,
     rewardsEnabled,
+    ...community,
   };
 }
+
+function communityDetailsOf(m: CommunityDetails): CommunityDetails {
+  return {
+    communityPurpose: m.communityPurpose,
+    communityBeneficiaries: m.communityBeneficiaries,
+    communityDistribution: m.communityDistribution,
+    communityGoalUsd: m.communityGoalUsd,
+  };
+}
+
+// Public transparency view: no private emails, keys, buyer or shipping details.
+marketplaces.get("/:slug/community", async (c) => {
+  const marketplace = await prisma.marketplace.findUnique({
+    where: { slug: c.req.param("slug") },
+    include: {
+      operator: { select: { name: true, stellarPublicKey: true } },
+      communityFund: { select: { name: true, stellarPublicKey: true } },
+      vendors: { include: { user: { select: { name: true, stellarPublicKey: true } } } },
+    },
+  });
+  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+  const [user, sales] = await Promise.all([
+    getSessionUser(c),
+    prisma.sale.findMany({
+      where: { product: { marketplaceId: marketplace.id } },
+      select: { amountUsd: true, splitSnapshot: true },
+    }),
+  ]);
+  let rewards: Awaited<ReturnType<typeof loadRewardsView>> | null = null;
+  let communityBalanceUsd: number | null = null;
+  let verificationError: string | null = null;
+  try {
+    if (marketplace.rewardsEnabled) {
+      rewards = await loadRewardsView(marketplace);
+      if (!rewards.bound) verificationError = "This marketplace’s rewards fund is not connected yet. Verified amounts and recipients are unavailable.";
+    } else if (marketplace.splitCommunityBps > 0 && marketplace.communityFund?.stellarPublicKey) {
+      communityBalanceUsd = await getUsdBalance(marketplace.communityFund.stellarPublicKey);
+    }
+  } catch (error) {
+    console.error("[community] verification unavailable:", error);
+    verificationError = "Live fund information is temporarily unavailable. We are not showing an unverified balance or payout schedule.";
+  }
+  return c.json({
+    marketplace: {
+      name: marketplace.name, slug: marketplace.slug,
+      regenerativeEnabled: marketplace.regenerativeEnabled,
+      rewardsEnabled: marketplace.rewardsEnabled,
+      ...communityDetailsOf(marketplace),
+      communityDetailsUpdatedAt: marketplace.communityDetailsUpdatedAt?.toISOString() ?? null,
+      splits: { vendorBps: marketplace.splitVendorBps, operatorBps: marketplace.splitOperatorBps, communityBps: marketplace.splitCommunityBps },
+      operator: { name: marketplace.operator.name, address: marketplace.operator.stellarPublicKey },
+      communityFund: marketplace.communityFund ? { name: marketplace.communityFund.name, address: marketplace.communityFund.stellarPublicKey } : null,
+      sellers: marketplace.vendors.map(v => ({ name: v.user.name, address: v.user.stellarPublicKey })),
+    },
+    canManage: user?.id === marketplace.operatorId,
+    sales: summarizeCommunitySales(sales),
+    communityBalanceUsd,
+    rewards,
+    verificationError,
+    verifiedAt: new Date().toISOString(),
+    historyLimit: PERIOD_HISTORY_LIMIT,
+  });
+});
+
+// Editing the public narrative never edits contract splits or beneficiaries.
+marketplaces.patch("/:slug/community", async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Sign in as the marketplace organizer" }, 401);
+  const marketplace = await prisma.marketplace.findUnique({ where: { slug: c.req.param("slug") } });
+  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+  if (marketplace.operatorId !== user.id) return c.json({ error: "Only this marketplace’s organizer can edit its community details" }, 403);
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "Invalid payload" }, 400);
+  const details = parseCommunityDetails(body as Record<string, unknown>, marketplace.splitCommunityBps > 0);
+  if (typeof details === "string") return c.json({ error: details }, 400);
+  const updated = await prisma.marketplace.update({ where: { id: marketplace.id }, data: { ...details, communityDetailsUpdatedAt: new Date() } });
+  return c.json({ community: communityDetailsOf(updated), updatedAt: updated.communityDetailsUpdatedAt?.toISOString() });
+});
 
 // ── GET /check-slug ────────────────────────────────────────────────────────
 
@@ -225,6 +310,8 @@ marketplaces.post("/", async (c) => {
             name: input.name,
             description: input.description,
             category: input.category,
+            ...communityDetailsOf(input),
+            communityDetailsUpdatedAt: new Date(),
             ...(existing?.contractMarketplaceId ? {} : onChainFields),
           },
           create: {
@@ -232,6 +319,8 @@ marketplaces.post("/", async (c) => {
             slug: input.slug,
             description: input.description,
             category: input.category,
+            ...communityDetailsOf(input),
+            communityDetailsUpdatedAt: new Date(),
             ...onChainFields,
             operatorId: operatorUser.id,
           },
@@ -380,6 +469,7 @@ marketplaces.get("/:slug/storefront", async (c) => {
       rewardsEnabled: marketplace.rewardsEnabled,
       splitCommunityBps: marketplace.splitCommunityBps,
       communityFundName: communityFundLabel(marketplace),
+      ...communityDetailsOf(marketplace),
     },
     products: marketplace.products.map((p) => ({
       id: p.id,
@@ -451,6 +541,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
     regenerativeEnabled: marketplace.regenerativeEnabled,
     rewardsEnabled: marketplace.rewardsEnabled,
     demoImpersonation: demoImpersonationEnabled(),
+    community: communityDetailsOf(marketplace),
     splits: {
       vendorBps: marketplace.splitVendorBps,
       operatorBps: marketplace.splitOperatorBps,

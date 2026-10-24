@@ -23,7 +23,7 @@ export default async function CartPage(props: { params: Promise<{ slug: string }
   const { user } = (await meRes.json()) as { user: { id: string } | null };
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-6 py-12">
+    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-2xl px-6 py-12">
       <CartView
         marketplaceName={marketplace.name}
         products={products}

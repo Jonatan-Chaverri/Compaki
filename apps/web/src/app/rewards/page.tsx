@@ -1,9 +1,8 @@
 // "My rewards" — Community Rewards periods the session user is a member of,
 // across marketplaces, with on-chain amounts and a claim button.
 
-import Link from "next/link";
 
-import { AppHeader } from "@/components/shell";
+import { AppHeader, PageHeading, EmptyState } from "@/components/shell";
 import { apiFetch } from "@/lib/api";
 
 import { MemberRewards, type MemberRewardsPayload } from "./member-rewards";
@@ -17,17 +16,8 @@ export default async function RewardsPage() {
     return (
       <div className="min-h-screen bg-slate-50/60">
         <AppHeader />
-        <main className="mx-auto w-full max-w-xl px-6 py-20 text-center">
-          <p className="text-3xl">🔐</p>
-          <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
-            Sign in to see your community rewards
-          </h1>
-          <Link
-            href="/login?next=/rewards"
-            className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
-          >
-            Sign in
-          </Link>
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
+          <EmptyState icon="leaf" title="Good things grow together." description="If a marketplace has invited you to share in community rewards, sign in to see your share and collect available rewards." href="/login?next=/rewards" action="Sign in to see rewards" />
         </main>
       </div>
     );
@@ -37,12 +27,9 @@ export default async function RewardsPage() {
   return (
     <div className="min-h-screen bg-slate-50/60">
       <AppHeader />
-      <main className="mx-auto w-full max-w-3xl px-6 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">My community rewards</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Marketplaces you belong to set aside part of every sale in an on-chain treasury. When a
-          period closes, your share is fixed by the contract and you can claim it.
-        </p>
+      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-3xl px-6 py-12">
+        <PageHeading eyebrow="Your share of the good" title="Community rewards." description="Communities you belong to can set aside a share of each sale for their members. See what’s growing and collect your rewards when a period closes." />
+        <div className="account-intro"><span>01 · Sales grow the fund</span><span>→</span><span>02 · The period closes</span><span>→</span><span>03 · Collect your share</span></div>
         {res.ok ? (
           <MemberRewards initial={body} />
         ) : (

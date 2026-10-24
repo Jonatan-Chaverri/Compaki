@@ -18,7 +18,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:format": "prisma format"
+    "prisma:format": "prisma format",
+    "test:community": "node --import tsx --test src/lib/community.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

@@ -106,9 +106,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
   if (!rewards.bound) {
     return (
       <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-        This marketplace isn&apos;t registered in the configured contract yet. An administrator
-        must run <code className="font-mono">npm run marketplaces:rebind</code> after the contract
-        redeploy.
+        Community rewards are still being set up for this marketplace. Contact your administrator to finish connecting the fund before accepting purchases.
       </section>
     );
   }
@@ -129,9 +127,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
           <span className="font-medium text-slate-900">
             {percent(rewards.communityBps)} of every sale
           </span>{" "}
-          is held by the Compaki smart contract — not by you or Compaki — and paid out to the
-          members of each period according to shares fixed before the period starts. No one can
-          withdraw it or change a running period&apos;s rules.
+          goes into a protected community fund. Choose the members and their shares before each period begins. Once it starts, no one can redirect the fund or change those shares.
         </p>
         <p className="mt-2 text-xs text-slate-500">
           Contract{" "}
@@ -148,9 +144,9 @@ export function RewardsPanel({ slug }: { slug: string }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-4">
-        <Stat label="Held in treasury" value={formatAmount(rewards.treasury?.heldUsd ?? 0)} accent />
-        <Stat label="Contributed (all time)" value={formatAmount(rewards.treasury?.contributedUsd ?? 0)} />
-        <Stat label="Claimed by members" value={formatAmount(rewards.treasury?.claimedUsd ?? 0)} />
+        <Stat label="In the community fund" value={formatAmount(rewards.treasury?.heldUsd ?? 0)} accent />
+        <Stat label="Total contributed" value={formatAmount(rewards.treasury?.contributedUsd ?? 0)} />
+        <Stat label="Collected by members" value={formatAmount(rewards.treasury?.claimedUsd ?? 0)} />
         <Stat
           label="Current period"
           value={current ? `#${current.periodId}` : "None"}
@@ -184,7 +180,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
                 }
                 className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700 disabled:opacity-40"
               >
-                Close period &amp; fix rewards
+                Close period &amp; release rewards
               </button>
             ) : null
           }
@@ -248,11 +244,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
         </div>
       )}
 
-      <p className="pt-2 text-xs text-slate-400">
-        On-chain (read from the contract on every refresh): treasury, periods, members, shares,
-        rewards and claim status. Off-chain (Compaki database): member names, transaction links
-        and which sale fed which period.
-      </p>
+      <details className="pt-2 text-xs leading-relaxed text-slate-500"><summary className="cursor-pointer">How these numbers are verified</summary><p className="mt-2">Fund balances, shares and rewards are read from Stellar on every refresh. Compaki stores member names and payment links separately. Demo funds have no monetary value.</p></details>
     </section>
   );
 }
@@ -331,7 +323,7 @@ function PeriodCard({
         </div>
       </div>
 
-      <table className="mt-4 w-full text-sm">
+      <div className="scroll-table"><table className="mt-4 w-full text-sm">
         <thead>
           <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
             <th className="py-2 font-medium">Member</th>
@@ -369,7 +361,7 @@ function PeriodCard({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
       {period.contributions.length > 0 && (
         <details className="mt-3 text-xs text-slate-500">
@@ -452,8 +444,7 @@ function OpenPeriodForm({
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <p className="font-medium text-slate-900">Open a new rewards period</p>
       <p className="mt-0.5 text-sm text-slate-500">
-        Members and shares are written to the contract and frozen for the whole period. Up to 20
-        members; use a Compaki account email or any Stellar address (G…).
+        Choose up to 20 members and how they share the fund. Add each member’s Compaki email, or their Stellar account address. These shares stay fixed until the period ends.
       </p>
       {previous && (
         <button
@@ -478,12 +469,14 @@ function OpenPeriodForm({
             <input
               value={row.who}
               onChange={(e) => update(i, { who: e.target.value })}
-              placeholder="member@example.com or G…"
+              placeholder="Member’s email or Stellar address"
+              aria-label={`Member ${i + 1} email or account address`}
               className={inputClass}
               disabled={disabled}
             />
             <div className="relative w-28 shrink-0">
               <input
+                aria-label={`Member ${i + 1} share percentage`}
                 value={row.percent}
                 onChange={(e) => update(i, { percent: e.target.value })}
                 inputMode="decimal"
@@ -529,7 +522,7 @@ function OpenPeriodForm({
               className={`${inputClass} w-24 text-right`}
               disabled={disabled}
             />
-            <span className="text-sm text-slate-500">minutes (ledger time)</span>
+            <span className="text-sm text-slate-500">minutes (network time)</span>
           </span>
         </label>
         <button
@@ -537,7 +530,7 @@ function OpenPeriodForm({
           disabled={!valid || disabled}
           className="rounded-full bg-navy-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Commit rules &amp; open period
+          Confirm shares &amp; open period
         </button>
       </div>
       {formError && <p className="mt-2 text-xs text-red-600">{formError}</p>}
@@ -604,8 +597,8 @@ function GuaranteeChecks({ slug }: { slug: string }) {
   ];
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="font-medium text-slate-900">Try to break the rules</p>
+    <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <summary className="cursor-pointer font-medium text-slate-900">How is the community fund protected?</summary>
       <p className="mt-0.5 text-sm text-slate-500">
         Each check evaluates the action with your operator signature against the live contract,
         exactly as the network would. Nothing is submitted.
@@ -642,12 +635,12 @@ function GuaranteeChecks({ slug }: { slug: string }) {
                 disabled={r.state === "running"}
                 className="shrink-0 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40"
               >
-                {r.state === "running" ? "Checking…" : "Try it"}
+                {r.state === "running" ? "Checking…" : "Check protection"}
               </button>
             </div>
           );
         })}
       </div>
-    </div>
+    </details>
   );
 }

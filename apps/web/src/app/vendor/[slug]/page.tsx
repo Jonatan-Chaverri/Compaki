@@ -31,7 +31,7 @@ export default async function VendorPage(props: { params: Promise<{ slug: string
     return (
       <div className="min-h-screen bg-slate-50/60">
         <AppHeader />
-        <main className="mx-auto w-full max-w-xl px-6 py-20 text-center">
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
           <h1 className="text-xl font-semibold text-slate-900">
             You&apos;re not a vendor here (yet)
           </h1>
@@ -52,14 +52,7 @@ export default async function VendorPage(props: { params: Promise<{ slug: string
 
   return (
     <div className="min-h-screen bg-slate-50/60">
-      <AppHeader
-        right={
-          <span className="text-sm text-slate-500">
-            {data.vendor.name} · vendor at{" "}
-            <span className="font-medium text-slate-700">{data.marketplace.name}</span>
-          </span>
-        }
-      />
+      <AppHeader />
       <VendorDashboard
         slug={data.marketplace.slug}
         marketplaceName={data.marketplace.name}

@@ -1,5 +1,10 @@
 "use client";
 
+import { CommunityEditor } from "@/components/community-editor";
+import type { CommunityDetails } from "@/lib/community";
+import Link from "next/link";
+import { Icon } from "@/components/icon";
+import { PageHeading } from "@/components/shell";
 import { useState } from "react";
 
 import { LiveBalance } from "@/components/live-balance";
@@ -38,9 +43,11 @@ export interface CatalogRow {
   vendorName: string;
 }
 
-type Tab = "overview" | "rewards" | "vendors" | "products";
+type Tab = "overview" | "rewards" | "vendors" | "products" | "community";
 
 export function OperatorDashboard({
+  community,
+  initialTab = "overview",
   name,
   slug,
   regenerativeEnabled,
@@ -54,6 +61,8 @@ export function OperatorDashboard({
   vendors,
   catalog,
 }: {
+  community: CommunityDetails;
+  initialTab?: "overview" | "community";
   name: string;
   slug: string;
   regenerativeEnabled: boolean;
@@ -73,66 +82,42 @@ export function OperatorDashboard({
   vendors: VendorRow[];
   catalog: CatalogRow[];
 }) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(initialTab === "community" && splits.communityBps > 0 ? "community" : "overview");
   const tabs: Tab[] = rewardsEnabled
     ? ["overview", "rewards", "vendors", "products"]
     : ["overview", "vendors", "products"];
+  if (splits.communityBps > 0) tabs.push("community");
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-6 py-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{name}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Splits {splits.vendorBps / 100}% vendors · {splits.operatorBps / 100}% you ·{" "}
-            {splits.communityBps / 100}% community
-            {regenerativeEnabled && (
-              <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                regenerative
-              </span>
-            )}
-            {rewardsEnabled && (
-              <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                community rewards
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition ${
-                tab === t ? "bg-navy-900 text-white" : "text-slate-500 hover:bg-slate-100"
-              }`}
-            >
-              {t === "rewards" ? "Community rewards" : t}
-            </button>
-          ))}
-        </div>
+    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-6 py-8">
+      <PageHeading eyebrow="Your marketplace at a glance" title={name} description="A home for your sellers, your sales, and the good you’re growing together.">
+        <Link href={`/m/${slug}`} className="button-secondary button-small">View storefront<Icon name="arrow" className="h-4 w-4" /></Link>
+      </PageHeading>
+      <div className="dashboard-tabs" aria-label="Marketplace sections">
+        {tabs.map(t => <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium capitalize text-slate-500"><Icon name={t === "overview" ? "grid" : (t === "rewards" || t === "community") ? "leaf" : t === "vendors" ? "people" : "bag"} className="h-4 w-4" />{t === "rewards" ? "Community rewards" : t === "vendors" ? "Sellers" : t === "community" ? "Community story" : t}</button>)}
       </div>
+      {tab === "overview" && <div className="account-intro"><Icon name="leaf" className="h-5 w-5 shrink-0" /><span>Every sale supports your people: <strong>{splits.vendorBps / 100}% to sellers</strong> · {splits.operatorBps / 100}% to your marketplace · {splits.communityBps / 100}% to the community.{regenerativeEnabled && " Community contributions are enabled."}</span></div>}
 
       {tab === "overview" && (
         <>
           <div className="mt-6 grid gap-4 sm:grid-cols-4">
             <StatCard label="Total sales" value={String(stats.totalSales)} />
-            <StatCard label="Gross volume" value={formatUsd(stats.grossVolume)} />
+            <StatCard label="Total order value" value={formatUsd(stats.grossVolume)} />
             {operatorAccount && (
-              <LiveBalance account={operatorAccount} label="Your balance (live)" />
+              <LiveBalance account={operatorAccount} label="Your demo balance" />
             )}
             {communityAccount && (
-              <LiveBalance account={communityAccount} label="Community fund (live)" accent />
+              <LiveBalance account={communityAccount} label="Community demo balance" accent />
             )}
           </div>
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="dashboard-summary">
             <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-              Revenue by recipient
+              Good shared with every sale
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <RevenueRow label="Vendors" amount={stats.vendorRevenue} dot="bg-navy-900" />
-              <RevenueRow label="You (operator)" amount={stats.operatorRevenue} dot="bg-slate-400" />
+              <RevenueRow label="Your marketplace" amount={stats.operatorRevenue} dot="bg-slate-400" />
               <RevenueRow
                 label={rewardsEnabled ? "Community rewards" : "Community fund"}
                 amount={stats.communityRevenue}
@@ -150,7 +135,7 @@ export function OperatorDashboard({
                 No sales yet — share your storefront to get going.
               </div>
             ) : (
-              <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="scroll-table mt-3 rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
@@ -177,7 +162,7 @@ export function OperatorDashboard({
                             rel="noopener noreferrer"
                             className="text-xs text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-700"
                           >
-                            verify ↗
+                            View payment ↗
                           </a>
                         </td>
                       </tr>
@@ -191,6 +176,7 @@ export function OperatorDashboard({
       )}
 
       {tab === "rewards" && <RewardsPanel slug={slug} />}
+      {tab === "community" && <CommunityEditor slug={slug} initial={community} rewardsEnabled={rewardsEnabled} />}
 
       {tab === "vendors" && (
         <section className="mt-6">
@@ -223,7 +209,7 @@ export function OperatorDashboard({
                         rel="noopener noreferrer"
                         className="text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-700"
                       >
-                        registered on-chain ↗
+                        View registration ↗
                       </a>
                     )}
                     {demoImpersonation && (
@@ -296,7 +282,8 @@ function RevenueRow({ label, amount, dot }: { label: string; amount: number; dot
 
 function InviteLink({ slug }: { slug: string }) {
   const [copied, setCopied] = useState(false);
-  const url = `compaki.app/m/${slug}/join`;
+  const [copyError, setCopyError] = useState(false);
+  const url = `/m/${slug}/join`;
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div>
@@ -305,19 +292,22 @@ function InviteLink({ slug }: { slug: string }) {
           Anyone with this link can register and start selling in about a minute.
         </p>
       </div>
-      <div className="flex items-center gap-2">
-        <code className="rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <code className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">
           {url}
         </code>
         <button
-          onClick={() => {
-            void navigator.clipboard.writeText(`${window.location.origin}/m/${slug}/join`);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1_500);
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(`${window.location.origin}/m/${slug}/join`);
+              setCopied(true);
+              setCopyError(false);
+              setTimeout(() => setCopied(false), 1_500);
+            } catch { setCopyError(true); }
           }}
           className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700"
         >
-          {copied ? "Copied ✓" : "Copy link"}
+          {copied ? "Copied ✓" : copyError ? "Select and copy link" : "Copy invite link"}
         </button>
       </div>
     </div>

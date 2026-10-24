@@ -61,6 +61,12 @@ model Marketplace {
   // Community Rewards: the community share is held by the contract and
   // distributed per period. Fixed when the marketplace is registered on-chain.
   rewardsEnabled       Boolean  @default(false)
+  // Public organizer-authored context, separate from immutable payment rules.
+  communityPurpose       String   @default("")
+  communityBeneficiaries String   @default("")
+  communityDistribution String   @default("")
+  communityGoalUsd       Float?
+  communityDetailsUpdatedAt DateTime?
   createdAt            DateTime @default(now())
 
   operatorId String

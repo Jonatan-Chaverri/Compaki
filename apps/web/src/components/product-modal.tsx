@@ -5,7 +5,8 @@
 // marketplaceSlug; editing PATCHes the product id.
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Icon } from "./icon";
 
 export interface EditableProduct {
   id: string;
@@ -22,20 +23,21 @@ const EMOJI_CHOICES = ["☕", "🍫", "🧺", "🏺", "🧶", "🎨", "🍯", "�
 const inputClass =
   "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
-export function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
-  );
+export function Modal({ children, onClose, label = "Details" }: { children: React.ReactNode; onClose: () => void; label?: string }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => { element?.close(); };
+  }, []);
+  return <dialog ref={dialog} aria-label={label} className="app-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
+    if (event.target !== event.currentTarget) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+  }}>
+    <button type="button" className="dialog-close" onClick={onClose} aria-label="Close dialog"><Icon name="close" className="h-4 w-4" /></button>
+    {children}
+  </dialog>;
 }
 
 export function ProductModal({
@@ -92,15 +94,16 @@ export function ProductModal({
   };
 
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={onClose} label={product ? "Edit product" : "Add a product"}>
       <h2 className="text-lg font-semibold tracking-tight text-slate-900">
         {product ? "Edit product" : "Add a product"}
       </h2>
       <div className="mt-4 space-y-4">
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">Name</label>
+          <label htmlFor="product-name" className="mb-1.5 block text-sm font-medium text-slate-700">Product name</label>
           <input
             type="text"
+            id="product-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Hand-roasted coffee, 250g"
@@ -108,12 +111,13 @@ export function ProductModal({
           />
         </div>
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="product-short" className="mb-1.5 block text-sm font-medium text-slate-700">
             Short description{" "}
             <span className="font-normal text-slate-400">(shown on the storefront)</span>
           </label>
           <input
             type="text"
+            id="product-short"
             value={shortDescription}
             onChange={(e) => setShortDescription(e.target.value)}
             maxLength={140}
@@ -122,11 +126,12 @@ export function ProductModal({
           />
         </div>
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="product-description" className="mb-1.5 block text-sm font-medium text-slate-700">
             Full description{" "}
             <span className="font-normal text-slate-400">(shown on the product page)</span>
           </label>
           <textarea
+            id="product-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What makes it special?"
@@ -136,11 +141,12 @@ export function ProductModal({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Price ($)</label>
+            <label htmlFor="product-price" className="mb-1.5 block text-sm font-medium text-slate-700">Price ($)</label>
             <input
               type="number"
               min="0.01"
               step="0.01"
+              id="product-price"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
               placeholder="12.50"
@@ -148,13 +154,14 @@ export function ProductModal({
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+            <label htmlFor="product-stock" className="mb-1.5 block text-sm font-medium text-slate-700">
               Stock <span className="font-normal text-slate-400">(units)</span>
             </label>
             <input
               type="number"
               min="0"
               step="1"
+              id="product-stock"
               value={stock}
               onChange={(e) => setStock(e.target.value)}
               placeholder="20"
@@ -163,11 +170,12 @@ export function ProductModal({
           </div>
         </div>
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label htmlFor="product-image" className="mb-1.5 block text-sm font-medium text-slate-700">
             Image URL <span className="font-normal text-slate-400">or pick an emoji</span>
           </label>
           <input
             type="text"
+            id="product-image"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
             placeholder="https://… or an emoji"
@@ -178,6 +186,8 @@ export function ProductModal({
               <button
                 key={emoji}
                 onClick={() => setImageUrl(emoji)}
+                aria-label={`Use ${emoji} as product image`}
+                aria-pressed={imageUrl === emoji}
                 className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition hover:bg-slate-100 ${
                   imageUrl === emoji ? "bg-slate-100 ring-2 ring-brand-600" : ""
                 }`}
