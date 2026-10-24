@@ -447,7 +447,7 @@ testnet accounts; 9 contract tests.
   above, plus operator-only dashboard data.
 - Fixes found along the way: the API retried every failed Stellar call (the
   timeout check matched its own stack frame), and `deploy:testnet` crashed
-  under ESM (`__dirname`).
+  under ESM (`__dirname`)
 
 ## Project layout
 
