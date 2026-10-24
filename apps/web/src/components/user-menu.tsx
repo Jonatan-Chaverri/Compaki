@@ -154,6 +154,15 @@ export function UserMenu() {
               <Link role="menuitem" href="/dashboard" onClick={() => setOpen(false)} className="block px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50">Manage my marketplace</Link>
               <Link
                 role="menuitem"
+                href="/profile"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
+              >
+                <UserIcon className="h-4 w-4 text-slate-400" />
+                My profile
+              </Link>
+              <Link
+                role="menuitem"
                 href="/orders"
                 onClick={() => setOpen(false)}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"

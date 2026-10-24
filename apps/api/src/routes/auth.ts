@@ -5,7 +5,7 @@
 //                          over the challenge (+ the Cavos email token, when
 //                          verifiable), links/creates the Compaki user, sets
 //                          the session cookie
-//   POST /profile          name, country for the signed-in user (first login)
+//   POST /profile          name (+ country, required on first login) for the signed-in user
 //   POST /login            email + password (existing/demo accounts)
 //   POST /logout           clears the session cookie
 //
@@ -116,10 +116,16 @@ auth.post("/profile", async (c) => {
   const b = await readJson(c);
   if (!b) return c.json({ error: "Invalid JSON" }, 400);
   const name = typeof b.name === "string" ? b.name.trim().slice(0, 60) : "";
-  const country = typeof b.country === "string" ? b.country.trim().slice(0, 60) : "";
   if (name.length < 2) return c.json({ error: "Please tell us your name" }, 400);
-  if (country.length < 2) return c.json({ error: "Please tell us your country of residence" }, 400);
-  const updated = await prisma.user.update({ where: { id: user.id }, data: { name, country } });
+  // Country is sent by the first-login form; /profile may change just the name.
+  const country = typeof b.country === "string" ? b.country.trim().slice(0, 60) : undefined;
+  if (country !== undefined && country.length < 2) {
+    return c.json({ error: "Please tell us your country of residence" }, 400);
+  }
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: { name, ...(country !== undefined ? { country } : {}) },
+  });
   return c.json({ user: publicUser(updated) });
 });
 
