@@ -4,14 +4,16 @@
 //   POST /marketplace/:slug/periods                 open a period (operator)
 //   POST /marketplace/:slug/periods/:id/close       close an ended period (operator or beneficiary)
 //   POST /marketplace/:slug/periods/:id/claim       claim the session user's reward
+//                                                   (Cavos wallets: 202 + tx to sign,
+//                                                   finished by POST /api/tx/:id)
 //   POST /marketplace/:slug/guarantees              simulate a forbidden action (operator)
 //   GET  /me                                        session user's rewards across marketplaces
 //
 // Every balance, share and claim right in these payloads is read from the
 // contract (see src/lib/rewards.ts). Postgres only adds tx hashes and names.
-// Transactions are signed with the acting user's custodial key — the backend
-// holds those keys, so on-chain `require_auth` proves "the backend acted for
-// this user", not that the user signed personally (see README "Custody").
+// Members with a Cavos wallet sign their own claims in the browser; for
+// custodial accounts the backend signs with the key it holds, so there
+// `require_auth` proves "the backend acted for this user" (README "Custody").
 
 import { Hono } from "hono";
 
@@ -22,7 +24,9 @@ import {
   loadRewardsView,
   PERIOD_HISTORY_LIMIT,
 } from "@/lib/rewards";
+import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import { getSessionUser } from "@/lib/session";
+import { personalWallet, userAddresses } from "@/lib/wallets";
 import {
   claimReward,
   closeRewardsPeriod,
@@ -30,8 +34,10 @@ import {
   decryptSecret,
   getRewardsPeriod,
   getRewardsStatus,
+  i128Of,
   isValidAccountAddress,
   openRewardsPeriod,
+  prepareClaim,
   simulateForbiddenAction,
   stellarConfig,
   stellarExpertTxUrl,
@@ -56,6 +62,12 @@ const marketplaceSelect = {
   contractId: true,
 } as const;
 
+/** The address the viewer's money uses (Cavos wallet once ready, else custodial). */
+function viewerAddressOf(user: Parameters<typeof personalWallet>[0]): string | null {
+  const personal = personalWallet(user);
+  return personal.kind === "none" ? null : personal.address;
+}
+
 function errorResponse(error: unknown, fallback: string) {
   const known = describeContractError(error);
   if (known) return { body: { error: known.message, code: known.code }, status: known.status };
@@ -78,7 +90,7 @@ rewards.get("/marketplace/:slug", async (c) => {
     return c.json({
       marketplace: { name: marketplace.name, slug: marketplace.slug },
       canManage: user?.id === marketplace.operatorId,
-      viewerAddress: user?.stellarPublicKey ?? null,
+      viewerAddress: user ? viewerAddressOf(user) : null,
       rewards: view,
     });
   } catch (error) {
@@ -162,7 +174,11 @@ rewards.post("/marketplace/:slug/periods", async (c) => {
     if (!member) {
       return c.json({ error: `No Compaki account for ${email} — ask them to sign up first` }, 400);
     }
-    let memberAddress = member.stellarPublicKey;
+    if (member.cavosAddress && !member.cavosWalletReadyAt) {
+      return c.json({ error: `${email} hasn't finished setting up their wallet yet` }, 400);
+    }
+    const personal = personalWallet(member);
+    let memberAddress = personal.kind === "none" ? null : personal.address;
     if (!memberAddress) {
       const account = await createCustodialAccount();
       await prisma.user.update({
@@ -232,26 +248,29 @@ rewards.post("/marketplace/:slug/periods/:id/close", async (c) => {
 
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug: c.req.param("slug") },
-    select: marketplaceSelect,
+    select: { ...marketplaceSelect, operator: { select: { stellarSecretEncrypted: true } } },
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
   const onChainId = boundOnChainId(marketplace);
   if (!marketplace.rewardsEnabled || onChainId === null) {
     return c.json({ error: "Community Rewards is not enabled for this marketplace" }, 400);
   }
-  if (!user.stellarSecretEncrypted || !user.stellarPublicKey) {
-    return c.json({ error: "You don't have a payment account yet" }, 403);
+  if (!marketplace.operator.stellarSecretEncrypted) {
+    return c.json({ error: "Operator payment account missing" }, 409);
   }
 
   try {
     const period = await getRewardsPeriod(onChainId, periodId);
+    const mine = userAddresses(user);
     const allowed =
-      user.id === marketplace.operatorId || period.beneficiaries.includes(user.stellarPublicKey);
+      user.id === marketplace.operatorId || period.beneficiaries.some((b) => mine.includes(b));
     if (!allowed) {
       return c.json({ error: "Only the operator or a beneficiary can close this period" }, 403);
     }
+    // close_period needs no authorization on-chain, only a fee payer: the
+    // marketplace's operator account pays, whoever clicked.
     const { totalStroops, txHash } = await closeRewardsPeriod({
-      signerSecret: decryptSecret(user.stellarSecretEncrypted),
+      signerSecret: decryptSecret(marketplace.operator.stellarSecretEncrypted),
       marketplaceId: onChainId,
       periodId,
     });
@@ -286,16 +305,57 @@ rewards.post("/marketplace/:slug/periods/:id/close", async (c) => {
 // ── POST /marketplace/:slug/periods/:id/claim ──────────────────────────────
 //
 // Claims for the session user only: the contract pays the address whose
-// authorization it checks, and the backend signs with this user's key.
+// authorization it checks. A Cavos wallet signs in the browser (202 + the
+// transaction; POST /api/tx/:id submits it and calls completeClaim); a
+// custodial account is signed by the backend.
+
+/** Auxiliary record for the explorer link; the claim is already final on-chain. */
+async function recordClaim(params: {
+  marketplaceId: string;
+  periodId: number;
+  memberAddress: string;
+  amountUsd: number;
+  txHash: string;
+}) {
+  try {
+    const periodRow = await prisma.rewardsPeriod.upsert({
+      where: {
+        marketplaceId_contractId_periodId: {
+          marketplaceId: params.marketplaceId,
+          contractId: stellarConfig.marketplaceContractId,
+          periodId: params.periodId,
+        },
+      },
+      update: {},
+      create: {
+        marketplaceId: params.marketplaceId,
+        contractId: stellarConfig.marketplaceContractId,
+        periodId: params.periodId,
+      },
+    });
+    await prisma.rewardClaim.create({
+      data: {
+        periodRowId: periodRow.id,
+        memberAddress: params.memberAddress,
+        amountUsd: params.amountUsd,
+        txHash: params.txHash,
+      },
+    });
+  } catch (dbError) {
+    console.error("[rewards] claim confirmed on-chain but not recorded:", params.txHash, dbError);
+  }
+}
+
+interface ClaimContext {
+  marketplaceId: string;
+  periodId: number;
+}
 
 rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
   const user = await getSessionUser(c);
   if (!user) return c.json({ error: "Sign in to claim" }, 401);
   const periodId = Number(c.req.param("id"));
   if (!Number.isInteger(periodId) || periodId < 0) return c.json({ error: "Invalid period" }, 400);
-  if (!user.stellarSecretEncrypted || !user.stellarPublicKey) {
-    return c.json({ error: "You are not a beneficiary of this period." }, 403);
-  }
 
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug: c.req.param("slug") },
@@ -308,47 +368,74 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
   }
 
   try {
+    const period = await getRewardsPeriod(onChainId, periodId);
+    const notMember = () => c.json({ error: "You are not a beneficiary of this period." }, 403);
+
+    // The user's Cavos wallet is a member: they sign the claim themselves.
+    if (user.cavosAddress && period.beneficiaries.includes(user.cavosAddress)) {
+      if (!user.cavosWalletReadyAt) {
+        return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
+      }
+      const prepared = await prepareClaim({
+        memberPublicKey: user.cavosAddress,
+        marketplaceId: onChainId,
+        periodId,
+      });
+      const pending = createPending<ClaimContext>({
+        kind: "claim",
+        userId: user.id,
+        signer: user.cavosAddress,
+        xdr: prepared.xdr,
+        hash: prepared.hash,
+        context: { marketplaceId: marketplace.id, periodId },
+      });
+      return c.json(signatureRequest(pending, `Claim your period #${periodId} reward`), 202);
+    }
+
+    // Custodial member: the backend signs with the key it holds.
+    if (
+      !user.stellarPublicKey ||
+      !user.stellarSecretEncrypted ||
+      !period.beneficiaries.includes(user.stellarPublicKey)
+    ) {
+      return notMember();
+    }
     const { amountStroops, txHash } = await claimReward({
       memberSecret: decryptSecret(user.stellarSecretEncrypted),
       marketplaceId: onChainId,
       periodId,
     });
     const amountUsd = stroopsToUsd(amountStroops);
-    // Auxiliary record for the explorer link; the claim itself is already
-    // final on-chain, so a DB hiccup here must not fail the response.
-    try {
-      const periodRow = await prisma.rewardsPeriod.upsert({
-        where: {
-          marketplaceId_contractId_periodId: {
-            marketplaceId: marketplace.id,
-            contractId: stellarConfig.marketplaceContractId,
-            periodId,
-          },
-        },
-        update: {},
-        create: {
-          marketplaceId: marketplace.id,
-          contractId: stellarConfig.marketplaceContractId,
-          periodId,
-        },
-      });
-      await prisma.rewardClaim.create({
-        data: {
-          periodRowId: periodRow.id,
-          memberAddress: user.stellarPublicKey,
-          amountUsd,
-          txHash,
-        },
-      });
-    } catch (dbError) {
-      console.error("[rewards] claim confirmed on-chain but not recorded:", txHash, dbError);
-    }
+    await recordClaim({
+      marketplaceId: marketplace.id,
+      periodId,
+      memberAddress: user.stellarPublicKey,
+      amountUsd,
+      txHash,
+    });
     return c.json({ periodId, amountUsd, txHash, verifyUrl: stellarExpertTxUrl(txHash) });
   } catch (error) {
     const { body, status } = errorResponse(error, "Could not claim the reward");
     return c.json(body, status);
   }
 });
+
+/** Called by POST /api/tx/:id once a wallet-signed claim confirmed on-chain. */
+export async function completeClaim(
+  pending: PendingTx,
+  result: { txHash: string; returnValue: Parameters<typeof i128Of>[0] },
+) {
+  const context = pending.context as ClaimContext;
+  const amountUsd = stroopsToUsd(i128Of(result.returnValue));
+  await recordClaim({
+    marketplaceId: context.marketplaceId,
+    periodId: context.periodId,
+    memberAddress: pending.signer,
+    amountUsd,
+    txHash: result.txHash,
+  });
+  return { periodId: context.periodId, amountUsd, verifyUrl: stellarExpertTxUrl(result.txHash) };
+}
 
 // ── POST /marketplace/:slug/guarantees — "try to break it" demo ───────────
 //
@@ -422,8 +509,9 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
 rewards.get("/me", async (c) => {
   const user = await getSessionUser(c);
   if (!user) return c.json({ error: "Not signed in" }, 401);
-  if (!user.stellarPublicKey) return c.json({ address: null, marketplaces: [] });
-  const address = user.stellarPublicKey;
+  const mine = userAddresses(user);
+  if (mine.length === 0) return c.json({ address: null, marketplaces: [] });
+  const address = viewerAddressOf(user);
 
   const candidates = await prisma.marketplace.findMany({
     where: {
@@ -447,19 +535,19 @@ rewards.get("/me", async (c) => {
         ledgerTime: view.ledgerTime,
         periods: view.periods
           .map((p) => {
-            const mine = p.beneficiaries.find((b) => b.address === address);
-            if (!mine) return null;
+            const member = p.beneficiaries.find((b) => mine.includes(b.address));
+            if (!member) return null;
             return {
               periodId: p.periodId,
               startTs: p.startTs,
               endTs: p.endTs,
               status: p.status,
               totalUsd: p.totalUsd,
-              shareBps: mine.shareBps,
-              projectedUsd: mine.projectedUsd,
-              amountUsd: mine.amountUsd,
-              claimed: mine.claimed,
-              claimTxHash: mine.claimTxHash,
+              shareBps: member.shareBps,
+              projectedUsd: member.projectedUsd,
+              amountUsd: member.amountUsd,
+              claimed: member.claimed,
+              claimTxHash: member.claimTxHash,
               closeTxHash: p.closeTxHash,
             };
           })

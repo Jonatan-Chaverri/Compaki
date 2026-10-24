@@ -13,6 +13,8 @@ import { orders } from "./routes/orders";
 import { products } from "./routes/products";
 import { rewards } from "./routes/rewards";
 import { sales } from "./routes/sales";
+import { tx } from "./routes/tx";
+import { wallet } from "./routes/wallet";
 
 // All routes live under /api so the web app can proxy /api/* here verbatim.
 // Cookies and SSE flow through that same-origin proxy, so no CORS is needed.
@@ -29,6 +31,8 @@ app.route("/api/orders", orders);
 app.route("/api/products", products);
 app.route("/api/rewards", rewards);
 app.route("/api/sales", sales);
+app.route("/api/tx", tx);
+app.route("/api/wallet", wallet);
 
 app.get("/health", (c) => c.json({ ok: true }));
 

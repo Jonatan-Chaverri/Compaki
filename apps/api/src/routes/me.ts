@@ -28,6 +28,10 @@ me.get("/", async (c) => {
   ]);
   return c.json({
     user: { id: user.id, name: user.name, email: user.email, country: user.country },
+    wallet: {
+      cavosAddress: user.cavosAddress,
+      cavosReady: user.cavosWalletReadyAt !== null,
+    },
     operatedMarketplaceSlug: marketplace?.slug ?? null,
     vendorMarketplaces: memberships.map((m) => ({
       slug: m.marketplace.slug,

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { CompakiCavosProvider } from "@/components/cavos-provider";
 import { AppFooter } from "@/components/shell";
 
 const geistSans = Geist({
@@ -29,7 +30,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col"><a className="skip-link" href="#main-content">Skip to content</a><div id="app-content" className="flex-1">{children}</div><AppFooter /></body>
+      <body className="min-h-full flex flex-col"><a className="skip-link" href="#main-content">Skip to content</a><CompakiCavosProvider><div id="app-content" className="flex-1">{children}</div><AppFooter /></CompakiCavosProvider></body>
     </html>
   );
 }

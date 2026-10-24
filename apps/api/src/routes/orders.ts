@@ -4,25 +4,31 @@
 //   GET  /          session buyer's orders (pending + completed; expired hidden)
 //   GET  /:id       checkout payload for one order (buyer only)
 //   POST /:id/pay   shipping address + payment: settles every item on-chain,
-//                   decrements stock, marks the order COMPLETED
+//                   decrements stock, marks the order COMPLETED. Buyers with a
+//                   Cavos wallet sign each item in the browser: this returns
+//                   202 + the first transaction to sign, and POST /api/tx/:id
+//                   continues item by item (see src/lib/checkout.ts).
 //
 // Expiry is lazy: any read or pay first flips stale PENDING orders to EXPIRED.
 
 import { Hono } from "hono";
 
-import { prisma, type SplitSnapshot } from "@/lib/db";
+import {
+  completeOrder,
+  lineAmount,
+  loadOrderForPayment,
+  nextCavosPurchaseStep,
+  orderItemsInclude,
+  orderPayload,
+  recordSale,
+  topUpDemoBalance,
+  vendorAddressFor,
+} from "@/lib/checkout";
+import { prisma } from "@/lib/db";
 import { boundOnChainId, describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
-import {
-  createCustodialAccount,
-  decryptSecret,
-  getUsdBalance,
-  mintDemoUsd,
-  purchase,
-  stellarExpertTxUrl,
-  stroopsToUsd,
-  usdToStroops,
-} from "@/lib/stellar";
+import { createCustodialAccount, decryptSecret, purchase } from "@/lib/stellar";
+import { cavosWalletPending, personalWallet } from "@/lib/wallets";
 
 export const orders = new Hono();
 
@@ -34,57 +40,6 @@ async function expireStaleOrders(buyerId: string) {
     where: { buyerId, status: "PENDING", expiresAt: { lt: new Date() } },
     data: { status: "EXPIRED" },
   });
-}
-
-const orderItemsInclude = {
-  items: {
-    include: {
-      product: {
-        select: { id: true, name: true, imageUrl: true, stock: true },
-      },
-      sale: { select: { id: true } },
-    },
-  },
-  marketplace: { select: { name: true, slug: true } },
-} as const;
-
-function orderPayload(
-  order: {
-    id: string;
-    status: string;
-    totalUsd: number;
-    expiresAt: Date;
-    createdAt: Date;
-    completedAt: Date | null;
-    marketplace: { name: string; slug: string };
-    items: {
-      id: string;
-      quantity: number;
-      unitPriceUsd: number;
-      product: { id: string; name: string; imageUrl: string | null };
-      sale?: { id: string } | null;
-    }[];
-  },
-) {
-  return {
-    id: order.id,
-    status: order.status,
-    totalUsd: order.totalUsd,
-    expiresAt: order.expiresAt.toISOString(),
-    createdAt: order.createdAt.toISOString(),
-    completedAt: order.completedAt?.toISOString() ?? null,
-    marketplace: order.marketplace,
-    items: order.items.map((item) => ({
-      id: item.id,
-      productId: item.product.id,
-      productName: item.product.name,
-      imageUrl: item.product.imageUrl,
-      quantity: item.quantity,
-      unitPriceUsd: item.unitPriceUsd,
-      lineTotalUsd: Math.round(item.unitPriceUsd * item.quantity * 100) / 100,
-      receiptPath: item.sale ? `/receipt/${item.sale.id}` : null,
-    })),
-  };
 }
 
 // ── POST / — create a pending order from the cart ───────────────────────────
@@ -235,25 +190,7 @@ orders.post("/:id/pay", async (c) => {
   }
 
   await expireStaleOrders(sessionUser.id);
-  const order = await prisma.order.findUnique({
-    where: { id: c.req.param("id") },
-    include: {
-      marketplace: {
-        include: {
-          operator: { select: { name: true } },
-          communityFund: { select: { name: true } },
-        },
-      },
-      items: {
-        include: {
-          product: {
-            include: { vendor: { select: { id: true, name: true, stellarPublicKey: true } } },
-          },
-          sale: { select: { id: true } },
-        },
-      },
-    },
-  });
+  const order = await loadOrderForPayment(c.req.param("id"));
   if (!order || order.buyerId !== sessionUser.id) {
     return c.json({ error: "Order not found" }, 404);
   }
@@ -269,7 +206,7 @@ orders.post("/:id/pay", async (c) => {
   }
   const unsettled = order.items.filter((item) => !item.sale);
   for (const item of unsettled) {
-    if (!item.product.vendor.stellarPublicKey) {
+    if (!vendorAddressFor(order, item)) {
       return c.json({ error: `${item.product.name} is not ready for purchase yet` }, 409);
     }
     if (item.product.stock < item.quantity) {
@@ -279,121 +216,78 @@ orders.post("/:id/pay", async (c) => {
       );
     }
   }
+  if (cavosWalletPending(sessionUser)) {
+    return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
+  }
+  const remainingUsd = unsettled.reduce((acc, item) => acc + lineAmount(item).lineUsd, 0);
 
   try {
-    // 1. Buyer custodial payment account. First-time buyers start pre-funded
-    //    (the "card payment" is simulated by minting demo USDC); returning
-    //    buyers get topped up if their balance can't cover the total.
-    let buyer = sessionUser;
-    if (!buyer.stellarPublicKey || !buyer.stellarSecretEncrypted) {
-      const account = await createCustodialAccount({
-        startingUsd: Math.max(100, Math.ceil(order.totalUsd)),
+    const wallet = personalWallet(sessionUser);
+
+    // Cavos wallet: the buyer signs each item in the browser. The demo
+    // "card payment" tops the wallet up with demo money first.
+    if (wallet.kind === "cavos") {
+      await topUpDemoBalance(wallet.address, remainingUsd);
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          shipAddress: shipping.address,
+          shipCity: shipping.city,
+          shipPostalCode: shipping.postalCode || null,
+          shipCountry: shipping.country,
+        },
       });
-      buyer = await prisma.user.update({
-        where: { id: buyer.id },
+      const step = await nextCavosPurchaseStep(order.id, {
+        id: sessionUser.id,
+        cavosAddress: wallet.address,
+      });
+      return c.json(step, "signatureRequired" in step ? 202 : 200);
+    }
+
+    // Custodial account: first-time buyers start pre-funded (the "card
+    // payment" is simulated by minting demo money); returning buyers get
+    // topped up if their balance can't cover the order.
+    let buyerSecretEncrypted: string;
+    if (wallet.kind === "none") {
+      const account = await createCustodialAccount({
+        startingUsd: Math.max(100, Math.ceil(remainingUsd)),
+      });
+      await prisma.user.update({
+        where: { id: sessionUser.id },
         data: {
           stellarPublicKey: account.publicKey,
           stellarSecretEncrypted: account.secretEncrypted,
         },
       });
+      buyerSecretEncrypted = account.secretEncrypted;
     } else {
-      const balance = await getUsdBalance(buyer.stellarPublicKey);
-      if (balance < order.totalUsd) {
-        const shortfall = Math.ceil((order.totalUsd - balance) * 100) / 100;
-        await mintDemoUsd(buyer.stellarPublicKey, shortfall);
-      }
+      await topUpDemoBalance(wallet.address, remainingUsd);
+      buyerSecretEncrypted = wallet.secretEncrypted;
     }
-    const buyerSecret = decryptSecret(buyer.stellarSecretEncrypted as string);
+    const buyerSecret = decryptSecret(buyerSecretEncrypted);
 
-    // 2. One atomic on-chain split purchase per unsettled item. Each item
-    //    writes its Sale row + stock decrement immediately, so a failure
-    //    mid-order can be retried without re-charging settled items.
+    // One atomic on-chain split purchase per unsettled item, recorded as it
+    // settles so a failure mid-order can be retried without re-charging.
     for (const item of unsettled) {
-      const lineUsd = Math.round(item.unitPriceUsd * item.quantity * 100) / 100;
-      const amountStroops = usdToStroops(lineUsd);
       const settleStart = Date.now();
       const { txHash, rewardsPeriodId } = await purchase({
         buyerSecret,
         marketplaceId: onChainId,
-        vendorPublicKey: item.product.vendor.stellarPublicKey as string,
-        amountStroops,
+        vendorPublicKey: vendorAddressFor(order, item) as string,
+        amountStroops: lineAmount(item).amountStroops,
       });
-      const settleSeconds = Math.max(1, Math.round((Date.now() - settleStart) / 1000));
-
-      // Split frozen at purchase time; mirrors the contract's math (shares
-      // round down, remainder → community fund).
-      const vendorStroops = (amountStroops * BigInt(marketplace.splitVendorBps)) / 10_000n;
-      const operatorStroops = (amountStroops * BigInt(marketplace.splitOperatorBps)) / 10_000n;
-      const communityStroops = amountStroops - vendorStroops - operatorStroops;
-      const snapshot: SplitSnapshot = {
-        vendorBps: marketplace.splitVendorBps,
-        operatorBps: marketplace.splitOperatorBps,
-        communityBps: marketplace.splitCommunityBps,
-        vendorAmountUsd: stroopsToUsd(vendorStroops),
-        operatorAmountUsd: stroopsToUsd(operatorStroops),
-        communityAmountUsd: stroopsToUsd(communityStroops),
+      await recordSale({
+        order,
+        item,
+        buyerId: sessionUser.id,
+        txHash,
         rewardsPeriodId,
-      };
-      await prisma.$transaction([
-        prisma.sale.create({
-          data: {
-            amountUsd: lineUsd,
-            quantity: item.quantity,
-            txHash,
-            splitSnapshot: JSON.stringify(snapshot),
-            settleSeconds,
-            shipAddress: shipping.address,
-            shipCity: shipping.city,
-            shipPostalCode: shipping.postalCode || null,
-            shipCountry: shipping.country,
-            productId: item.productId,
-            buyerId: buyer.id,
-            orderItemId: item.id,
-          },
-        }),
-        prisma.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: item.quantity } },
-        }),
-      ]);
+        settleSeconds: Math.max(1, Math.round((Date.now() - settleStart) / 1000)),
+        shipping,
+      });
     }
 
-    // 3. Close the order.
-    const completed = await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: "COMPLETED",
-        completedAt: new Date(),
-        shipAddress: shipping.address,
-        shipCity: shipping.city,
-        shipPostalCode: shipping.postalCode || null,
-        shipCountry: shipping.country,
-      },
-      include: {
-        ...orderItemsInclude,
-        items: {
-          include: {
-            product: { select: { id: true, name: true, imageUrl: true, stock: true } },
-            sale: { select: { id: true, txHash: true, amountUsd: true } },
-          },
-        },
-      },
-    });
-
-    return c.json({
-      order: orderPayload(completed),
-      sales: completed.items
-        .filter((item) => item.sale)
-        .map((item) => ({
-          saleId: item.sale!.id,
-          productName: item.product.name,
-          quantity: item.quantity,
-          amountUsd: item.sale!.amountUsd,
-          txHash: item.sale!.txHash,
-          receiptPath: `/receipt/${item.sale!.id}`,
-          verifyUrl: stellarExpertTxUrl(item.sale!.txHash),
-        })),
-    });
+    return c.json(await completeOrder(order.id, shipping));
   } catch (error) {
     const known = describeContractError(error);
     if (known) {

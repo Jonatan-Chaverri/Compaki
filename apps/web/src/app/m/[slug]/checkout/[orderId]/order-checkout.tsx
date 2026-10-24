@@ -3,14 +3,17 @@
 // Checkout for a pending order: shows the order summary and a live countdown
 // (orders expire 10 minutes after creation), collects the shipping address,
 // and pays. Payment settles one on-chain split per item, so the processing
-// state can take a few seconds per line. A completed order shows the settled
-// breakdown with receipt links.
+// state can take a few seconds per line. Buyers with a Cavos wallet approve
+// each item's payment from their own wallet ("Approve payment 1 of 2").
+// A completed order shows the settled breakdown with receipt links.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useCompakiWallet } from "@/components/cavos-provider";
 import { ProductVisual, CheckoutSteps } from "@/components/shell";
 import { formatUsd } from "@/lib/format";
+import { followSignatures, readResult } from "@/lib/wallet-signing";
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
@@ -93,6 +96,8 @@ export function OrderCheckout({
   );
   const [error, setError] = useState<string | null>(null);
   const [sales, setSales] = useState<SettledSale[]>([]);
+  const wallet = useCompakiWallet();
+  const [approval, setApproval] = useState<string | null>(null);
 
   const valid =
     address.trim().length >= 5 && city.trim().length >= 2 && country.trim().length >= 2;
@@ -100,24 +105,33 @@ export function OrderCheckout({
   const submit = async () => {
     setState("processing");
     setError(null);
+    setApproval(null);
     try {
-      const res = await fetch(`/api/orders/${order.id}/pay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shipAddress: address,
-          shipCity: city,
-          shipPostalCode: postalCode,
-          shipCountry: country,
+      const first = await readResult<{ sales?: SettledSale[] }>(
+        await fetch(`/api/orders/${order.id}/pay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            shipAddress: address,
+            shipCity: city,
+            shipPostalCode: postalCode,
+            shipCountry: country,
+          }),
         }),
-      });
-      const data = (await res.json()) as { sales?: SettledSale[]; error?: string };
-      if (res.status === 410) {
+      );
+      if (first.status === 410) {
         setState("expired");
         return;
       }
-      if (!res.ok) throw new Error(data.error ?? "Payment failed");
-      setSales(data.sales ?? []);
+      const result = await followSignatures(first, wallet?.signXdr ?? null, (request) =>
+        setApproval(
+          request.steps && request.steps > 1
+            ? `Approve payment ${request.step} of ${request.steps} in your wallet…`
+            : "Approve the payment in your wallet…",
+        ),
+      );
+      if (result.status !== 200) throw new Error(result.body.error ?? "Payment failed");
+      setSales(result.body.sales ?? []);
       setState("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Payment failed");
@@ -344,7 +358,7 @@ export function OrderCheckout({
           {state === "processing" ? (
             <span className="inline-flex items-center gap-2">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              Processing payment…
+              {approval ?? "Processing payment…"}
             </span>
           ) : (
             `Pay ${formatUsd(order.totalUsd)} with demo funds`

@@ -9,6 +9,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { useCompakiWallet } from "@/components/cavos-provider";
+
 interface SessionUser {
   id: string;
   name: string;
@@ -50,6 +52,7 @@ function initialsOf(name: string): string {
 export function UserMenu() {
   const pathname = usePathname();
   const router = useRouter();
+  const wallet = useCompakiWallet();
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
   const [user, setUser] = useState<SessionUser | null>(null);
   const [vendorMarketplaces, setVendorMarketplaces] = useState<VendorMarketplace[]>([]);
@@ -95,6 +98,7 @@ export function UserMenu() {
 
   const signOut = async () => {
     setOpen(false);
+    wallet?.logout();
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     setState("out");

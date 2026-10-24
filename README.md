@@ -20,11 +20,15 @@ running period's rules.
 > **Testnet only.** All money is a self-issued demo asset on Stellar testnet
 > (`CPKUSD` on fresh deployments; older deployments used the code `USDC` with
 > a Compaki-issued issuer). It is **not** Circle's USDC and has no value.
-> Accounts are **custodial**; see [Guarantees and limitations](#guarantees-and-limitations).
+> People who sign in with email get their **own Cavos wallet** and sign their
+> purchases and claims themselves; older/demo accounts are still **custodial**.
+> See [Wallets and sign-in](#wallets-and-sign-in-cavos) and
+> [Guarantees and limitations](#guarantees-and-limitations).
 
 - [How Community Rewards works](#how-community-rewards-works)
 - [Contract architecture](#contract-architecture)
 - [From purchase to claim](#from-purchase-to-claim)
+- [Wallets and sign-in (Cavos)](#wallets-and-sign-in-cavos)
 - [Guarantees and limitations](#guarantees-and-limitations)
 - [Run locally](#run-locally) · [Testnet](#stellar-testnet) · [Tests](#tests)
 - [Example transactions](#example-transactions)
@@ -191,6 +195,33 @@ npm run prisma:generate
 npm run test:community
 ```
 
+## Wallets and sign-in (Cavos)
+
+New users sign in with their **email** through [Cavos](https://docs.cavos.xyz)
+(`@cavos/kit`): Cavos emails a code, verifies it, and opens the user's own
+Stellar wallet — a classic `G…` account whose key Cavos derives from the login
+and keeps in its vault. **Compaki never holds that key.**
+
+| Step | Who does what |
+| --- | --- |
+| Sign in | Browser: `sendOtp` / `verifyOtp`. The wallet signs a one-time challenge (`signMessage`); the API verifies the ed25519 signature (`POST /api/auth/cavos`). |
+| Email | Trusted only if Cavos' signed email token verifies against `enclave.cavos.xyz`'s published keys; only then can an existing account be linked by email. A reported email is ignored. |
+| Activate | API funds the address with testnet XLM (Friendbot) and prepares the trustline + starting demo balance; the wallet signs it (`signXdr`). |
+| Purchase / claim | API prepares each transaction with the user's wallet as source; the wallet signs it in the browser; `POST /api/tx/:id` submits it only if it hashes to the prepared transaction and carries the wallet's signature. One signature per cart item. |
+
+Personal money (purchases, vendor revenue, member rewards) uses the Cavos
+wallet as soon as it is active. **The marketplace operator stays a server-held
+service account**: creating marketplaces, registering vendors, opening and
+paying for closing periods are signed by the API — otherwise every vendor
+sign-up would wait for the operator's manual approval. Accounts created before
+Cavos (and the seeded demo accounts) keep their custodial account and can
+still sign in with a password.
+
+Setup: create an app in the Cavos console, add your web origin under allowed
+origins, and set `NEXT_PUBLIC_CAVOS_APP_ID` (see `apps/web/env.example`).
+Optionally set `CAVOS_APP_ID` on the API so email tokens are also checked
+against your app id.
+
 ## Guarantees and limitations
 
 **Enforced on-chain by the contract:**
@@ -213,16 +244,20 @@ npm run test:community
 
 **Not enforced by the contract (be precise about these):**
 
-- **Custody.** Every user's Stellar key is generated and held by the Compaki
-  backend (AES-256-GCM, key in `WALLET_ENCRYPTION_KEY`), and the backend signs
-  every transaction. `require_auth()` therefore proves "the backend signed for
-  this user", not "the user personally approved". In particular:
-  - The backend holds the operator key, so it can do anything the operator can
-    (open periods, register vendors). It still **cannot** withdraw the
-    treasury or change running periods: the contract forbids that for everyone.
-  - Members' payouts land in **custodial** accounts that Compaki's backend can
-    sign for. The contract guarantees the money reaches the member's address;
-    after that, custody is Compaki's. Compaki is **not** a non-custodial system.
+- **Custody.** Two models coexist:
+  - **Cavos wallets** (email sign-in): the user's key stays with Cavos/the user;
+    purchases and claims carry the user's own signature, and payouts land in a
+    wallet Compaki cannot move. Trust shifts to Cavos' key management (vault,
+    enclave recovery) instead of Compaki.
+  - **Custodial accounts** (operators, pre-Cavos and demo accounts): the key is
+    held by the Compaki backend (AES-256-GCM, `WALLET_ENCRYPTION_KEY`), so
+    `require_auth()` proves "the backend signed for this user". The backend
+    holds every operator key and can do anything an operator can (open periods,
+    register vendors) — but it still **cannot** withdraw the treasury or change
+    running periods: the contract forbids that for everyone.
+  Compaki is therefore **not** fully non-custodial.
+- **Signing requests are kept in memory** (single API instance): an API restart
+  drops pending signatures and the user retries the action.
 - **Who the members are** is the operator's choice. The contract stops the
   operator from listing its own address but can't detect other addresses the
   operator controls. The guarantee is that the rules are public and frozen
@@ -298,6 +333,8 @@ Environment variables used by this release:
 | `DEMO_SEED_PASSWORD`, `SEED_PERIOD_MINUTES` | seed | Demo logins; seeded period length. |
 | `DEMO_ASSET_CODE`, `DEPLOY_ENV_FILE` | deploy | Asset code for fresh deploys (default `CPKUSD`); alternative env file. |
 | `DEMO_PERIOD_SECONDS` | `demo:rewards` | Period length for the CLI proof (default 45). |
+| `NEXT_PUBLIC_CAVOS_APP_ID`, `NEXT_PUBLIC_CAVOS_ENV` | web | Cavos app id (public) and environment (`development` default). |
+| `CAVOS_APP_ID` | API | Optional: also require Cavos email tokens to be issued for this app. |
 
 ## Stellar testnet
 

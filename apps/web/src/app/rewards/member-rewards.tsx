@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { EmptyState } from "@/components/shell";
+import { useCompakiWallet } from "@/components/cavos-provider";
 import { TxBanner, type TxState } from "@/components/tx-banner";
 import {
   STATUS_STYLE,
@@ -16,6 +17,7 @@ import {
   txUrl,
   type PeriodStatus,
 } from "@/lib/rewards";
+import { followSignatures, readResult } from "@/lib/wallet-signing";
 
 interface MemberPeriod {
   periodId: number;
@@ -42,6 +44,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
   const [now, setNow] = useState(() => Date.now());
   const [tx, setTx] = useState<TxState>({ state: "idle" });
   const [busy, setBusy] = useState<string | null>(null);
+  const wallet = useCompakiWallet();
 
   const reload = useCallback(async () => {
     try {
@@ -67,9 +70,15 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
     setBusy(key);
     setTx({ state: "pending", label: pendingLabel });
     try {
-      const res = await fetch(url, { method: "POST" });
-      const body = (await res.json()) as { txHash?: string; error?: string; amountUsd?: number };
-      if (!res.ok || !body.txHash) throw new Error(body.error ?? "Transaction failed");
+      // Cavos wallets sign the claim here (202 + transaction to approve);
+      // custodial accounts are signed by the API.
+      const result = await followSignatures<{ txHash?: string; amountUsd?: number }>(
+        await readResult(await fetch(url, { method: "POST" })),
+        wallet?.signXdr ?? null,
+        () => setTx({ state: "pending", label: "Approve in your wallet" }),
+      );
+      const body = result.body;
+      if (result.status !== 200 || !body.txHash) throw new Error(body.error ?? "Transaction failed");
       setTx({
         state: "done",
         label: body.amountUsd !== undefined ? `${label} — ${formatAmount(body.amountUsd)} received` : label,

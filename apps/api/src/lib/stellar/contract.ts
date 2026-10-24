@@ -8,6 +8,7 @@ import {
   Contract,
   Keypair,
   Operation,
+  Transaction,
   TransactionBuilder,
   nativeToScVal,
   rpc,
@@ -122,6 +123,77 @@ interface InvokeResult {
 }
 
 /**
+ * A transaction prepared for a signer whose key Compaki doesn't hold (the
+ * user's Cavos wallet). The browser signs `xdr` with the wallet and sends the
+ * signed envelope back; `hash` is what the signed envelope must still hash to.
+ */
+export interface PreparedTx {
+  xdr: string;
+  hash: string;
+  source: string;
+}
+
+/** Transactions signed in the browser get longer time bounds. */
+const USER_SIGNING_TIMEOUT_S = 180;
+
+/**
+ * Builds and simulates one contract invocation with `source` as the
+ * transaction source (whose signature then covers its `require_auth`, as a
+ * source-account credential), and returns it assembled with the simulated
+ * footprint and fees, unsigned. A contract rejection throws ContractError.
+ */
+async function prepareInvocation(
+  method: string,
+  args: xdr.ScVal[],
+  source: string,
+  timeoutSeconds = 60,
+): Promise<Transaction> {
+  const server = getRpc();
+  const account = await getAccountWithWait(server, source);
+  const contract = new Contract(stellarConfig.marketplaceContractId);
+
+  const tx = new TransactionBuilder(account, {
+    fee: (Number(BASE_FEE) * 1_000).toString(), // generous cap; actual fee comes from simulation
+    networkPassphrase: stellarConfig.networkPassphrase,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(timeoutSeconds)
+    .build();
+
+  try {
+    return await server.prepareTransaction(tx);
+  } catch (error) {
+    throw toContractError(method, String(error)) ?? error;
+  }
+}
+
+/** Submits a fully signed transaction and polls until it is confirmed. */
+async function sendAndConfirm(signed: Transaction, label: string): Promise<InvokeResult> {
+  const server = getRpc();
+  const sent = await server.sendTransaction(signed);
+  if (sent.status === "ERROR") {
+    throw new Error(
+      `Transaction submission failed for ${label}: ${JSON.stringify(sent.errorResult ?? sent.status)}`,
+    );
+  }
+
+  // Poll for confirmation (testnet closes ledgers ~every 5s).
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await server.getTransaction(sent.hash);
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+      return { txHash: sent.hash, returnValue: result.returnValue };
+    }
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+      throw new Error(
+        `Transaction ${sent.hash} failed on-chain (${label}): ${result.resultXdr?.toXDR("base64") ?? "no result"}`,
+      );
+    }
+    await sleep(1_500);
+  }
+  throw new Error(`Transaction ${sent.hash} timed out waiting for confirmation (${label})`);
+}
+
+/**
  * Builds, simulates, signs and submits one contract invocation, then polls
  * until it is confirmed. The signer's account is the transaction source, so
  * its signature also covers `require_auth` for that address (including the
@@ -134,48 +206,55 @@ async function invokeContract(
   signer: Keypair,
 ): Promise<InvokeResult> {
   return withTimeoutRetry(`invoke ${method}`, async () => {
-    const server = getRpc();
-    const account = await getAccountWithWait(server, signer.publicKey());
-    const contract = new Contract(stellarConfig.marketplaceContractId);
-
-    const tx = new TransactionBuilder(account, {
-      fee: (Number(BASE_FEE) * 1_000).toString(), // generous cap; actual fee comes from simulation
-      networkPassphrase: stellarConfig.networkPassphrase,
-    })
-      .addOperation(contract.call(method, ...args))
-      .setTimeout(60)
-      .build();
-
-    let prepared;
-    try {
-      prepared = await server.prepareTransaction(tx);
-    } catch (error) {
-      throw toContractError(method, String(error)) ?? error;
-    }
+    const prepared = await prepareInvocation(method, args, signer.publicKey());
     prepared.sign(signer);
-
-    const sent = await server.sendTransaction(prepared);
-    if (sent.status === "ERROR") {
-      throw new Error(
-        `Transaction submission failed for ${method}: ${JSON.stringify(sent.errorResult ?? sent.status)}`,
-      );
-    }
-
-    // Poll for confirmation (testnet closes ledgers ~every 5s).
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const result = await server.getTransaction(sent.hash);
-      if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-        return { txHash: sent.hash, returnValue: result.returnValue };
-      }
-      if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
-        throw new Error(
-          `Transaction ${sent.hash} failed on-chain (${method}): ${result.resultXdr?.toXDR("base64") ?? "no result"}`,
-        );
-      }
-      await sleep(1_500);
-    }
-    throw new Error(`Transaction ${sent.hash} timed out waiting for confirmation (${method})`);
+    return sendAndConfirm(prepared, method);
   });
+}
+
+/** The signed envelope from the browser isn't the transaction we prepared. */
+export class SignedTxMismatchError extends Error {
+  constructor(reason: string) {
+    super(`Signed transaction rejected: ${reason}`);
+    this.name = "SignedTxMismatchError";
+  }
+}
+
+/**
+ * Submits a transaction the user signed in the browser (Cavos `signXdr`).
+ * Before anything reaches the network it checks that the envelope still
+ * hashes to the transaction Compaki prepared (so the client can't swap in a
+ * different one) and that it carries a valid signature from `signer`.
+ * Works for contract invocations and classic transactions alike.
+ */
+export async function submitUserSignedXdr(params: {
+  signedXdr: string;
+  expectedHash: string;
+  signer: string;
+  label: string;
+}): Promise<InvokeResult> {
+  let tx;
+  try {
+    tx = TransactionBuilder.fromXDR(params.signedXdr, stellarConfig.networkPassphrase);
+  } catch {
+    throw new SignedTxMismatchError("not a valid transaction envelope");
+  }
+  if (!(tx instanceof Transaction)) throw new SignedTxMismatchError("fee-bump envelopes are not accepted");
+  const hash = tx.hash();
+  if (hash.toString("hex") !== params.expectedHash) {
+    throw new SignedTxMismatchError("it differs from the prepared transaction");
+  }
+  const key = Keypair.fromPublicKey(params.signer);
+  const hint = key.signatureHint();
+  const signedByUser = tx.signatures.some(
+    (s) => s.hint().equals(hint) && key.verify(hash, s.signature()),
+  );
+  if (!signedByUser) throw new SignedTxMismatchError("it is not signed by your wallet");
+  return sendAndConfirm(tx, params.label);
+}
+
+function toPrepared(tx: Transaction): PreparedTx {
+  return { xdr: tx.toXDR(), hash: tx.hash().toString("hex"), source: tx.source };
 }
 
 /**
@@ -306,8 +385,40 @@ export async function purchase(params: {
     ],
     buyer,
   );
+  return { txHash, rewardsPeriodId: purchasePeriodOf(returnValue) };
+}
+
+/**
+ * Prepares a purchase for a buyer whose wallet signs in the browser. Submit
+ * it with submitUserSignedXdr and decode the result with purchasePeriodOf.
+ */
+export async function preparePurchase(params: {
+  buyerPublicKey: string;
+  marketplaceId: bigint;
+  vendorPublicKey: string;
+  amountStroops: bigint;
+}): Promise<PreparedTx> {
+  return withTimeoutRetry("prepare purchase", async () =>
+    toPrepared(
+      await prepareInvocation(
+        "purchase",
+        [
+          scU64(params.marketplaceId),
+          scAddress(params.buyerPublicKey),
+          scAddress(params.vendorPublicKey),
+          scI128(params.amountStroops),
+        ],
+        params.buyerPublicKey,
+        USER_SIGNING_TIMEOUT_S,
+      ),
+    ),
+  );
+}
+
+/** Rewards period a confirmed purchase was booked to (null for classic). */
+export function purchasePeriodOf(returnValue: xdr.ScVal | undefined): number | null {
   const period = returnValue ? (scValToNative(returnValue) as number | null | undefined) : null;
-  return { txHash, rewardsPeriodId: period ?? null };
+  return period ?? null;
 }
 
 /** Read-only config lookup via simulation (no transaction submitted). */
@@ -421,6 +532,29 @@ export async function claimReward(params: {
     amountStroops: returnValue ? BigInt(scValToNative(returnValue) as bigint) : 0n,
     txHash,
   };
+}
+
+/** Prepares a claim for a member whose wallet signs in the browser. */
+export async function prepareClaim(params: {
+  memberPublicKey: string;
+  marketplaceId: bigint;
+  periodId: number;
+}): Promise<PreparedTx> {
+  return withTimeoutRetry("prepare claim", async () =>
+    toPrepared(
+      await prepareInvocation(
+        "claim",
+        [scU64(params.marketplaceId), scU32(params.periodId), scAddress(params.memberPublicKey)],
+        params.memberPublicKey,
+        USER_SIGNING_TIMEOUT_S,
+      ),
+    ),
+  );
+}
+
+/** Decodes an i128 contract return value (claim amount, close total). */
+export function i128Of(returnValue: xdr.ScVal | undefined): bigint {
+  return returnValue ? BigInt(scValToNative(returnValue) as bigint) : 0n;
 }
 
 export async function getRewardsStatus(marketplaceId: bigint): Promise<RewardsStatusOnChain> {

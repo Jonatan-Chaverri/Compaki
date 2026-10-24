@@ -26,8 +26,18 @@ model User {
   // can claim their account by registering with the same email.
   passwordHash           String?
   country                String?
+  // Custodial (server-held) Stellar account. Still used for operator actions
+  // (create marketplace, register vendors, open periods) and for accounts that
+  // haven't connected a Cavos wallet.
   stellarPublicKey       String?  @unique
   stellarSecretEncrypted String?
+  // The user's own Cavos wallet (email login). Its key lives in the Cavos
+  // vault — Compaki never holds it; the user signs purchases and claims in the
+  // browser. Personal money (purchases, vendor revenue, member rewards) uses
+  // this wallet once it is ready.
+  cavosAddress           String?  @unique
+  // Set once the Cavos wallet is funded and trusts the demo asset.
+  cavosWalletReadyAt     DateTime?
   createdAt              DateTime @default(now())
 
   marketplaces     Marketplace[]      @relation("MarketplaceOperator")
@@ -88,6 +98,10 @@ model VendorMembership {
   sellsDescription String   @default("")
   // Hash of the register_vendor transaction on testnet.
   registerTxHash   String?
+  // Address registered on-chain as this vendor (their Cavos wallet or their
+  // custodial account). Null for memberships predating Cavos wallets, which
+  // use the user's custodial stellarPublicKey.
+  payoutAddress    String?
   createdAt        DateTime @default(now())
 
   marketplaceId String

@@ -14,6 +14,7 @@ import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails }
 import { boundOnChainId, loadRewardsView, PERIOD_HISTORY_LIMIT } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
 import { getSessionUser } from "@/lib/session";
+import { cavosWalletPending, personalWallet } from "@/lib/wallets";
 import {
   createCustodialAccount,
   createMarketplace,
@@ -152,7 +153,7 @@ marketplaces.get("/:slug/community", async (c) => {
       splits: { vendorBps: marketplace.splitVendorBps, operatorBps: marketplace.splitOperatorBps, communityBps: marketplace.splitCommunityBps },
       operator: { name: marketplace.operator.name, address: marketplace.operator.stellarPublicKey },
       communityFund: marketplace.communityFund ? { name: marketplace.communityFund.name, address: marketplace.communityFund.stellarPublicKey } : null,
-      sellers: marketplace.vendors.map(v => ({ name: v.user.name, address: v.user.stellarPublicKey })),
+      sellers: marketplace.vendors.map(v => ({ name: v.user.name, address: v.payoutAddress ?? v.user.stellarPublicKey })),
     },
     canManage: user?.id === marketplace.operatorId,
     sales: summarizeCommunitySales(sales),
@@ -574,7 +575,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       name: m.user.name,
       email: m.user.email ?? "",
       sells: m.sellsDescription,
-      account: m.user.stellarPublicKey,
+      account: m.payoutAddress ?? m.user.stellarPublicKey,
       registerTxHash: m.registerTxHash,
       joinedAt: m.createdAt.toISOString(),
       productCount: marketplace.products.filter((p) => p.vendorId === m.user.id).length,
@@ -608,7 +609,8 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
       })
     : null;
 
-  if (!user || !membership || !user.stellarPublicKey) {
+  const payoutAddress = membership?.payoutAddress ?? user?.stellarPublicKey ?? null;
+  if (!user || !membership || !payoutAddress) {
     return c.json({
       member: false as const,
       marketplace: { name: marketplace.name, slug: marketplace.slug },
@@ -633,7 +635,7 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
       slug: marketplace.slug,
       splitVendorBps: marketplace.splitVendorBps,
     },
-    vendor: { name: user.name, account: user.stellarPublicKey },
+    vendor: { name: user.name, account: payoutAddress },
     products: products.map((p) => ({
       id: p.id,
       name: p.name,
@@ -699,18 +701,28 @@ marketplaces.post("/:slug/vendors", async (c) => {
     return c.json({ error: "Marketplace is not fully set up" }, 409);
   }
 
+  if (cavosWalletPending(sessionUser)) {
+    return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
+  }
+
   try {
-    // 1. Custodial payment account for the session user.
-    let vendor = sessionUser;
-    if (!vendor.stellarPublicKey) {
+    // 1. Payout address: the vendor's own Cavos wallet when they have one,
+    //    else a custodial payment account.
+    const vendor = sessionUser;
+    const personal = personalWallet(vendor);
+    let payoutAddress: string;
+    if (personal.kind === "none") {
       const account = await createCustodialAccount();
-      vendor = await prisma.user.update({
+      await prisma.user.update({
         where: { id: vendor.id },
         data: {
           stellarPublicKey: account.publicKey,
           stellarSecretEncrypted: account.secretEncrypted,
         },
       });
+      payoutAddress = account.publicKey;
+    } else {
+      payoutAddress = personal.address;
     }
 
     // 2. Membership row (before the chain call so retries can resume).
@@ -731,11 +743,11 @@ marketplaces.post("/:slug/vendors", async (c) => {
       const { txHash } = await registerVendor({
         operatorSecret: decryptSecret(marketplace.operator.stellarSecretEncrypted),
         marketplaceId: onChainId,
-        vendorPublicKey: vendor.stellarPublicKey as string,
+        vendorPublicKey: payoutAddress,
       });
       membership = await prisma.vendorMembership.update({
         where: { id: membership.id },
-        data: { registerTxHash: txHash },
+        data: { registerTxHash: txHash, payoutAddress },
       });
     }
 

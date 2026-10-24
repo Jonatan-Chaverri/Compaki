@@ -1,8 +1,8 @@
 "use client";
 
-// Sign in / create account. One session works across all marketplaces.
+// Password sign-in for existing accounts (demo/seeded accounts and accounts
+// created before Cavos). New accounts are created with email sign-in (Cavos).
 // ?next=/some/path returns the user to where they were after auth.
-// ?mode=register opens the "Create account" tab directly.
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -10,42 +10,26 @@ import { useState } from "react";
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500";
 
-type Mode = "signin" | "register";
-
 export function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
 
-  const [mode, setMode] = useState<Mode>(
-    searchParams.get("mode") === "register" ? "register" : "signin",
-  );
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [country, setCountry] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-  const valid =
-    mode === "signin"
-      ? emailValid && password.length > 0
-      : name.trim().length >= 2 &&
-        emailValid &&
-        password.length >= 8 &&
-        country.trim().length >= 2;
+  const valid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) && password.length > 0;
 
   const submit = async () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(mode === "signin" ? "/api/auth/login" : "/api/auth/register", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          mode === "signin" ? { email, password } : { name, email, password, country },
-        ),
+        body: JSON.stringify({ email, password }),
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Something went wrong");
@@ -57,128 +41,52 @@ export function AuthForm() {
     }
   };
 
-  const switchMode = (m: Mode) => {
-    setMode(m);
-    setError(null);
-  };
-
   return (
-    <div className="auth-form">
-      <h1 className="text-center text-2xl font-semibold tracking-tight text-slate-900">
-        {mode === "signin" ? "Welcome back" : "Create your account"}
-      </h1>
-      <p className="mt-2 text-center text-sm text-slate-500">
-        Your favorite communities, all in one place.
-      </p>
-
-      <div className="mt-6 flex rounded-full border border-slate-200 bg-white p-1">
-        {(
-          [
-            ["signin", "Sign in"],
-            ["register", "Create account"],
-          ] as const
-        ).map(([m, label]) => (
-          <button
-            key={m}
-            onClick={() => switchMode(m)}
-            aria-pressed={mode === m}
-            disabled={busy}
-            className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
-              mode === m ? "bg-navy-900 text-white" : "text-slate-500 hover:text-slate-900"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+    <form
+      className="auth-fields mt-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid && !busy) void submit();
+      }}
+    >
+      <div className="mb-4">
+        <label htmlFor="auth-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
+        <input
+          id="auth-email"
+          autoComplete="email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="ana@example.com"
+          className={inputClass}
+          disabled={busy}
+        />
       </div>
-
-      <form className="auth-fields mt-6" onSubmit={(event) => { event.preventDefault(); if (valid && !busy) void submit(); }}>
-        {mode === "register" && (
-          <div className="mb-5">
-            <label htmlFor="auth-name" className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
-            <input
-              id="auth-name"
-              autoComplete="name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ana Retana"
-              className={inputClass}
-              disabled={busy}
-            />
-          </div>
-        )}
-
-        <div className="mb-5">
-          <label htmlFor="auth-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
-          <input
-            id="auth-email"
-            autoComplete="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="ana@example.com"
-            className={inputClass}
-            disabled={busy}
-          />
-        </div>
-
-        <div className="mb-5">
-          <label htmlFor="auth-password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
-          <input
-            id="auth-password"
-            autoComplete={mode === "register" ? "new-password" : "current-password"}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={mode === "register" ? "At least 8 characters" : "Your password"}
-            className={inputClass}
-            disabled={busy}
-          />
-        </div>
-
-        {mode === "register" && (
-          <div className="mb-5">
-            <label htmlFor="auth-country" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Country of residence
-            </label>
-            <input
-              id="auth-country"
-              autoComplete="country-name"
-              type="text"
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              placeholder="Costa Rica"
-              className={inputClass}
-              disabled={busy}
-            />
-          </div>
-        )}
-
-        {error && (
-          <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={!valid || busy}
-          className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {busy ? (
-            <span className="inline-flex items-center gap-2">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              {mode === "signin" ? "Signing in…" : "Creating your account…"}
-            </span>
-          ) : mode === "signin" ? (
-            "Sign in"
-          ) : (
-            "Create account"
-          )}
-        </button>
-      </form>
-      <p className="mt-5 text-xs leading-relaxed text-slate-500">Just your email and password. We set up your payment account for you.</p>
-    </div>
+      <div className="mb-4">
+        <label htmlFor="auth-password" className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
+        <input
+          id="auth-password"
+          autoComplete="current-password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Your password"
+          className={inputClass}
+          disabled={busy}
+        />
+      </div>
+      {error && (
+        <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={!valid || busy}
+        className="w-full rounded-full border border-slate-200 bg-white px-7 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {busy ? "Signing in…" : "Sign in with password"}
+      </button>
+    </form>
   );
 }

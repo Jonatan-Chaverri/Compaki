@@ -123,14 +123,15 @@ async function main(): Promise<void> {
 
     const vendorTx: { membershipId: string; txHash: string }[] = [];
     for (const v of m.vendors) {
-      if (!v.user.stellarPublicKey) {
+      const vendorAddress = v.payoutAddress ?? v.user.stellarPublicKey;
+      if (!vendorAddress) {
         console.log(`    vendor ${v.user.name}: no payment account, skipped`);
         continue;
       }
       const { txHash } = await registerVendor({
         operatorSecret,
         marketplaceId: created.marketplaceId,
-        vendorPublicKey: v.user.stellarPublicKey,
+        vendorPublicKey: vendorAddress,
       });
       vendorTx.push({ membershipId: v.id, txHash });
       console.log(`    vendor ${v.user.name} · tx ${txHash}`);

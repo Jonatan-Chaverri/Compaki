@@ -40,7 +40,7 @@ function usdToHorizonAmount(amountUsd: number): string {
     (usdToStroops(amountUsd) % 10_000_000n).toString().padStart(7, "0");
 }
 
-async function fundWithFriendbot(publicKey: string): Promise<void> {
+export async function fundWithFriendbot(publicKey: string): Promise<void> {
   await withTimeoutRetry(`friendbot ${publicKey.slice(0, 6)}`, async () => {
     const res = await fetch(
       `${stellarConfig.friendbotUrl}?addr=${encodeURIComponent(publicKey)}`,
@@ -153,5 +153,64 @@ export async function getUsdBalance(publicKey: string): Promise<number> {
         b.asset_issuer === stellarConfig.usdcIssuerPublic,
     );
     return entry ? Number.parseFloat(entry.balance) : 0;
+  });
+}
+
+/** Demo-asset trustline state of an account ("missing" = not on-chain yet). */
+export async function demoTrustlineState(
+  publicKey: string,
+): Promise<"missing" | "no-trustline" | "ready"> {
+  return withTimeoutRetry(`trustline ${publicKey.slice(0, 6)}`, async () => {
+    let account;
+    try {
+      account = await getHorizon().loadAccount(publicKey);
+    } catch (error) {
+      if (error instanceof Error && /not found|404/i.test(`${error.name} ${error.message}`)) {
+        return "missing";
+      }
+      throw error;
+    }
+    const trusts = account.balances.some(
+      (b) =>
+        b.asset_type !== "native" &&
+        "asset_code" in b &&
+        b.asset_code === stellarConfig.usdcCode &&
+        b.asset_issuer === stellarConfig.usdcIssuerPublic,
+    );
+    return trusts ? "ready" : "no-trustline";
+  });
+}
+
+/**
+ * Setup for a user-owned wallet (Cavos): ONE transaction holding the wallet's
+ * trustline to the demo asset plus a starting demo balance minted by the
+ * issuer, already signed by the issuer. Only the wallet's own signature is
+ * missing — Compaki never holds that key. The account must already exist.
+ */
+export async function prepareTrustlineSetup(params: {
+  publicKey: string;
+  startingUsd: number;
+}): Promise<{ xdr: string; hash: string }> {
+  return withTimeoutRetry("prepare wallet setup", async () => {
+    const account = await getHorizon().loadAccount(params.publicKey);
+    const issuer = Keypair.fromSecret(stellarConfig.usdcIssuerSecret);
+    const asset = demoUsdcAsset();
+    const builder = new TransactionBuilder(account, {
+      fee: (Number(BASE_FEE) * 10).toString(),
+      networkPassphrase: stellarConfig.networkPassphrase,
+    }).addOperation(Operation.changeTrust({ asset }));
+    if (params.startingUsd > 0) {
+      builder.addOperation(
+        Operation.payment({
+          source: issuer.publicKey(),
+          destination: params.publicKey,
+          asset,
+          amount: usdToHorizonAmount(params.startingUsd),
+        }),
+      );
+    }
+    const tx = builder.setTimeout(180).build();
+    tx.sign(issuer);
+    return { xdr: tx.toXDR(), hash: tx.hash().toString("hex") };
   });
 }

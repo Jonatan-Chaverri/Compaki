@@ -1,72 +1,126 @@
-// /api/auth — email + password authentication.
+// /api/auth — authentication.
 //
-//   POST /register   name, email, password, country → user + session cookie
-//   POST /login      email, password → user + session cookie
-//   POST /logout     clears the session cookie
+//   POST /cavos/challenge  { address } → one-time message for the wallet to sign
+//   POST /cavos            Cavos wallet login: verifies the wallet's signature
+//                          over the challenge (+ the Cavos email token, when
+//                          verifiable), links/creates the Compaki user, sets
+//                          the session cookie
+//   POST /profile          name, country for the signed-in user (first login)
+//   POST /login            email + password (existing/demo accounts)
+//   POST /logout           clears the session cookie
 //
-// Legacy users (created by the old passwordless demo flows and the seed
-// script) have no passwordHash. Registering with their email does NOT claim
-// them: knowing an email address is not proof of owning the account (and its
-// custodial payment key). An administrator sets their password out of band
-// with `npm run users:set-password -- <email>` (or DEMO_SEED_PASSWORD for
-// seeded demo users).
+// New accounts are created only through Cavos. An existing account is linked
+// to a Cavos wallet in exactly two cases: the email comes from a Cavos token
+// we verified ourselves (Cavos proved the user received the code), or the
+// user is already signed in to that account when connecting the wallet.
+// A merely reported email is never enough — knowing an address is not proof
+// of owning it. Legacy passwordless users can't be claimed through /login;
+// `npm run users:set-password -- <email>` remains for demo accounts.
 
 import { Hono } from "hono";
 
+import { createChallenge, verifiedEmailFromCavosToken, verifyChallengeSignature } from "@/lib/cavos";
 import { prisma } from "@/lib/db";
-import { hashPassword, verifyPassword } from "@/lib/passwords";
-import { clearSessionCookieHeader, sessionCookieHeader } from "@/lib/session";
+import { verifyPassword } from "@/lib/passwords";
+import {
+  clearSessionCookieHeader,
+  getSessionUser,
+  sessionCookieHeader,
+} from "@/lib/session";
+import { isValidAccountAddress } from "@/lib/stellar";
 
 export const auth = new Hono();
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const MIN_PASSWORD_LENGTH = 8;
 
 function publicUser(user: { id: string; name: string; email: string | null; country: string | null }) {
   return { id: user.id, name: user.name, email: user.email, country: user.country };
 }
 
-auth.post("/register", async (c) => {
-  let body: unknown;
+async function readJson(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown> | null> {
   try {
-    body = await c.req.json();
+    return ((await c.req.json()) ?? {}) as Record<string, unknown>;
   } catch {
-    return c.json({ error: "Invalid JSON" }, 400);
+    return null;
   }
-  const b = (body ?? {}) as Record<string, unknown>;
-  const name = typeof b.name === "string" ? b.name.trim() : "";
-  const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
-  const password = typeof b.password === "string" ? b.password : "";
-  const country = typeof b.country === "string" ? b.country.trim().slice(0, 60) : "";
+}
 
-  if (name.length < 2) return c.json({ error: "Please tell us your name" }, 400);
-  if (!EMAIL_RE.test(email)) return c.json({ error: "Invalid email address" }, 400);
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return c.json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` }, 400);
-  }
-  if (country.length < 2) return c.json({ error: "Please tell us your country of residence" }, 400);
+auth.post("/cavos/challenge", async (c) => {
+  const b = await readJson(c);
+  const address = typeof b?.address === "string" ? b.address : "";
+  if (!isValidAccountAddress(address)) return c.json({ error: "Invalid wallet address" }, 400);
+  return c.json({ message: createChallenge(address) });
+});
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing?.passwordHash) {
-    return c.json({ error: "That email is already registered — sign in instead" }, 409);
-  }
-  if (existing) {
-    return c.json(
-      {
-        error:
-          "An account with this email already exists but has no password yet. For security it can't be claimed by email alone — ask the Compaki administrator to set a password for it.",
-      },
-      409,
-    );
-  }
-
-  const passwordHash = await hashPassword(password);
-  const user = await prisma.user.create({
-    data: { name, email, country, passwordHash, role: "BUYER" },
+auth.post("/cavos", async (c) => {
+  const b = await readJson(c);
+  if (!b) return c.json({ error: "Invalid JSON" }, 400);
+  const str = (key: string) => (typeof b[key] === "string" ? (b[key] as string) : "");
+  const address = str("address");
+  const signatureOk = verifyChallengeSignature({
+    address,
+    publicKey: str("publicKey"),
+    message: str("message"),
+    signatureHex: str("signature"),
   });
+  if (!signatureOk) {
+    return c.json({ error: "We couldn't verify your wallet signature — please sign in again" }, 401);
+  }
+  const verifiedEmail = await verifiedEmailFromCavosToken(str("emailToken") || null);
+  // Linking to the current session is an explicit action ("connect wallet"),
+  // never a side effect of signing in on a shared browser.
+  const sessionUser = b.link === true ? await getSessionUser(c) : null;
+
+  let user = await prisma.user.findUnique({ where: { cavosAddress: address } });
+  if (!user) {
+    // Link an existing account: the signed-in one, or the one owning the
+    // verified email. Never one that already has a different wallet.
+    const candidate =
+      sessionUser ??
+      (verifiedEmail ? await prisma.user.findUnique({ where: { email: verifiedEmail } }) : null);
+    if (candidate?.cavosAddress && candidate.cavosAddress !== address) {
+      return c.json({ error: "This account is already linked to a different wallet" }, 409);
+    }
+    if (candidate) {
+      user = await prisma.user.update({
+        where: { id: candidate.id },
+        data: { cavosAddress: address, cavosWalletReadyAt: null },
+      });
+    } else {
+      const emailTaken = verifiedEmail
+        ? await prisma.user.findUnique({ where: { email: verifiedEmail }, select: { id: true } })
+        : null;
+      user = await prisma.user.create({
+        data: {
+          email: verifiedEmail && !emailTaken ? verifiedEmail : null,
+          name: (verifiedEmail ?? "Compaki member").split("@")[0],
+          role: "BUYER",
+          cavosAddress: address,
+        },
+      });
+    }
+  }
 
   c.header("Set-Cookie", sessionCookieHeader(user.id));
-  return c.json({ user: publicUser(user) }, 201);
+  return c.json({
+    user: publicUser(user),
+    emailVerified: verifiedEmail !== null,
+    needsProfile: !user.country,
+    walletReady: user.cavosWalletReadyAt !== null,
+  });
+});
+
+auth.post("/profile", async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Not signed in" }, 401);
+  const b = await readJson(c);
+  if (!b) return c.json({ error: "Invalid JSON" }, 400);
+  const name = typeof b.name === "string" ? b.name.trim().slice(0, 60) : "";
+  const country = typeof b.country === "string" ? b.country.trim().slice(0, 60) : "";
+  if (name.length < 2) return c.json({ error: "Please tell us your name" }, 400);
+  if (country.length < 2) return c.json({ error: "Please tell us your country of residence" }, 400);
+  const updated = await prisma.user.update({ where: { id: user.id }, data: { name, country } });
+  return c.json({ user: publicUser(updated) });
 });
 
 auth.post("/login", async (c) => {
