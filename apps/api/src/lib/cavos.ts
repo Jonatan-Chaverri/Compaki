@@ -5,11 +5,13 @@
 //
 //   1. Wallet ownership — the browser signs a one-time challenge with the
 //      wallet (Cavos `signMessage`); we verify the ed25519 signature here.
-//   2. Email ownership (optional) — Cavos' recovery enclave verifies the email
-//      code and issues an ES256 JWT (iss https://enclave.cavos.xyz). If that
-//      token verifies against the enclave's published keys, its email is
-//      trusted; otherwise the email the browser reports is ignored for
-//      anything security-relevant (no account linking by email).
+//   2. Email ownership (optional) — the login token Cavos keeps in the
+//      browser: for email codes an ES256 JWT from Cavos' recovery enclave
+//      (iss https://enclave.cavos.xyz), for "Continue with Google" Google's
+//      own RS256 id_token. If it verifies against the issuer's published keys
+//      (and Google marks the email verified), its email is trusted; otherwise
+//      the email the browser reports is ignored for anything
+//      security-relevant (no account linking by email).
 
 import { createPublicKey, randomBytes, verify as verifySignature, type JsonWebKey } from "node:crypto";
 
@@ -18,7 +20,9 @@ import { Keypair } from "@stellar/stellar-sdk";
 import { isValidAccountAddress } from "@/lib/stellar";
 
 export const CAVOS_ENCLAVE_ISSUER = "https://enclave.cavos.xyz";
-const JWKS_URL = `${CAVOS_ENCLAVE_ISSUER}/.well-known/jwks.json`;
+const ENCLAVE_JWKS_URL = `${CAVOS_ENCLAVE_ISSUER}/.well-known/jwks.json`;
+const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
+const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const CAVOS_MESSAGE_PREFIX = "Cavos Signed Message:\n";
 
@@ -66,27 +70,41 @@ export function verifyChallengeSignature(params: {
   return key.verify(cavosPrefixed(Buffer.from(params.message, "utf8")), signature);
 }
 
-// ── Enclave email token (ES256 JWT) ────────────────────────────────────────
+// ── Login tokens (enclave ES256 / Google RS256) ──────────────────────────────
 
-let jwksCache: { keys: (JsonWebKey & { kid?: string })[]; fetchedAt: number } | null = null;
+type Jwk = JsonWebKey & { kid?: string };
+const jwksCache = new Map<string, { keys: Jwk[]; fetchedAt: number }>();
 
-async function enclaveKeys(): Promise<(JsonWebKey & { kid?: string })[]> {
-  if (jwksCache && Date.now() - jwksCache.fetchedAt < 60 * 60 * 1000) return jwksCache.keys;
-  const res = await fetch(JWKS_URL);
-  if (!res.ok) throw new Error(`Cavos JWKS unavailable (${res.status})`);
-  const body = (await res.json()) as { keys?: (JsonWebKey & { kid?: string })[] };
-  jwksCache = { keys: body.keys ?? [], fetchedAt: Date.now() };
-  return jwksCache.keys;
+async function publishedKeys(url: string): Promise<Jwk[]> {
+  const cached = jwksCache.get(url);
+  if (cached && Date.now() - cached.fetchedAt < 60 * 60 * 1000) return cached.keys;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`JWKS unavailable (${res.status}) at ${url}`);
+  const body = (await res.json()) as { keys?: Jwk[] };
+  const keys = body.keys ?? [];
+  jwksCache.set(url, { keys, fetchedAt: Date.now() });
+  return keys;
 }
 
 function base64UrlJson(part: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>;
 }
 
+function audiences(claims: Record<string, unknown>): unknown[] {
+  return Array.isArray(claims.aud) ? claims.aud : claims.aud === undefined ? [] : [claims.aud];
+}
+
 /**
- * Returns the verified, lower-cased email from a Cavos enclave email token,
- * or null when the token is missing, malformed, expired, for another app,
- * not signed by the enclave, or carries no email. Never throws.
+ * Returns the verified, lower-cased email from the login token Cavos keeps in
+ * the browser, or null when the token is missing, malformed, expired, not
+ * signed by its issuer, for another app, or carries no verified email.
+ * Never throws.
+ *
+ *   - Cavos enclave (email code): ES256, enclave JWKS; with CAVOS_APP_ID set
+ *     its `aud`, when present, must include the app id.
+ *   - Google (Continue with Google): RS256, Google JWKS, email_verified must
+ *     be true. Its `aud` is Cavos' Google OAuth client; pin it with
+ *     CAVOS_GOOGLE_CLIENT_ID (logged here until pinned).
  */
 export async function verifiedEmailFromCavosToken(token: string | null | undefined): Promise<string | null> {
   try {
@@ -95,33 +113,47 @@ export async function verifiedEmailFromCavosToken(token: string | null | undefin
     if (!headerPart || !payloadPart || !signaturePart) return null;
     const header = base64UrlJson(headerPart);
     const claims = base64UrlJson(payloadPart);
-    if (header.alg !== "ES256" || claims.iss !== CAVOS_ENCLAVE_ISSUER) return null;
     if (typeof claims.exp !== "number" || claims.exp * 1000 < Date.now()) return null;
-    const appId = process.env.CAVOS_APP_ID;
-    if (appId && claims.aud !== undefined) {
-      const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-      if (!audiences.includes(appId)) return null;
+
+    let jwksUrl: string;
+    if (claims.iss === CAVOS_ENCLAVE_ISSUER && header.alg === "ES256") {
+      jwksUrl = ENCLAVE_JWKS_URL;
+      const appId = process.env.CAVOS_APP_ID;
+      if (appId && claims.aud !== undefined && !audiences(claims).includes(appId)) return null;
+    } else if (GOOGLE_ISSUERS.includes(String(claims.iss)) && header.alg === "RS256") {
+      jwksUrl = GOOGLE_JWKS_URL;
+      if (claims.email_verified !== true) return null;
+      const clientId = process.env.CAVOS_GOOGLE_CLIENT_ID;
+      if (clientId) {
+        if (!audiences(claims).includes(clientId)) return null;
+      } else {
+        console.warn("[cavos] Google token accepted without audience pinning; aud =", claims.aud);
+      }
+    } else {
+      return null;
     }
 
-    const keys = await enclaveKeys();
+    const keys = await publishedKeys(jwksUrl);
     const jwk = keys.find((k) => !header.kid || k.kid === header.kid);
     if (!jwk) return null;
     const ok = verifySignature(
       "sha256",
       Buffer.from(`${headerPart}.${payloadPart}`),
-      { key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" },
+      header.alg === "ES256"
+        ? { key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" }
+        : createPublicKey({ key: jwk, format: "jwk" }),
       Buffer.from(signaturePart, "base64url"),
     );
     if (!ok) return null;
 
     const email = typeof claims.email === "string" ? claims.email.trim().toLowerCase() : null;
     if (!email || claims.email_verified === false) {
-      console.warn("[cavos] enclave token verified but carries no email claim; claims:", Object.keys(claims));
+      console.warn("[cavos] login token verified but carries no usable email; claims:", Object.keys(claims));
       return null;
     }
     return email;
   } catch (error) {
-    console.warn("[cavos] email token not verifiable:", error instanceof Error ? error.message : error);
+    console.warn("[cavos] login token not verifiable:", error instanceof Error ? error.message : error);
     return null;
   }
 }

@@ -1,8 +1,9 @@
 "use client";
 
-// Email sign-in with Cavos. Cavos emails a code, verifies it, and opens the
-// user's own Stellar wallet (derived from the login; its key never reaches
-// Compaki). Then:
+// Sign-in with Cavos — "Continue with Google" or an emailed code. Either way
+// Cavos opens the user's own Stellar wallet (derived from the login; its key
+// never reaches Compaki). Google leaves the page and comes back to /login,
+// where the provider finishes the login and we pick up from step 1. Then:
 //   1. the wallet signs a one-time challenge → POST /api/auth/cavos (session),
 //   2. first login only: name + country,
 //   3. wallet activation (testnet XLM + demo-money trustline), signed by the
@@ -23,18 +24,40 @@ type Step = "email" | "code" | "working" | "device" | "profile";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Survive the round trip to Google (the callback returns to /login without
+// our query string).
+const OAUTH_PENDING_KEY = "compaki:oauth-pending";
+const NEXT_KEY = "compaki:login-next";
+
+function readAndClear(key: string): string | null {
+  try {
+    const value = window.sessionStorage.getItem(key);
+    window.sessionStorage.removeItem(key);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 export function CavosLogin() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
-  const { sendOtp, verifyOtp, wallet, address, walletStatus, authorizeDevice, logout } = useCavos();
+  const { sendOtp, verifyOtp, login, wallet, address, walletStatus, user, authError, authorizeDevice, logout } =
+    useCavos();
 
   // The async sign-in below waits for the wallet the provider opens after the
-  // code is verified; it reads the latest values through this ref.
-  const latest = useRef({ wallet, address, walletStatus });
+  // code is verified (or after the Google callback); it reads the latest
+  // values through this ref.
+  const latest = useRef({ wallet, address, walletStatus, user, authError });
   useEffect(() => {
-    latest.current = { wallet, address, walletStatus };
+    latest.current = { wallet, address, walletStatus, user, authError };
   });
+
+  const destination = () => {
+    const target = searchParams.get("next") ?? readAndClear(NEXT_KEY) ?? "/";
+    return target.startsWith("/") ? target : "/";
+  };
 
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
@@ -55,6 +78,7 @@ export function CavosLogin() {
     for (let i = 0; i < 120; i++) {
       const current = latest.current;
       if (current.wallet?.chain === "stellar" && current.address) return current;
+      if (current.authError) throw new Error(current.authError);
       await sleep(500);
     }
     throw new Error("Your wallet didn't open — please try again.");
@@ -74,7 +98,7 @@ export function CavosLogin() {
       () => setProgress("Approving your wallet's activation…"),
     );
     if (result.status !== 200) throw new Error(result.body.error ?? "Wallet activation failed");
-    router.push(next.startsWith("/") ? next : "/");
+    router.push(destination());
     router.refresh();
   };
 
@@ -109,8 +133,9 @@ export function CavosLogin() {
           publicKey: signed.publicKey,
           signature: bytesToHex(signed.signature),
           message: challenge.body.message,
-          email,
-          // Cavos' signed email proof; the API trusts the email only if it verifies.
+          email: email || latest.current.user?.email || "",
+          // Cavos' signed login token (email code or Google); the API trusts
+          // the email only if it verifies.
           emailToken: new CavosAuth({ appId: CAVOS_APP_ID }).getAuthToken(),
         }),
       }),
@@ -122,12 +147,48 @@ export function CavosLogin() {
       return;
     }
     if (login.body.walletReady) {
-      router.push(next.startsWith("/") ? next : "/");
+      router.push(destination());
       router.refresh();
       return;
     }
     await activateWallet();
   };
+
+  const startGoogle = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      window.sessionStorage.setItem(NEXT_KEY, next);
+      window.sessionStorage.setItem(OAUTH_PENDING_KEY, "google");
+      await login("google"); // navigates away to Google
+    } catch (err) {
+      readAndClear(OAUTH_PENDING_KEY);
+      fail(err, "email");
+    }
+  };
+
+  // Back from Google: the provider exchanges the callback code and opens the
+  // wallet; continue the sign-in from there.
+  useEffect(() => {
+    if (readAndClear(OAUTH_PENDING_KEY) !== "google") return;
+    let cancelled = false;
+    const resume = async () => {
+      await sleep(0);
+      if (cancelled) return;
+      setBusy(true);
+      try {
+        await finishSignIn();
+      } catch (err) {
+        fail(err, "email");
+      }
+    };
+    void resume();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount, right after the redirect back to /login.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitEmail = async () => {
     setBusy(true);
@@ -194,12 +255,12 @@ export function CavosLogin() {
   return (
     <div className="auth-form">
       <h1 className="text-center text-2xl font-semibold tracking-tight text-slate-900">
-        {step === "profile" ? "Tell us about you" : "Sign in with your email"}
+        {step === "profile" ? "Tell us about you" : "Sign in to Compaki"}
       </h1>
       <p className="mt-2 text-center text-sm text-slate-500">
         {step === "profile"
           ? "Just once — this is how vendors and communities will see you."
-          : "No password. We email you a code and open your own wallet."}
+          : "No password. Continue with Google or get a code by email — we open your own wallet."}
       </p>
 
       <form
@@ -212,6 +273,30 @@ export function CavosLogin() {
           if (step === "profile" && name.trim().length >= 2 && country.trim().length >= 2) void submitProfile();
         }}
       >
+        {step === "email" && (
+          <>
+            <button
+              type="button"
+              onClick={() => void startGoogle()}
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-3 rounded-full border border-slate-200 bg-white px-7 py-3 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden className="h-4 w-4">
+                <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
+                <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
+                <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
+                <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
+              </svg>
+              Continue with Google
+            </button>
+            <p className="my-5 flex items-center gap-3 text-xs text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              or get a code by email
+              <span className="h-px flex-1 bg-slate-200" />
+            </p>
+          </>
+        )}
+
         {(step === "email" || step === "code") && (
           <div className="mb-5">
             <label htmlFor="cavos-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
