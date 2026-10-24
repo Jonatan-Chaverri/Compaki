@@ -17,6 +17,9 @@ export default async function JoinPage(props: { params: Promise<{ slug: string }
   if (res.status === 404) notFound();
   if (!res.ok) throw new Error(`Marketplace request failed (${res.status})`);
   const { marketplace } = (await res.json()) as { marketplace: MarketplaceInfo };
+  // Vendors join as the signed-in user (never by typing someone's email).
+  const meRes = await apiFetch("/api/me");
+  const { user } = (await meRes.json()) as { user: { name: string; email: string | null } | null };
 
   return (
     <main className="mx-auto w-full max-w-xl px-6 py-12">
@@ -30,7 +33,7 @@ export default async function JoinPage(props: { params: Promise<{ slug: string }
         </p>
       </div>
       <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <JoinForm slug={marketplace.slug} marketplaceName={marketplace.name} />
+        <JoinForm slug={marketplace.slug} marketplaceName={marketplace.name} user={user} />
       </div>
     </main>
   );

@@ -167,6 +167,26 @@ export function UserMenu() {
                 </svg>
                 My orders
               </Link>
+              <Link
+                role="menuitem"
+                href="/rewards"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4 text-slate-400"
+                >
+                  <path d="M20 12v9H4v-9M2 7h20v5H2zM12 21V7" />
+                  <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+                </svg>
+                My rewards
+              </Link>
               {vendorMarketplaces.map((marketplace) => (
                 <Link
                   key={marketplace.slug}

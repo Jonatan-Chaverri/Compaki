@@ -62,6 +62,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
   // Step 2
   const [splits, setSplits] = useState<Splits>({ vendor: 90, operator: 10, community: 0 });
   const [regenerative, setRegenerative] = useState(false);
+  const [rewards, setRewards] = useState(false);
 
   // Step 3 (launch)
   const [launchStates, setLaunchStates] = useState<Record<LaunchStepId, LaunchStepState>>({
@@ -139,6 +140,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           operatorBps: splits.operator * 100,
           communityBps: splits.community * 100,
           regenerativeEnabled: regenerative,
+          rewardsEnabled: regenerative && rewards,
         }),
       });
 
@@ -180,7 +182,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
     } finally {
       launchInFlight.current = false;
     }
-  }, [name, slug, description, category, splits, regenerative]);
+  }, [name, slug, description, category, splits, regenerative, rewards]);
 
   const startLaunch = () => {
     setStep(2);
@@ -333,12 +335,39 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                     className="h-5 w-5 accent-emerald-600"
                   />
                 </label>
+                {regenerative && (
+                  <label className="mt-4 flex cursor-pointer items-start justify-between gap-4 border-t border-emerald-100 pt-4">
+                    <span>
+                      <span className="text-sm font-medium text-slate-900">
+                        Community Rewards (on-chain treasury)
+                      </span>
+                      <span className="mt-1 block text-xs text-slate-600">
+                        The community share is held by the smart contract and split between
+                        members you register per period, with shares that can&apos;t be changed
+                        once a period starts. Sales pause while no period is open. This can&apos;t
+                        be changed after launch.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={rewards}
+                      onChange={(e) => setRewards(e.target.checked)}
+                      className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600"
+                    />
+                  </label>
+                )}
               </div>
+              {regenerative && rewards && splits.community === 0 && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Community Rewards needs a community share above 0%.
+                </p>
+              )}
 
               <WizardNav
                 onBack={() => setStep(0)}
                 onNext={startLaunch}
                 nextLabel="Launch my marketplace"
+                nextDisabled={regenerative && rewards && splits.community === 0}
               />
             </StepCard>
           )}

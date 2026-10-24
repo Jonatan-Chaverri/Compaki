@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppHeader } from "@/components/shell";
@@ -16,6 +17,8 @@ interface DashboardPayload {
   name: string;
   slug: string;
   regenerativeEnabled: boolean;
+  rewardsEnabled: boolean;
+  demoImpersonation: boolean;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
   operatorAccount: string | null;
   communityAccount: string | null;
@@ -35,6 +38,27 @@ export default async function OperatorPage(props: { params: Promise<{ slug: stri
   const { slug } = await props.params;
   const res = await apiFetch(`/api/marketplaces/${encodeURIComponent(slug)}/dashboard`);
   if (res.status === 404) notFound();
+  if (res.status === 401 || res.status === 403) {
+    return (
+      <div className="min-h-screen bg-slate-50/60">
+        <AppHeader />
+        <main className="mx-auto w-full max-w-xl px-6 py-20 text-center">
+          <p className="text-3xl">🔐</p>
+          <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
+            {res.status === 401
+              ? "Sign in as the operator to see this dashboard"
+              : "Only this marketplace's operator can see its dashboard"}
+          </h1>
+          <Link
+            href={`/login?next=/dashboard/${encodeURIComponent(slug)}`}
+            className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
+          >
+            {res.status === 401 ? "Sign in" : "Switch account"}
+          </Link>
+        </main>
+      </div>
+    );
+  }
   if (!res.ok) throw new Error(`Dashboard request failed (${res.status})`);
   const data = (await res.json()) as DashboardPayload;
 
@@ -52,6 +76,8 @@ export default async function OperatorPage(props: { params: Promise<{ slug: stri
         name={data.name}
         slug={data.slug}
         regenerativeEnabled={data.regenerativeEnabled}
+        rewardsEnabled={data.rewardsEnabled}
+        demoImpersonation={data.demoImpersonation}
         splits={data.splits}
         operatorAccount={data.operatorAccount}
         communityAccount={data.communityAccount}

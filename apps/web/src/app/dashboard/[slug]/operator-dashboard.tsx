@@ -6,6 +6,8 @@ import { LiveBalance } from "@/components/live-balance";
 import { ProductVisual } from "@/components/shell";
 import { formatDateTime, formatUsd } from "@/lib/format";
 
+import { RewardsPanel } from "./rewards-panel";
+
 export interface SaleFeedRow {
   id: string;
   productName: string;
@@ -36,12 +38,14 @@ export interface CatalogRow {
   vendorName: string;
 }
 
-type Tab = "overview" | "vendors" | "products";
+type Tab = "overview" | "rewards" | "vendors" | "products";
 
 export function OperatorDashboard({
   name,
   slug,
   regenerativeEnabled,
+  rewardsEnabled,
+  demoImpersonation,
   splits,
   operatorAccount,
   communityAccount,
@@ -53,6 +57,8 @@ export function OperatorDashboard({
   name: string;
   slug: string;
   regenerativeEnabled: boolean;
+  rewardsEnabled: boolean;
+  demoImpersonation: boolean;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
   operatorAccount: string | null;
   communityAccount: string | null;
@@ -68,6 +74,9 @@ export function OperatorDashboard({
   catalog: CatalogRow[];
 }) {
   const [tab, setTab] = useState<Tab>("overview");
+  const tabs: Tab[] = rewardsEnabled
+    ? ["overview", "rewards", "vendors", "products"]
+    : ["overview", "vendors", "products"];
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-8">
@@ -82,10 +91,15 @@ export function OperatorDashboard({
                 regenerative
               </span>
             )}
+            {rewardsEnabled && (
+              <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                community rewards
+              </span>
+            )}
           </p>
         </div>
-        <div className="flex gap-2">
-          {(["overview", "vendors", "products"] as Tab[]).map((t) => (
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -93,7 +107,7 @@ export function OperatorDashboard({
                 tab === t ? "bg-navy-900 text-white" : "text-slate-500 hover:bg-slate-100"
               }`}
             >
-              {t}
+              {t === "rewards" ? "Community rewards" : t}
             </button>
           ))}
         </div>
@@ -119,7 +133,11 @@ export function OperatorDashboard({
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <RevenueRow label="Vendors" amount={stats.vendorRevenue} dot="bg-navy-900" />
               <RevenueRow label="You (operator)" amount={stats.operatorRevenue} dot="bg-slate-400" />
-              <RevenueRow label="Community fund" amount={stats.communityRevenue} dot="bg-emerald-500" />
+              <RevenueRow
+                label={rewardsEnabled ? "Community rewards" : "Community fund"}
+                amount={stats.communityRevenue}
+                dot="bg-emerald-500"
+              />
             </div>
           </div>
 
@@ -172,6 +190,8 @@ export function OperatorDashboard({
         </>
       )}
 
+      {tab === "rewards" && <RewardsPanel slug={slug} />}
+
       {tab === "vendors" && (
         <section className="mt-6">
           <InviteLink slug={slug} />
@@ -206,13 +226,15 @@ export function OperatorDashboard({
                         registered on-chain ↗
                       </a>
                     )}
-                    <a
-                      href={`/api/demo/impersonate?userId=${v.id}&redirect=/vendor/${slug}`}
-                      className="rounded-full border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
-                      title="Demo shortcut: switches your session to this vendor"
-                    >
-                      View their dashboard →
-                    </a>
+                    {demoImpersonation && (
+                      <a
+                        href={`/api/demo/impersonate?userId=${v.id}&redirect=/vendor/${slug}`}
+                        className="rounded-full border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
+                        title="Local demo shortcut (ENABLE_DEMO_IMPERSONATION): switches your session to this vendor"
+                      >
+                        View their dashboard →
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}

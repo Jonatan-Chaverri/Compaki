@@ -9,17 +9,15 @@ const inputClass =
 export function JoinForm({
   slug,
   marketplaceName,
+  user,
 }: {
   slug: string;
   marketplaceName: string;
+  user: { name: string; email: string | null } | null;
 }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [sells, setSells] = useState("");
   const [state, setState] = useState<"idle" | "submitting" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
-
-  const valid = name.trim().length >= 2 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
 
   const submit = async () => {
     setState("submitting");
@@ -28,7 +26,7 @@ export function JoinForm({
       const res = await fetch(`/api/marketplaces/${slug}/vendors`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, sells }),
+        body: JSON.stringify({ sells }),
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Registration failed");
@@ -59,30 +57,38 @@ export function JoinForm({
     );
   }
 
+  if (!user) {
+    const next = encodeURIComponent(`/m/${slug}/join`);
+    return (
+      <div className="py-2 text-center">
+        <p className="text-sm text-slate-600">
+          Sign in or create a Compaki account first — you&apos;ll join {marketplaceName} as that
+          account.
+        </p>
+        <div className="mt-5 flex justify-center gap-3">
+          <Link
+            href={`/login?next=${next}`}
+            className="rounded-full bg-navy-900 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-navy-700"
+          >
+            Sign in
+          </Link>
+          <Link
+            href={`/login?mode=register&next=${next}`}
+            className="rounded-full border border-slate-200 px-6 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Create account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="mb-5">
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Rosa Jiménez"
-          className={inputClass}
-          disabled={state === "submitting"}
-        />
-      </div>
-      <div className="mb-5">
-        <label className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="rosa@example.com"
-          className={inputClass}
-          disabled={state === "submitting"}
-        />
-      </div>
+      <p className="mb-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+        Joining as <span className="font-medium text-slate-900">{user.name}</span>
+        {user.email && <span className="text-slate-400"> · {user.email}</span>}
+      </p>
       <div className="mb-6">
         <label className="mb-1.5 block text-sm font-medium text-slate-700">
           What do you sell?
@@ -106,7 +112,7 @@ export function JoinForm({
 
       <button
         onClick={() => void submit()}
-        disabled={!valid || state === "submitting"}
+        disabled={state === "submitting"}
         className="w-full rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {state === "submitting" ? (
