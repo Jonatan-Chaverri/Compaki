@@ -5,6 +5,7 @@ import { Hono } from "hono";
 
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
+import { ownWalletProvider } from "@/lib/wallets";
 
 export const me = new Hono();
 
@@ -29,8 +30,9 @@ me.get("/", async (c) => {
   return c.json({
     user: { id: user.id, name: user.name, email: user.email, country: user.country },
     wallet: {
-      cavosAddress: user.cavosAddress,
-      cavosReady: user.cavosWalletReadyAt !== null,
+      address: user.walletAddress,
+      provider: user.walletAddress ? ownWalletProvider(user) : null,
+      ready: user.walletReadyAt !== null,
     },
     operatedMarketplaceSlug: marketplace?.slug ?? null,
     vendorMarketplaces: memberships.map((m) => ({

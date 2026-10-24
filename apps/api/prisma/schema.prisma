@@ -31,13 +31,17 @@ model User {
   // haven't connected a Cavos wallet.
   stellarPublicKey       String?  @unique
   stellarSecretEncrypted String?
-  // The user's own Cavos wallet (email login). Its key lives in the Cavos
-  // vault — Compaki never holds it; the user signs purchases and claims in the
-  // browser. Personal money (purchases, vendor revenue, member rewards) uses
-  // this wallet once it is ready.
-  cavosAddress           String?  @unique
-  // Set once the Cavos wallet is funded and trusts the demo asset.
-  cavosWalletReadyAt     DateTime?
+  // The user's own Stellar wallet: a Cavos wallet (email/Google login) or a
+  // wallet they already had (Freighter, xBull, Albedo… via Stellar Wallets
+  // Kit). Its key never reaches Compaki; the user signs purchases and claims
+  // in the browser. Personal money (purchases, vendor revenue, member
+  // rewards) uses this wallet once it is ready. Mapped onto the original
+  // cavosAddress / cavosWalletReadyAt columns (no data migration needed).
+  walletAddress          String?  @unique @map("cavosAddress")
+  // "cavos" | "stellar-wallet"; null on rows from before this field = cavos.
+  walletProvider         String?
+  // Set once the wallet is funded and trusts the demo asset.
+  walletReadyAt          DateTime? @map("cavosWalletReadyAt")
   createdAt              DateTime @default(now())
 
   marketplaces     Marketplace[]      @relation("MarketplaceOperator")

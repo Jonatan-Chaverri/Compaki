@@ -4,14 +4,14 @@
 //   POST /marketplace/:slug/periods                 open a period (operator)
 //   POST /marketplace/:slug/periods/:id/close       close an ended period (operator or beneficiary)
 //   POST /marketplace/:slug/periods/:id/claim       claim the session user's reward
-//                                                   (Cavos wallets: 202 + tx to sign,
+//                                                   (own wallets: 202 + tx to sign,
 //                                                   finished by POST /api/tx/:id)
 //   POST /marketplace/:slug/guarantees              simulate a forbidden action (operator)
 //   GET  /me                                        session user's rewards across marketplaces
 //
 // Every balance, share and claim right in these payloads is read from the
 // contract (see src/lib/rewards.ts). Postgres only adds tx hashes and names.
-// Members with a Cavos wallet sign their own claims in the browser; for
+// Members with their own wallet sign their claims in the browser; for
 // custodial accounts the backend signs with the key it holds, so there
 // `require_auth` proves "the backend acted for this user" (README "Custody").
 
@@ -62,7 +62,7 @@ const marketplaceSelect = {
   contractId: true,
 } as const;
 
-/** The address the viewer's money uses (Cavos wallet once ready, else custodial). */
+/** The address the viewer's money uses (own wallet once ready, else custodial). */
 function viewerAddressOf(user: Parameters<typeof personalWallet>[0]): string | null {
   const personal = personalWallet(user);
   return personal.kind === "none" ? null : personal.address;
@@ -174,7 +174,7 @@ rewards.post("/marketplace/:slug/periods", async (c) => {
     if (!member) {
       return c.json({ error: `No Compaki account for ${email} — ask them to sign up first` }, 400);
     }
-    if (member.cavosAddress && !member.cavosWalletReadyAt) {
+    if (member.walletAddress && !member.walletReadyAt) {
       return c.json({ error: `${email} hasn't finished setting up their wallet yet` }, 400);
     }
     const personal = personalWallet(member);
@@ -305,7 +305,7 @@ rewards.post("/marketplace/:slug/periods/:id/close", async (c) => {
 // ── POST /marketplace/:slug/periods/:id/claim ──────────────────────────────
 //
 // Claims for the session user only: the contract pays the address whose
-// authorization it checks. A Cavos wallet signs in the browser (202 + the
+// authorization it checks. An own wallet signs in the browser (202 + the
 // transaction; POST /api/tx/:id submits it and calls completeClaim); a
 // custodial account is signed by the backend.
 
@@ -371,20 +371,20 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
     const period = await getRewardsPeriod(onChainId, periodId);
     const notMember = () => c.json({ error: "You are not a beneficiary of this period." }, 403);
 
-    // The user's Cavos wallet is a member: they sign the claim themselves.
-    if (user.cavosAddress && period.beneficiaries.includes(user.cavosAddress)) {
-      if (!user.cavosWalletReadyAt) {
+    // The user's own wallet is a member: they sign the claim themselves.
+    if (user.walletAddress && period.beneficiaries.includes(user.walletAddress)) {
+      if (!user.walletReadyAt) {
         return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
       }
       const prepared = await prepareClaim({
-        memberPublicKey: user.cavosAddress,
+        memberPublicKey: user.walletAddress,
         marketplaceId: onChainId,
         periodId,
       });
       const pending = createPending<ClaimContext>({
         kind: "claim",
         userId: user.id,
-        signer: user.cavosAddress,
+        signer: user.walletAddress,
         xdr: prepared.xdr,
         hash: prepared.hash,
         context: { marketplaceId: marketplace.id, periodId },

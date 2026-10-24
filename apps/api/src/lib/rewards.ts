@@ -133,8 +133,8 @@ export async function loadRewardsView(marketplace: {
   const addresses = [...new Set(periods.flatMap((p) => p.period.beneficiaries))];
   const [users, auxPeriods, sales] = await Promise.all([
     prisma.user.findMany({
-      where: { OR: [{ stellarPublicKey: { in: addresses } }, { cavosAddress: { in: addresses } }] },
-      select: { name: true, stellarPublicKey: true, cavosAddress: true },
+      where: { OR: [{ stellarPublicKey: { in: addresses } }, { walletAddress: { in: addresses } }] },
+      select: { name: true, stellarPublicKey: true, walletAddress: true },
     }),
     prisma.rewardsPeriod.findMany({
       where: { marketplaceId: marketplace.id, contractId, periodId: { in: ids } },
@@ -148,7 +148,7 @@ export async function loadRewardsView(marketplace: {
     }),
   ]);
   const nameOf = new Map(
-    users.flatMap((u) => [u.stellarPublicKey, u.cavosAddress].filter(Boolean).map((a) => [a, u.name] as const)),
+    users.flatMap((u) => [u.stellarPublicKey, u.walletAddress].filter(Boolean).map((a) => [a, u.name] as const)),
   );
   const auxOf = new Map(auxPeriods.map((p) => [p.periodId, p]));
 

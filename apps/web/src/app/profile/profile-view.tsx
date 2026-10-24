@@ -15,10 +15,11 @@ export interface ProfileUser {
 }
 
 interface WalletInfo {
-  provider: "cavos" | "custodial" | "none";
+  provider: "own" | "custodial" | "none";
   address: string | null;
-  cavosAddress: string | null;
-  cavosReady: boolean;
+  walletAddress: string | null;
+  walletProvider: "cavos" | "stellar-wallet" | null;
+  walletReady: boolean;
   balanceUsd: number | null;
   assetCode: string;
 }
@@ -26,10 +27,14 @@ interface WalletInfo {
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500";
 
-const PROVIDER_LABEL: Record<WalletInfo["provider"], { title: string; detail: string }> = {
+const PROVIDER_LABEL: Record<"cavos" | "stellar-wallet" | "custodial" | "none", { title: string; detail: string }> = {
   cavos: {
     title: "Your own wallet (Cavos)",
     detail: "Only you can move this money: you approve every payment and claim from your browser.",
+  },
+  "stellar-wallet": {
+    title: "Your own Stellar wallet",
+    detail: "The wallet you connected (e.g. Freighter). You approve every payment and claim in it.",
   },
   custodial: {
     title: "Managed by Compaki",
@@ -91,7 +96,7 @@ export function ProfileView({ user }: { user: ProfileUser }) {
     try {
       const result = await followSignatures(
         await readResult(await fetch("/api/wallet/setup", { method: "POST" })),
-        signer?.signXdr ?? null,
+        signer.signXdr,
       );
       if (result.status !== 200) throw new Error(result.body.error ?? "Wallet activation failed");
       setVersion((v) => v + 1);
@@ -141,8 +146,10 @@ export function ProfileView({ user }: { user: ProfileUser }) {
   };
 
   const nameChanged = name.trim() !== user.name && name.trim().length >= 2;
-  const needsActivation = wallet !== null && wallet.cavosAddress !== null && !wallet.cavosReady;
-  const label = wallet ? PROVIDER_LABEL[wallet.provider] : null;
+  const needsActivation = wallet !== null && wallet.walletAddress !== null && !wallet.walletReady;
+  const label = wallet
+    ? PROVIDER_LABEL[wallet.provider === "own" ? wallet.walletProvider ?? "cavos" : wallet.provider]
+    : null;
   const canMint = wallet !== null && wallet.provider !== "none" && !needsActivation;
 
   return (
@@ -234,7 +241,7 @@ export function ProfileView({ user }: { user: ProfileUser }) {
           )}
           {needsActivation && (
             <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
-              Your Cavos wallet <code className="font-mono text-xs">{wallet.cavosAddress}</code> isn&apos;t
+              Your wallet <code className="font-mono text-xs">{wallet.walletAddress}</code> isn&apos;t
               activated yet.
               <button
                 type="button"

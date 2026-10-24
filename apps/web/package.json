@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cavos/kit": "^0.4.4",
+    "@creit.tech/stellar-wallets-kit": "^2.7.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

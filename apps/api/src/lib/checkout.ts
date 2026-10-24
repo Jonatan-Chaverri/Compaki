@@ -1,7 +1,7 @@
 // Order settlement shared by both payment paths:
 //
 //   - custodial buyers: the API signs every item's purchase in one request;
-//   - Cavos buyers: the API prepares one item's purchase at a time, the buyer
+//   - own-wallet buyers (Cavos or e.g. Freighter): the API prepares one item's purchase at a time, the buyer
 //     signs it in the browser, and POST /api/tx/:id submits it and comes back
 //     here for the next item (completePurchaseStep).
 //
@@ -213,7 +213,7 @@ export async function completeOrder(orderId: string, shipping: Shipping) {
   };
 }
 
-// ── Cavos (browser-signed) purchases ────────────────────────────────────────
+// ── Own-wallet (browser-signed) purchases ────────────────────────────────────────
 
 interface PurchaseContext {
   orderId: string;
@@ -231,11 +231,11 @@ function shippingOf(order: PaymentOrder): Shipping {
 }
 
 /**
- * Prepares the next unsettled item's purchase for the buyer's Cavos wallet to
+ * Prepares the next unsettled item's purchase for the buyer's own wallet to
  * sign, or completes the order when nothing is left. Shipping must already be
  * stored on the order.
  */
-export async function nextCavosPurchaseStep(orderId: string, buyer: { id: string; cavosAddress: string }) {
+export async function nextOwnWalletPurchaseStep(orderId: string, buyer: { id: string; walletAddress: string }) {
   const order = await loadOrderForPayment(orderId);
   if (!order) throw new Error(`Order ${orderId} vanished`);
   const unsettled = order.items.filter((item) => !item.sale);
@@ -248,7 +248,7 @@ export async function nextCavosPurchaseStep(orderId: string, buyer: { id: string
   if (!vendorAddress) throw new Error(`${item.product.name} has no payout address`);
 
   const prepared = await preparePurchase({
-    buyerPublicKey: buyer.cavosAddress,
+    buyerPublicKey: buyer.walletAddress,
     marketplaceId: onChainId,
     vendorPublicKey: vendorAddress,
     amountStroops: lineAmount(item).amountStroops,
@@ -256,7 +256,7 @@ export async function nextCavosPurchaseStep(orderId: string, buyer: { id: string
   const pending = createPending<PurchaseContext>({
     kind: "purchase",
     userId: buyer.id,
-    signer: buyer.cavosAddress,
+    signer: buyer.walletAddress,
     xdr: prepared.xdr,
     hash: prepared.hash,
     context: { orderId: order.id, itemId: item.id, startedAt: Date.now() },
@@ -288,5 +288,5 @@ export async function completePurchaseStep(
       shipping: shippingOf(order),
     });
   }
-  return nextCavosPurchaseStep(order.id, { id: pending.userId, cavosAddress: pending.signer });
+  return nextOwnWalletPurchaseStep(order.id, { id: pending.userId, walletAddress: pending.signer });
 }

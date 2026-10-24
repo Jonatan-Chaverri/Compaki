@@ -4,8 +4,8 @@
 //   GET  /          session buyer's orders (pending + completed; expired hidden)
 //   GET  /:id       checkout payload for one order (buyer only)
 //   POST /:id/pay   shipping address + payment: settles every item on-chain,
-//                   decrements stock, marks the order COMPLETED. Buyers with a
-//                   Cavos wallet sign each item in the browser: this returns
+//                   decrements stock, marks the order COMPLETED. Buyers with their
+//                   own wallet (Cavos or e.g. Freighter) sign each item in the browser: this returns
 //                   202 + the first transaction to sign, and POST /api/tx/:id
 //                   continues item by item (see src/lib/checkout.ts).
 //
@@ -17,7 +17,7 @@ import {
   completeOrder,
   lineAmount,
   loadOrderForPayment,
-  nextCavosPurchaseStep,
+  nextOwnWalletPurchaseStep,
   orderItemsInclude,
   orderPayload,
   recordSale,
@@ -28,7 +28,7 @@ import { prisma } from "@/lib/db";
 import { boundOnChainId, describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 import { createCustodialAccount, decryptSecret, purchase } from "@/lib/stellar";
-import { cavosWalletPending, personalWallet } from "@/lib/wallets";
+import { ownWalletPending, personalWallet } from "@/lib/wallets";
 
 export const orders = new Hono();
 
@@ -216,7 +216,7 @@ orders.post("/:id/pay", async (c) => {
       );
     }
   }
-  if (cavosWalletPending(sessionUser)) {
+  if (ownWalletPending(sessionUser)) {
     return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
   }
   const remainingUsd = unsettled.reduce((acc, item) => acc + lineAmount(item).lineUsd, 0);
@@ -224,9 +224,10 @@ orders.post("/:id/pay", async (c) => {
   try {
     const wallet = personalWallet(sessionUser);
 
-    // Cavos wallet: the buyer signs each item in the browser. The demo
+    // Own wallet (Cavos or an existing Stellar wallet): the buyer signs each
+    // item in the browser. The demo
     // "card payment" tops the wallet up with demo money first.
-    if (wallet.kind === "cavos") {
+    if (wallet.kind === "own") {
       await topUpDemoBalance(wallet.address, remainingUsd);
       await prisma.order.update({
         where: { id: order.id },
@@ -237,9 +238,9 @@ orders.post("/:id/pay", async (c) => {
           shipCountry: shipping.country,
         },
       });
-      const step = await nextCavosPurchaseStep(order.id, {
+      const step = await nextOwnWalletPurchaseStep(order.id, {
         id: sessionUser.id,
-        cavosAddress: wallet.address,
+        walletAddress: wallet.address,
       });
       return c.json(step, "signatureRequired" in step ? 202 : 200);
     }

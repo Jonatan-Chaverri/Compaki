@@ -3,6 +3,7 @@
 // on timeout. Nothing outside src/lib/stellar may talk to the chain.
 
 import {
+  Account,
   Address,
   BASE_FEE,
   Contract,
@@ -221,18 +222,16 @@ export class SignedTxMismatchError extends Error {
 }
 
 /**
- * Submits a transaction the user signed in the browser (Cavos `signXdr`).
- * Before anything reaches the network it checks that the envelope still
- * hashes to the transaction Compaki prepared (so the client can't swap in a
- * different one) and that it carries a valid signature from `signer`.
- * Works for contract invocations and classic transactions alike.
+ * Checks a transaction the user signed in their wallet: it must still hash to
+ * the transaction Compaki prepared (so the client can't swap in a different
+ * one) and carry a valid signature from `signer`. Returns the parsed
+ * transaction; throws SignedTxMismatchError otherwise.
  */
-export async function submitUserSignedXdr(params: {
+export function checkUserSignedXdr(params: {
   signedXdr: string;
   expectedHash: string;
   signer: string;
-  label: string;
-}): Promise<InvokeResult> {
+}): Transaction {
   let tx;
   try {
     tx = TransactionBuilder.fromXDR(params.signedXdr, stellarConfig.networkPassphrase);
@@ -250,7 +249,40 @@ export async function submitUserSignedXdr(params: {
     (s) => s.hint().equals(hint) && key.verify(hash, s.signature()),
   );
   if (!signedByUser) throw new SignedTxMismatchError("it is not signed by your wallet");
-  return sendAndConfirm(tx, params.label);
+  return tx;
+}
+
+/**
+ * Submits a transaction the user signed in the browser (Cavos `signXdr`, or
+ * an existing wallet's signTransaction) after checkUserSignedXdr. Works for
+ * contract invocations and classic transactions alike.
+ */
+export async function submitUserSignedXdr(params: {
+  signedXdr: string;
+  expectedHash: string;
+  signer: string;
+  label: string;
+}): Promise<InvokeResult> {
+  return sendAndConfirm(checkUserSignedXdr(params), params.label);
+}
+
+/**
+ * Sign-in challenge for an existing Stellar wallet (SEP-10 style): a
+ * transaction from the user's account with sequence number 0 — so it can
+ * never be valid on-chain — carrying the nonce in a manageData operation and
+ * a 5-minute time bound. Every wallet can sign transactions, while plain
+ * message signing is not universal; the API only verifies the signature and
+ * never submits it.
+ */
+export function buildLoginChallengeTx(params: { address: string; nonce: string }): PreparedTx {
+  const tx = new TransactionBuilder(new Account(params.address, "-1"), {
+    fee: BASE_FEE,
+    networkPassphrase: stellarConfig.networkPassphrase,
+  })
+    .addOperation(Operation.manageData({ name: "Compaki sign-in", value: params.nonce }))
+    .setTimeout(300)
+    .build();
+  return toPrepared(tx);
 }
 
 function toPrepared(tx: Transaction): PreparedTx {

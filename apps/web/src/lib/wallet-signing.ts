@@ -29,17 +29,14 @@ export async function readResult<T>(res: Response): Promise<ApiResult<T>> {
  */
 export async function followSignatures<T>(
   first: ApiResult<T>,
-  signXdr: ((xdr: string) => Promise<string>) | null,
+  signXdr: (xdr: string, address: string) => Promise<string>,
   onStep?: (request: SignatureRequired) => void,
 ): Promise<ApiResult<T>> {
   let result = first;
   while (result.status === 202 && result.body.signatureRequired) {
-    if (!signXdr) {
-      throw new Error("Your wallet isn't connected on this device — sign in again to approve.");
-    }
     const request = result.body.signatureRequired;
     onStep?.(request);
-    const signedXdr = await signXdr(request.xdr);
+    const signedXdr = await signXdr(request.xdr, request.address);
     result = await readResult<T>(
       await fetch(`/api/tx/${request.id}`, {
         method: "POST",

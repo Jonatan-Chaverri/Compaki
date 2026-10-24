@@ -1,10 +1,11 @@
-// /api/wallet — the signed-in user's Cavos wallet.
+// /api/wallet — the signed-in user's own wallet (Cavos or an existing Stellar
+// wallet such as Freighter).
 //
 //   GET  /        wallet address, provider and setup state
 //   POST /setup   one-time setup: funds the address with testnet XLM
-//                 (Friendbot — which creates the account; Cavos derives its key
-//                 from the user's login, so the wallet is usable as soon as the
-//                 account exists), then returns the trustline + starting
+//                 (Friendbot — which creates the account if it doesn't exist
+//                 yet; a Cavos wallet's key is derived from the login, so it is
+//                 usable as soon as the account exists), then returns the trustline + starting
 //                 demo-balance transaction for the wallet to sign. When it is
 //                 already set up, just marks it ready.
 //   POST /mint    testnet faucet: the demo-asset issuer sends $20 of demo
@@ -25,7 +26,7 @@ import {
   sleep,
   stellarConfig,
 } from "@/lib/stellar";
-import { cavosWalletPending, personalWallet } from "@/lib/wallets";
+import { ownWalletPending, ownWalletProvider, personalWallet } from "@/lib/wallets";
 
 export const wallet = new Hono();
 
@@ -48,8 +49,9 @@ wallet.get("/", async (c) => {
   return c.json({
     provider: personal.kind,
     address: personal.kind === "none" ? null : personal.address,
-    cavosAddress: user.cavosAddress,
-    cavosReady: user.cavosWalletReadyAt !== null,
+    walletAddress: user.walletAddress,
+    walletProvider: user.walletAddress ? ownWalletProvider(user) : null,
+    walletReady: user.walletReadyAt !== null,
     balanceUsd,
     assetCode: stellarConfig.usdcCode,
   });
@@ -58,9 +60,9 @@ wallet.get("/", async (c) => {
 wallet.post("/setup", async (c) => {
   const user = await getSessionUser(c);
   if (!user) return c.json({ error: "Not signed in" }, 401);
-  if (!user.cavosAddress) return c.json({ error: "Connect your Cavos wallet first" }, 409);
-  if (user.cavosWalletReadyAt) return c.json({ ready: true });
-  const address = user.cavosAddress;
+  if (!user.walletAddress) return c.json({ error: "Connect your wallet first" }, 409);
+  if (user.walletReadyAt) return c.json({ ready: true });
+  const address = user.walletAddress;
 
   try {
     let state = await demoTrustlineState(address);
@@ -73,7 +75,7 @@ wallet.post("/setup", async (c) => {
       if (state === "missing") throw new Error("Funded account never appeared on Horizon");
     }
     if (state === "ready") {
-      await prisma.user.update({ where: { id: user.id }, data: { cavosWalletReadyAt: new Date() } });
+      await prisma.user.update({ where: { id: user.id }, data: { walletReadyAt: new Date() } });
       return c.json({ ready: true });
     }
 
@@ -99,7 +101,7 @@ wallet.post("/mint", async (c) => {
   }
   const user = await getSessionUser(c);
   if (!user) return c.json({ error: "Not signed in" }, 401);
-  if (cavosWalletPending(user)) {
+  if (ownWalletPending(user)) {
     return c.json({ error: "Activate your wallet first", code: "WALLET_SETUP" }, 409);
   }
   const personal = personalWallet(user);
@@ -133,7 +135,7 @@ wallet.post("/mint", async (c) => {
 export async function completeWalletSetup(pending: PendingTx) {
   await prisma.user.update({
     where: { id: pending.userId },
-    data: { cavosWalletReadyAt: new Date() },
+    data: { walletReadyAt: new Date() },
   });
   return { ready: true };
 }

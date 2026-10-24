@@ -74,7 +74,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
       // custodial accounts are signed by the API.
       const result = await followSignatures<{ txHash?: string; amountUsd?: number }>(
         await readResult(await fetch(url, { method: "POST" })),
-        wallet?.signXdr ?? null,
+        wallet.signXdr,
         () => setTx({ state: "pending", label: "Approve in your wallet" }),
       );
       const body = result.body;

@@ -98,7 +98,7 @@ export function UserMenu() {
 
   const signOut = async () => {
     setOpen(false);
-    wallet?.logout();
+    wallet.logout();
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     setState("out");

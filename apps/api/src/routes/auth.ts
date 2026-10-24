@@ -5,6 +5,10 @@
 //                          over the challenge (+ the Cavos email token, when
 //                          verifiable), links/creates the Compaki user, sets
 //                          the session cookie
+//   POST /wallet/challenge { address } → challenge transaction for an existing
+//                          Stellar wallet (Freighter, xBull, Albedo…) to sign
+//   POST /wallet           { address, signedXdr } → verifies the signature,
+//                          links/creates the user, sets the session cookie
 //   POST /profile          name (+ country, required on first login) for the signed-in user
 //   POST /login            email + password (existing/demo accounts)
 //   POST /logout           clears the session cookie
@@ -22,6 +26,7 @@ import { Hono } from "hono";
 import { createChallenge, verifiedEmailFromCavosToken, verifyChallengeSignature } from "@/lib/cavos";
 import { prisma } from "@/lib/db";
 import { verifyPassword } from "@/lib/passwords";
+import { createWalletChallenge, verifyWalletChallenge } from "@/lib/wallet-login";
 import {
   clearSessionCookieHeader,
   getSessionUser,
@@ -71,20 +76,20 @@ auth.post("/cavos", async (c) => {
   // never a side effect of signing in on a shared browser.
   const sessionUser = b.link === true ? await getSessionUser(c) : null;
 
-  let user = await prisma.user.findUnique({ where: { cavosAddress: address } });
+  let user = await prisma.user.findUnique({ where: { walletAddress: address } });
   if (!user) {
     // Link an existing account: the signed-in one, or the one owning the
     // verified email. Never one that already has a different wallet.
     const candidate =
       sessionUser ??
       (verifiedEmail ? await prisma.user.findUnique({ where: { email: verifiedEmail } }) : null);
-    if (candidate?.cavosAddress && candidate.cavosAddress !== address) {
+    if (candidate?.walletAddress && candidate.walletAddress !== address) {
       return c.json({ error: "This account is already linked to a different wallet" }, 409);
     }
     if (candidate) {
       user = await prisma.user.update({
         where: { id: candidate.id },
-        data: { cavosAddress: address, cavosWalletReadyAt: null },
+        data: { walletAddress: address, walletProvider: "cavos", walletReadyAt: null },
       });
     } else {
       const emailTaken = verifiedEmail
@@ -95,7 +100,8 @@ auth.post("/cavos", async (c) => {
           email: verifiedEmail && !emailTaken ? verifiedEmail : null,
           name: (verifiedEmail ?? "Compaki member").split("@")[0],
           role: "BUYER",
-          cavosAddress: address,
+          walletAddress: address,
+          walletProvider: "cavos",
         },
       });
     }
@@ -106,7 +112,57 @@ auth.post("/cavos", async (c) => {
     user: publicUser(user),
     emailVerified: verifiedEmail !== null,
     needsProfile: !user.country,
-    walletReady: user.cavosWalletReadyAt !== null,
+    walletReady: user.walletReadyAt !== null,
+  });
+});
+
+auth.post("/wallet/challenge", async (c) => {
+  const b = await readJson(c);
+  const address = typeof b?.address === "string" ? b.address : "";
+  if (!isValidAccountAddress(address)) return c.json({ error: "Invalid wallet address" }, 400);
+  return c.json(createWalletChallenge(address));
+});
+
+auth.post("/wallet", async (c) => {
+  const b = await readJson(c);
+  if (!b) return c.json({ error: "Invalid JSON" }, 400);
+  const address = typeof b.address === "string" ? b.address : "";
+  const signedXdr = typeof b.signedXdr === "string" ? b.signedXdr : "";
+  if (!isValidAccountAddress(address) || !verifyWalletChallenge(address, signedXdr)) {
+    return c.json(
+      { error: "We couldn't verify your wallet's signature — make sure it's on Stellar testnet and try again" },
+      401,
+    );
+  }
+
+  let user = await prisma.user.findUnique({ where: { walletAddress: address } });
+  if (!user) {
+    // An existing account is only linked when its owner is signed in and
+    // asks for it (no email comes with a wallet signature).
+    const sessionUser = b.link === true ? await getSessionUser(c) : null;
+    if (sessionUser?.walletAddress && sessionUser.walletAddress !== address) {
+      return c.json({ error: "This account is already linked to a different wallet" }, 409);
+    }
+    user = sessionUser
+      ? await prisma.user.update({
+          where: { id: sessionUser.id },
+          data: { walletAddress: address, walletProvider: "stellar-wallet", walletReadyAt: null },
+        })
+      : await prisma.user.create({
+          data: {
+            name: "Stellar member",
+            role: "BUYER",
+            walletAddress: address,
+            walletProvider: "stellar-wallet",
+          },
+        });
+  }
+
+  c.header("Set-Cookie", sessionCookieHeader(user.id));
+  return c.json({
+    user: publicUser(user),
+    needsProfile: !user.country,
+    walletReady: user.walletReadyAt !== null,
   });
 });
 

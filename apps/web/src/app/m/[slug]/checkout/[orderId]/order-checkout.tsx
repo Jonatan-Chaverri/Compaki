@@ -123,7 +123,7 @@ export function OrderCheckout({
         setState("expired");
         return;
       }
-      const result = await followSignatures(first, wallet?.signXdr ?? null, (request) =>
+      const result = await followSignatures(first, wallet.signXdr, (request) =>
         setApproval(
           request.steps && request.steps > 1
             ? `Approve payment ${request.step} of ${request.steps} in your wallet…`

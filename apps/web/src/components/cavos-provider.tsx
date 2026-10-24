@@ -1,13 +1,17 @@
 "use client";
 
-// Cavos: email login + the user's own Stellar wallet. Cavos derives the wallet
-// from the login and keeps its key in the Cavos vault — Compaki never sees it.
-// The app only asks the wallet to sign (a login challenge, and transactions
-// the API prepared), through the small context below so pages work the same
-// whether or not Cavos is configured (NEXT_PUBLIC_CAVOS_APP_ID).
+// The user's own Stellar wallet, from either source:
+//   - Cavos: email/Google login + a wallet derived from it, key in the Cavos
+//     vault (enabled with NEXT_PUBLIC_CAVOS_APP_ID);
+//   - an existing wallet (Freighter, xBull, Albedo…) via Stellar Wallets Kit.
+// Compaki never sees either key. Pages ask for a signature through
+// useCompakiWallet().signXdr(xdr, address): the open Cavos wallet signs when it
+// is that address, otherwise the connected Stellar wallet is asked to.
 
 import { CavosProvider, useCavos } from "@cavos/kit/react";
 import { createContext, useContext, useMemo } from "react";
+
+import { disconnectStellarWallet, signWithStellarWallet } from "@/lib/stellar-wallets";
 
 export const CAVOS_APP_ID = process.env.NEXT_PUBLIC_CAVOS_APP_ID ?? "";
 export const cavosConfigured = CAVOS_APP_ID !== "";
@@ -16,25 +20,38 @@ export const cavosConfigured = CAVOS_APP_ID !== "";
 const CAVOS_APP_SALT = "compaki-v1";
 
 export interface CompakiWallet {
-  /** Signs a transaction the API prepared; returns the signed envelope. */
-  signXdr: (xdr: string) => Promise<string>;
-  /** Clears the Cavos session (on sign-out). */
+  /** Signs a transaction the API prepared for `address`; returns the signed envelope. */
+  signXdr: (xdr: string, address: string) => Promise<string>;
+  /** Ends the wallet sessions (on sign-out). */
   logout: () => void;
 }
 
-const WalletContext = createContext<CompakiWallet | null>(null);
+const stellarWalletOnly: CompakiWallet = {
+  signXdr: (xdr, address) => signWithStellarWallet(xdr, address),
+  logout: () => void disconnectStellarWallet(),
+};
 
-/** The signed-in user's Cavos wallet signer, or null (custodial/no wallet). */
-export function useCompakiWallet(): CompakiWallet | null {
+const WalletContext = createContext<CompakiWallet>(stellarWalletOnly);
+
+export function useCompakiWallet(): CompakiWallet {
   return useContext(WalletContext);
 }
 
-function WalletBridge({ children }: { children: React.ReactNode }) {
+function CavosBridge({ children }: { children: React.ReactNode }) {
   const { wallet, logout } = useCavos();
-  const value = useMemo<CompakiWallet | null>(() => {
-    if (!wallet || wallet.chain !== "stellar") return null;
-    return { signXdr: (xdr) => wallet.signXdr(xdr), logout };
-  }, [wallet, logout]);
+  const value = useMemo<CompakiWallet>(
+    () => ({
+      signXdr: (xdr, address) =>
+        wallet?.chain === "stellar" && wallet.address === address
+          ? wallet.signXdr(xdr)
+          : signWithStellarWallet(xdr, address),
+      logout: () => {
+        logout();
+        void disconnectStellarWallet();
+      },
+    }),
+    [wallet, logout],
+  );
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
 
@@ -52,7 +69,7 @@ export function CompakiCavosProvider({ children }: { children: React.ReactNode }
       }}
       modal={{ appName: "Compaki" }}
     >
-      <WalletBridge>{children}</WalletBridge>
+      <CavosBridge>{children}</CavosBridge>
     </CavosProvider>
   );
 }

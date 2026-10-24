@@ -1,11 +1,13 @@
 "use client";
 
-// Email sign-in (Cavos wallet) first; password sign-in for existing accounts.
+// Sign-in options: Cavos (Google or email code), an existing Stellar wallet,
+// and password sign-in for older/demo accounts.
 
 import { cavosConfigured } from "@/components/cavos-provider";
 
 import { AuthForm } from "./auth-form";
 import { CavosLogin } from "./cavos-login";
+import { StellarWalletLogin } from "./stellar-wallet-login";
 
 export function SignIn() {
   return (
@@ -20,6 +22,7 @@ export function SignIn() {
           </p>
         </div>
       )}
+      <StellarWalletLogin />
       <details className="auth-form mt-4" open={!cavosConfigured}>
         <summary className="cursor-pointer text-sm font-medium text-slate-600">
           Have an account with a password?

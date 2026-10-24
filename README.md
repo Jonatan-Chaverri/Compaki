@@ -209,8 +209,18 @@ and keeps in its vault. **Compaki never holds that key.**
 | Activate | API funds the address with testnet XLM (Friendbot) and prepares the trustline + starting demo balance; the wallet signs it (`signXdr`). |
 | Purchase / claim | API prepares each transaction with the user's wallet as source; the wallet signs it in the browser; `POST /api/tx/:id` submits it only if it hashes to the prepared transaction and carries the wallet's signature. One signature per cart item. |
 
-Personal money (purchases, vendor revenue, member rewards) uses the Cavos
-wallet as soon as it is active. **The marketplace operator stays a server-held
+**Already have a Stellar wallet?** Users can also sign in with Freighter, xBull,
+Albedo, Lobstr and others through [Stellar Wallets Kit](https://stellarwalletskit.dev).
+The API issues a SEP-10-style challenge transaction (the user's account as
+source, sequence 0 so it can never be submitted, the nonce in a `manageData`
+operation, 5-minute time bound); the wallet signs it and the API checks the
+signature against the address (`POST /api/auth/wallet`). Activation, purchases
+and claims then work exactly as for Cavos — the wallet signs each prepared
+transaction. The wallet must be switched to **Testnet**; accounts whose master
+key was removed (multisig) are not supported in this version.
+
+Personal money (purchases, vendor revenue, member rewards) uses the user's own
+wallet (Cavos or existing) as soon as it is active. **The marketplace operator stays a server-held
 service account**: creating marketplaces, registering vendors, opening and
 paying for closing periods are signed by the API — otherwise every vendor
 sign-up would wait for the operator's manual approval. Accounts created before

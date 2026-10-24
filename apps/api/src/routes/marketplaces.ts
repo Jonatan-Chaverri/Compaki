@@ -14,7 +14,7 @@ import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails }
 import { boundOnChainId, loadRewardsView, PERIOD_HISTORY_LIMIT } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
 import { getSessionUser } from "@/lib/session";
-import { cavosWalletPending, personalWallet } from "@/lib/wallets";
+import { ownWalletPending, personalWallet } from "@/lib/wallets";
 import {
   createCustodialAccount,
   createMarketplace,
@@ -701,7 +701,7 @@ marketplaces.post("/:slug/vendors", async (c) => {
     return c.json({ error: "Marketplace is not fully set up" }, 409);
   }
 
-  if (cavosWalletPending(sessionUser)) {
+  if (ownWalletPending(sessionUser)) {
     return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
   }
 
