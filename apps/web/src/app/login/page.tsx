@@ -23,8 +23,8 @@ export default function LoginPage() {
     <div className="login-page">
       <DemoNotice />
       <header className="login-header">
-        <Link href="/" aria-label={t("compakiHome")}><Logo /></Link>
-        <div className="login-header-actions"><Link href="/marketplaces" className="login-browse"><span>{t("justExploring")}</span> {" "}{t("browseMarketplaces")}{" "}<Icon name="arrow" className="h-4 w-4" /></Link><LanguageMenu /><ThemeMenu /></div>
+        <div className="header-brand"><Link href="/" aria-label={t("compakiHome")}><Logo /></Link><LanguageMenu /></div>
+        <div className="login-header-actions"><Link href="/marketplaces" className="login-browse"><span>{t("justExploring")}</span> {" "}{t("browseMarketplaces")}{" "}<Icon name="arrow" className="h-4 w-4" /></Link><ThemeMenu /></div>
       </header>
       <main id="main-content" tabIndex={-1} className="login-layout">
         <section className="login-story" aria-labelledby="login-story-title">

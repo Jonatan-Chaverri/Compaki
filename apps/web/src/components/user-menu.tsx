@@ -1,8 +1,8 @@
 "use client";
 import { useTranslations } from "next-intl";
 
-// Session widget for every top bar: a user icon with the name beneath it that
-// opens a dropdown. The dropdown shows "Sign in or create account" (one flow:
+// Session widget for every top bar: a circular avatar opens the account menu.
+// The dropdown shows "Sign in or create account" (one flow:
 // new users just add a name at the end) when logged out and the account
 // details + "Sign out" when logged in. One session works
 // across all marketplaces (the cookie is scoped to the whole site).
@@ -127,17 +127,15 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={loggedIn ? t("accountValue", { value1: user.name }) : t("signInOrCreateAnAccount")}
-        className="account-toggle flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 transition hover:bg-slate-50"
+        className="account-toggle flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-50"
       >
         <span
-          className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${
+          aria-hidden="true"
+          className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold ${
             loggedIn ? "bg-navy-900 text-white" : "border border-slate-200 text-slate-500"
           }`}
         >
-          {loggedIn ? initialsOf(user.name) : <UserIcon className="h-4 w-4" />}
-        </span>
-        <span className="hidden max-w-[7rem] truncate text-xs font-medium leading-none text-slate-600 sm:block">
-          {loggedIn ? user.name.split(/\s+/)[0] : t("signIn")}
+          {loggedIn ? initialsOf(user.name).charAt(0) : <UserIcon className="h-4 w-4" />}
         </span>
       </button>
 

@@ -11,15 +11,12 @@ const code = ts.transpileModule(readFileSync(new URL("../src/app/m/[slug]/layout
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
 
-async function navigation(apiFetch) {
+async function navigation() {
   const exports = {};
   const modules = {
     "react/jsx-runtime": jsxRuntime,
-    "next-intl/server": { getTranslations: async () => key => key },
-    "next/link": { __esModule: true, default: "a" },
     "@/components/cart": { CartProvider: "cart-provider", HeaderCartLink: "cart-link" },
     "@/components/shell": { AppHeader: "app-header" },
-    "@/lib/api": { apiFetch },
   };
   vm.runInNewContext(code, { exports, require: name => {
     assert.ok(name in modules, `Unexpected import: ${name}`);
@@ -39,21 +36,8 @@ async function navigation(apiFetch) {
 }
 const sellerLink = elements => elements.find(element => element.type === "a" && element.props.href === "/m/test-market/join");
 
-test("visitors see the cart without the seller menu item", async () => {
-  const elements = await navigation(async () => ({ ok: true, json: async () => ({ user: null }) }));
+test("marketplace navigation keeps the cart without a global seller link", async () => {
+  const elements = await navigation();
   assert.equal(sellerLink(elements), undefined);
   assert.ok(elements.some(element => element.type === "cart-link"));
-});
-
-test("signed-in members keep the marketplace seller link", async () => {
-  const elements = await navigation(async () => ({ ok: true, json: async () => ({ user: { id: "member" } }) }));
-  assert.equal(sellerLink(elements)?.props.children, "becomeASeller");
-});
-
-test("an unavailable session service keeps visitor navigation usable", async () => {
-  for (const request of [async () => { throw new Error("Offline"); }, async () => ({ ok: false })]) {
-    const elements = await navigation(request);
-    assert.equal(sellerLink(elements), undefined);
-    assert.ok(elements.some(element => element.type === "cart-link"));
-  }
 });

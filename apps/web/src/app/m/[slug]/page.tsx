@@ -43,7 +43,10 @@ export default async function StorefrontPage(props: { params: Promise<{ slug: st
       <header className={styles.header} aria-labelledby="marketplace-title">
         <div className={styles.intro}>
           <div className={styles.meta}><p className="eyebrow">{categoryLabel(marketplace.category, t)}</p><p className={styles.products}><Icon name="bag" className="h-3.5 w-3.5" />{t("storefrontProductCount", { count: products.length })}</p></div>
-          <h1 id="marketplace-title" className={styles.title}>{marketplace.name}</h1>
+          <div className={styles.heading}>
+            <h1 id="marketplace-title" className={styles.title}>{marketplace.name}</h1>
+            <Link href={`/m/${marketplace.slug}/join`} className={styles.sellerLink}>{t("becomeASeller")}<Icon name="arrow" className="h-3 w-3" /></Link>
+          </div>
           <p className={styles.description}>{marketplace.description || t("thoughtfulProductsIndependentPeopleACommunityWorthDiscovering")}</p>
         </div>
         {hasCommunityContribution && <div className={styles.impact}>

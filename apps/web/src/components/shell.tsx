@@ -23,9 +23,9 @@ export function AppHeader({ right }: { right?: React.ReactNode }) {
     <DemoNotice />
     <header className="app-header">
       <div className="header-inner">
-        <Link href="/" aria-label={t("compakiHome")} className="shrink-0"><Logo /></Link>
+        <div className="header-brand"><Link href="/" aria-label={t("compakiHome")} className="shrink-0"><Logo /></Link><LanguageMenu /></div>
         <AppNavigation />
-        <div className="header-actions">{right}<LanguageMenu /><UserMenu /></div>
+        <div className="header-actions">{right}<UserMenu /></div>
       </div>
     </header>
   </>;

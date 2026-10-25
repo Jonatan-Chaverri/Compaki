@@ -352,13 +352,12 @@ const STEP_COPY = [
     <div className="onboarding-page">
       <DemoNotice />
       <header className="onboarding-header">
-        <Link href="/" aria-label={t("compakiHome")}>
+        <div className="header-brand"><Link href="/" aria-label={t("compakiHome")}>
           <Logo />
-        </Link>
+        </Link><LanguageMenu /></div>
         <div>
           <Link href="/marketplaces" className="onboarding-exit">
             {t("backToMarketplaces")}</Link>
-          <LanguageMenu />
           <UserMenu />
         </div>
       </header>

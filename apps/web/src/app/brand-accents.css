@@ -23,6 +23,8 @@
 .onboarding-categories label:has(:checked) { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line); }
 .onboarding-progress li[aria-current="step"] .onboarding-step-number { background: var(--brand-yellow); color: #263c30; border-color: var(--brand-yellow); }
 .header-inner { gap: 24px; }
+.header-brand, .onboarding-header > .header-brand { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.header-brand > a { flex-shrink: 0; }
 .header-actions { gap: 11px; }
 .account-toggle[aria-expanded="true"] { border-color: var(--brand-yellow-line); background: var(--brand-yellow-soft); }
 @media (max-width: 1120px) {
@@ -35,19 +37,23 @@
   .header-inner .brand-logo { font-size: 23px; gap: 4px; }
   .header-inner .brand-logo img { width: 27px; height: 27px; }
   .header-actions { gap: 6px; }
-  .header-actions .account-toggle { padding: 4px; min-width: 40px; min-height: 40px; }
+  .header-brand, .onboarding-header > .header-brand { gap: 7px; }
+  .header-actions .account-toggle { padding: 0; min-width: 40px; min-height: 40px; }
   .header-inner .mobile-nav-toggle { width: 36px; height: 40px; }
   .login-header { padding-inline: 20px; }
   .login-header-actions { gap: 8px; }
   .login-browse { display: none; }
   .onboarding-header > div { gap: 8px; }
   .onboarding-exit { display: none; }
-  .onboarding-header .account-toggle { padding: 4px; }
+  .onboarding-header .account-toggle { padding: 0; }
 }
 @media (max-width: 380px) {
   .header-inner { gap: 6px; }
-  .header-inner .brand-logo { font-size: 22px; }
-  .header-inner .brand-logo img { width: 25px; height: 25px; }
+  .header-inner .brand-logo { font-size: 20px; }
+  .header-inner .brand-logo img { width: 23px; height: 23px; }
   .header-actions { gap: 5px; }
-  .header-actions .account-toggle { min-width: 38px; }
+  .header-actions .account-toggle { width: 36px; height: 38px; min-width: 36px; min-height: 38px; }
+  .header-inner .mobile-nav-toggle { width: 32px; }
+  .header-actions > a { padding-inline: 2px; }
+  .header-actions > a > span:first-child { width: 28px; height: 28px; }
 }
