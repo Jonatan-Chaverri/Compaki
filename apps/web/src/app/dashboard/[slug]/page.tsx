@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { AppHeader } from "@/components/shell";
 import { apiFetch } from "@/lib/api";
+import type { CommunityMode } from "@/lib/rewards";
 
 import {
   OperatorDashboard,
@@ -18,7 +19,7 @@ interface DashboardPayload {
   name: string;
   slug: string;
   regenerativeEnabled: boolean;
-  rewardsEnabled: boolean;
+  communityMode: CommunityMode;
   demoImpersonation: boolean;
   community: CommunityDetails;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
@@ -74,7 +75,7 @@ export default async function OperatorPage(props: { params: Promise<{ slug: stri
         name={data.name}
         slug={data.slug}
         regenerativeEnabled={data.regenerativeEnabled}
-        rewardsEnabled={data.rewardsEnabled}
+        communityMode={data.communityMode}
         demoImpersonation={data.demoImpersonation}
         splits={data.splits}
         operatorAccount={data.operatorAccount}

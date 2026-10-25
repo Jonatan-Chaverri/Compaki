@@ -8,6 +8,7 @@ import { Hono } from "hono";
 
 import { prisma } from "@/lib/db";
 import { parseProductInput } from "@/lib/products";
+import { communityModeOf } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 
 import { communityFundLabel } from "./marketplaces";
@@ -75,7 +76,7 @@ products.get("/:id", async (c) => {
       name: product.marketplace.name,
       slug: product.marketplace.slug,
       regenerativeEnabled: product.marketplace.regenerativeEnabled,
-      rewardsEnabled: product.marketplace.rewardsEnabled,
+      communityMode: communityModeOf(product.marketplace),
       splitCommunityBps: product.marketplace.splitCommunityBps,
       communityFundName: communityFundLabel(product.marketplace),
     },

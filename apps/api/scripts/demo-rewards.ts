@@ -1,20 +1,24 @@
 /**
- * Community Rewards end-to-end proof against testnet (no database needed).
- * Uses the same src/lib/stellar functions as the API:
+ * Community Rewards + fundraising end-to-end proof against testnet (no
+ * database needed). Uses the same src/lib/stellar functions as the API:
  *
- *   1. provisions operator / vendor / buyer / 3 member custodial accounts,
- *   2. creates a rewards marketplace (88% vendor / 5% operator / 5% community,
- *      + Compaki's fixed 2% platform fee)
- *      and registers the vendor,
- *   3. shows a purchase is REJECTED while no period is open,
- *   4. opens a period (members 50% / 30% / 20%) ending in DEMO_PERIOD_SECONDS,
- *   5. buys twice — the community share lands in the contract treasury,
- *   6. shows premature close, early claim, rule change and a treasury
- *      withdrawal by the operator are all rejected,
- *   7. waits for the ledger to pass the end time, closes, claims for all
- *      three members, and shows a second claim is rejected.
+ * Community Rewards (88% vendor / 5% operator / 5% community + Compaki's 2%):
+ *   1. creates a rewards marketplace with one-minute periods whose pool goes
+ *      60% to sellers and 40% to buyers, and registers two vendors,
+ *   2. two buyers buy from the two vendors ($40 and $60): $5 lands in the
+ *      contract, booked to period 1,
+ *   3. shows an early claim, the operator claiming for a participant and a
+ *      treasury withdrawal by the operator are all rejected,
+ *   4. waits for the period to end — nobody closes it — and every seller
+ *      and buyer claims their share (by sales and by purchases),
+ *   5. shows a second claim and a non-participant's claim are rejected, and
+ *      that the next sale lands in the next period by itself.
  *
- * Run: npm run demo:rewards   (requires a contract with Community Rewards —
+ * Fundraising ($5 target → 70% / 30% to two wallets, new round after):
+ *   6. a $60 sale raises $3 (release rejected: below target), a $40 sale
+ *      reaches $5, anyone releases it, and round 2 starts.
+ *
+ * Run: npm run demo:rewards   (requires a contract with community modes —
  *      `npm run deploy:testnet` or `-- --contract-only`)
  */
 
@@ -23,17 +27,18 @@ import "./load-env";
 import {
   ContractError,
   claimReward,
-  closeRewardsPeriod,
   createCustodialAccount,
+  createFundraiseMarketplace,
   createRewardsMarketplace,
   decryptSecret,
-  getRewardsEntitlements,
-  getRewardsPeriod,
+  getFundraise,
+  getPeriodTotals,
+  getReward,
   getRewardsStatus,
   getUsdBalance,
-  openRewardsPeriod,
   purchase,
   registerVendor,
+  releaseFundraise,
   simulateForbiddenAction,
   sleep,
   stellarConfig,
@@ -43,7 +48,7 @@ import {
   usdToStroops,
 } from "../src/lib/stellar";
 
-const PERIOD_SECONDS = Number(process.env.DEMO_PERIOD_SECONDS ?? 45);
+const PERIOD_SECONDS = 120; // long enough for both sales to land in one period
 const usd = (n: number) => `$${n.toFixed(4).replace(/0{1,2}$/, "")}`;
 
 const txs: { step: string; hash: string }[] = [];
@@ -70,139 +75,151 @@ async function expectRejected(step: string, expected: string, action: () => Prom
 }
 
 async function main(): Promise<void> {
-  console.log("── Compaki Community Rewards demo (testnet) ────────────");
+  console.log("── Compaki Community Rewards + fundraising demo (testnet) ──");
   console.log(`Contract: ${stellarExpertContractUrl(stellarConfig.marketplaceContractId)}`);
 
-  console.log("1. Provisioning custodial accounts (Friendbot + trustlines)...");
-  const [operator, vendor, buyer, memberA, memberB, memberC] = await Promise.all([
+  console.log("0. Provisioning custodial accounts (Friendbot + trustlines)...");
+  const [operator, vendor1, vendor2, buyerA, buyerB, wallet1, wallet2] = await Promise.all([
     createCustodialAccount(),
     createCustodialAccount(),
-    createCustodialAccount({ startingUsd: 100 }),
     createCustodialAccount(),
+    createCustodialAccount({ startingUsd: 150 }),
+    createCustodialAccount({ startingUsd: 150 }),
     createCustodialAccount(),
     createCustodialAccount(),
   ]);
   const operatorSecret = decryptSecret(operator.secretEncrypted);
-  const buyerSecret = decryptSecret(buyer.secretEncrypted);
+  const secretOf = (a: { secretEncrypted: string }) => decryptSecret(a.secretEncrypted);
+  const buy = async (buyer: typeof buyerA, vendor: typeof vendor1, marketplaceId: bigint, amount: number) =>
+    purchase({
+      buyerSecret: secretOf(buyer),
+      marketplaceId,
+      vendorPublicKey: vendor.publicKey,
+      amountStroops: usdToStroops(amount),
+    });
 
-  console.log("2. Creating a rewards marketplace (88/5/5 + 2% Compaki) + registering the vendor...");
+  // ── Community Rewards ────────────────────────────────────────────────
+  console.log(`1. Rewards marketplace: ${PERIOD_SECONDS}s periods, pool 60% sellers / 40% buyers...`);
   const created = await createRewardsMarketplace({
     operatorSecret,
     vendorBps: 8_800,
     operatorBps: 500,
     communityBps: 500,
+    periodSeconds: PERIOD_SECONDS,
+    vendorPoolBps: 6_000,
   });
   const marketplaceId = created.marketplaceId;
   recordTx(`create_rewards_marketplace (id ${marketplaceId})`, created.txHash);
-  recordTx(
-    "register_vendor",
-    (await registerVendor({ operatorSecret, marketplaceId, vendorPublicKey: vendor.publicKey })).txHash,
-  );
-
-  console.log("3. Purchase with no open period...");
-  await expectRejected("purchase before any period", "NoActivePeriod", () =>
-    purchase({
-      buyerSecret,
-      marketplaceId,
-      vendorPublicKey: vendor.publicKey,
-      amountStroops: usdToStroops(10),
-    }),
-  );
-
-  console.log(`4. Opening period: A 50% / B 30% / C 20%, ${PERIOD_SECONDS}s long...`);
-  const { ledgerTime } = await getRewardsStatus(marketplaceId);
-  const endTs = ledgerTime + PERIOD_SECONDS;
-  const opened = await openRewardsPeriod({
-    operatorSecret,
-    marketplaceId,
-    beneficiaries: [memberA.publicKey, memberB.publicKey, memberC.publicKey],
-    sharesBps: [5_000, 3_000, 2_000],
-    endTs,
-  });
-  const periodId = opened.periodId;
-  recordTx(`open_period (period ${periodId})`, opened.txHash);
-
-  console.log("5. Two purchases ($42.00 and $18.50)...");
-  for (const amount of [42, 18.5]) {
-    const result = await purchase({
-      buyerSecret,
-      marketplaceId,
-      vendorPublicKey: vendor.publicKey,
-      amountStroops: usdToStroops(amount),
-    });
-    recordTx(`purchase $${amount.toFixed(2)} → booked to period ${result.rewardsPeriodId}`, result.txHash);
+  for (const v of [vendor1, vendor2]) {
+    recordTx(
+      "register_vendor",
+      (await registerVendor({ operatorSecret, marketplaceId, vendorPublicKey: v.publicKey })).txHash,
+    );
   }
-  const running = await getRewardsPeriod(marketplaceId, periodId);
-  console.log(`    period total on-chain: ${usd(stroopsToUsd(running.totalContributedStroops))} (expected $3.025)`);
 
-  console.log("6. Things that must fail while the period runs...");
-  await expectRejected("close before end", "PeriodNotEnded", () =>
-    closeRewardsPeriod({ signerSecret: operatorSecret, marketplaceId, periodId }),
+  console.log("2. Buyer A buys $40 from vendor 1, buyer B $60 from vendor 2...");
+  const first = await buy(buyerA, vendor1, marketplaceId, 40);
+  const period = first.receipt.period;
+  if (period === null) throw new Error("purchase was not booked to a period");
+  recordTx(`purchase $40.00 → period ${period + 1}`, first.txHash);
+  const second = await buy(buyerB, vendor2, marketplaceId, 60);
+  if (second.receipt.period !== period) {
+    console.log("    (the second sale fell into the next minute's period; shares below cover the first)");
+  }
+  recordTx(`purchase $60.00 → period ${(second.receipt.period ?? 0) + 1}`, second.txHash);
+  const totals = await getPeriodTotals(marketplaceId, period);
+  console.log(
+    `    period ${period + 1} on-chain: sellers' pool ${usd(stroopsToUsd(totals.vendorPoolStroops))}, buyers' pool ${usd(stroopsToUsd(totals.buyerPoolStroops))}`,
   );
-  await expectRejected("claim before close", "PeriodNotClosed", () =>
-    claimReward({ memberSecret: decryptSecret(memberA.secretEncrypted), marketplaceId, periodId }),
+
+  console.log("3. Things that must fail...");
+  await expectRejected("claim before the period ends", "PeriodNotEnded", () =>
+    claimReward({ memberSecret: secretOf(buyerA), marketplaceId, periodId: period }),
   );
-  for (const kind of ["change-rules", "withdraw"] as const) {
+  const status = await getRewardsStatus(marketplaceId);
+  for (const kind of ["claim-for-someone", "withdraw"] as const) {
     const result = await simulateForbiddenAction({
       kind,
       operatorPublicKey: operator.publicKey,
       marketplaceId,
-      amountStroops: running.totalContributedStroops,
+      amountStroops: status.totalContributedStroops,
+      participant: buyerA.publicKey,
+      periodId: period,
     });
     if (!result.rejected) throw new Error(`SECURITY CHECK FAILED: operator ${kind} was accepted`);
     rejections.push({ step: `operator ${kind} (control: ${result.control})`, reason: result.reason });
     console.log(`    ✔ rejected as expected: operator ${kind} → ${result.reason} (control: ${result.control})`);
   }
 
-  console.log("7. Waiting for the ledger to pass the period end...");
+  console.log("4. Waiting for the period to end on the ledger (nobody needs to close it)...");
+  const endTs = status.startTs + (period + 1) * status.periodSeconds;
   for (;;) {
-    const { ledgerTime: now } = await getRewardsStatus(marketplaceId);
-    if (now >= endTs) break;
-    process.stdout.write(`    ${endTs - now}s left\r`);
+    const { ledgerTime } = await getRewardsStatus(marketplaceId);
+    if (ledgerTime >= endTs) break;
+    process.stdout.write(`    ${endTs - ledgerTime}s left    \r`);
     await sleep(5_000);
   }
-  const closed = await closeRewardsPeriod({ signerSecret: operatorSecret, marketplaceId, periodId });
-  recordTx(`close_period (total ${usd(stroopsToUsd(closed.totalStroops))})`, closed.txHash);
-
-  const entitlements = await getRewardsEntitlements(marketplaceId, periodId);
-  for (const [label, member] of [
-    ["A", memberA],
-    ["B", memberB],
-    ["C", memberC],
-  ] as const) {
-    const ent = entitlements.find((e) => e.member === member.publicKey);
-    const claimed = await claimReward({
-      memberSecret: decryptSecret(member.secretEncrypted),
-      marketplaceId,
-      periodId,
-    });
-    recordTx(
-      `claim member ${label} (${(ent?.shareBps ?? 0) / 100}% → ${usd(stroopsToUsd(claimed.amountStroops))})`,
-      claimed.txHash,
-    );
+  const participants = [
+    ["vendor 1", vendor1],
+    ["vendor 2", vendor2],
+    ["buyer A", buyerA],
+    ["buyer B", buyerB],
+  ] as const;
+  for (const [label, who] of participants) {
+    const reward = await getReward(marketplaceId, period, who.publicKey);
+    if (reward.amountStroops === 0n) continue;
+    const claimed = await claimReward({ memberSecret: secretOf(who), marketplaceId, periodId: period });
+    recordTx(`claim ${label} → ${usd(stroopsToUsd(claimed.amountStroops))}`, claimed.txHash);
   }
-  await expectRejected("second claim by member A", "AlreadyClaimed", () =>
-    claimReward({ memberSecret: decryptSecret(memberA.secretEncrypted), marketplaceId, periodId }),
-  );
 
-  const [vendorBal, operatorBal, aBal, bBal, cBal, status] = await Promise.all([
-    getUsdBalance(vendor.publicKey),
-    getUsdBalance(operator.publicKey),
-    getUsdBalance(memberA.publicKey),
-    getUsdBalance(memberB.publicKey),
-    getUsdBalance(memberC.publicKey),
-    getRewardsStatus(marketplaceId),
-  ]);
+  console.log("5. More things that must fail, and the next period...");
+  await expectRejected("second claim by buyer A", "AlreadyClaimed", () =>
+    claimReward({ memberSecret: secretOf(buyerA), marketplaceId, periodId: period }),
+  );
+  await expectRejected("claim by someone who didn't sell or buy", "NothingToClaim", () =>
+    claimReward({ memberSecret: operatorSecret, marketplaceId, periodId: period }),
+  );
+  const next = await buy(buyerA, vendor1, marketplaceId, 10);
+  recordTx(`purchase $10.00 → period ${(next.receipt.period ?? 0) + 1} (started by itself)`, next.txHash);
+
+  // ── Fundraising ──────────────────────────────────────────────────────
+  console.log("6. Fundraising marketplace: $5 target → 70% wallet 1 / 30% wallet 2, then a new round...");
+  const fund = await createFundraiseMarketplace({
+    operatorSecret,
+    vendorBps: 8_800,
+    operatorBps: 500,
+    communityBps: 500,
+    targetStroops: usdToStroops(5),
+    recipients: [wallet1.publicKey, wallet2.publicKey],
+    sharesBps: [7_000, 3_000],
+    policy: "new-round",
+  });
+  recordTx(`create_fundraise_marketplace (id ${fund.marketplaceId})`, fund.txHash);
+  recordTx(
+    "register_vendor",
+    (await registerVendor({ operatorSecret, marketplaceId: fund.marketplaceId, vendorPublicKey: vendor1.publicKey })).txHash,
+  );
+  recordTx("purchase $60.00 → raised $3.00", (await buy(buyerA, vendor1, fund.marketplaceId, 60)).txHash);
+  const releaser = stellarConfig.usdcIssuerSecret; // anyone may release
+  await expectRejected("release below the target", "GoalNotReached", () =>
+    releaseFundraise({ signerSecret: releaser, marketplaceId: fund.marketplaceId }),
+  );
+  recordTx("purchase $40.00 → raised $5.00", (await buy(buyerB, vendor1, fund.marketplaceId, 40)).txHash);
+  const released = await releaseFundraise({ signerSecret: releaser, marketplaceId: fund.marketplaceId });
+  recordTx(`release_fundraise (${usd(stroopsToUsd(released.amountStroops))} → 70% / 30%)`, released.txHash);
+  const fundState = await getFundraise(fund.marketplaceId);
+
+  const balances = await Promise.all(
+    [vendor1, vendor2, buyerA, buyerB, operator, wallet1, wallet2].map((a) => getUsdBalance(a.publicKey)),
+  );
+  const expected = [133.2, 54.6, 40.8, 51.2, 10.5, 3.5, 1.5];
+  const labels = ["vendor 1", "vendor 2", "buyer A", "buyer B", "operator", "wallet 1", "wallet 2"];
 
   console.log("────────────────────────────────────────────────────────");
-  console.log(`vendor    ${usd(vendorBal)}  (expected $53.24)`);
-  console.log(`operator  ${usd(operatorBal)}  (expected $3.025)`);
-  console.log(`member A  ${usd(aBal)}  (expected $1.5125)`);
-  console.log(`member B  ${usd(bBal)}  (expected $0.9075)`);
-  console.log(`member C  ${usd(cBal)}  (expected $0.605)`);
-  console.log(
-    `treasury  contributed ${usd(stroopsToUsd(status.totalContributedStroops))}, claimed ${usd(stroopsToUsd(status.totalClaimedStroops))}`,
+  labels.forEach((label, i) =>
+    console.log(`${label.padEnd(9)} ${usd(balances[i]).padEnd(9)} (expected ${usd(expected[i])})`),
   );
+  console.log(`fundraiser now in round ${fundState.round + 1}, raised ${usd(stroopsToUsd(fundState.raisedStroops))}`);
   console.log("\nMarkdown summary:\n");
   console.log(`Contract: [\`${stellarConfig.marketplaceContractId}\`](${stellarExpertContractUrl(stellarConfig.marketplaceContractId)})\n`);
   console.log("| Step | Transaction |\n| --- | --- |");

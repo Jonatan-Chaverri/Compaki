@@ -12,7 +12,6 @@ import {
   formatCountdown,
   formatTs,
   ledgerNow,
-  percent,
   shortAddress,
   txUrl,
   type PeriodStatus,
@@ -24,18 +23,24 @@ interface MemberPeriod {
   startTs: number;
   endTs: number;
   status: PeriodStatus;
-  totalUsd: number;
-  shareBps: number;
-  projectedUsd: number;
-  amountUsd: number | null;
-  claimed: boolean | null;
+  soldUsd: number;
+  boughtUsd: number;
+  /** Read from the contract: final once the period ended, an estimate before. */
+  amountUsd: number;
+  claimed: boolean;
   claimTxHash: string | null;
-  closeTxHash: string | null;
 }
 
 export interface MemberRewardsPayload {
   address: string | null;
-  marketplaces: { name: string; slug: string; ledgerTime: number | null; periods: MemberPeriod[] }[];
+  marketplaces: {
+    name: string;
+    slug: string;
+    ledgerTime: number | null;
+    vendorPoolBps: number;
+    buyerPoolBps: number;
+    periods: MemberPeriod[];
+  }[];
 }
 
 export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
@@ -70,7 +75,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
     setBusy(key);
     setTx({ state: "pending", label: pendingLabel });
     try {
-      // Cavos wallets sign the claim here (202 + transaction to approve);
+      // Own wallets sign the claim here (202 + transaction to approve);
       // custodial accounts are signed by the API.
       const result = await followSignatures<{ txHash?: string; amountUsd?: number }>(
         await readResult(await fetch(url, { method: "POST" })),
@@ -94,7 +99,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
 
   if (data.marketplaces.length === 0) {
     return (
-      <div className="mt-8"><EmptyState icon="leaf" title="Your next chapter of shared good." description="You haven’t been added to a rewards period yet. A marketplace organizer can invite you when they open one." href="/marketplaces" action="Explore your communities" />
+      <div className="mt-8"><EmptyState icon="leaf" title="Your next chapter of shared good." description="When you sell or buy in a marketplace with community rewards, your share of each period shows up here." href="/marketplaces" action="Explore your communities" />
         {data.address && <details className="mt-4 rounded-xl border border-slate-200 p-4 text-xs text-slate-500"><summary className="cursor-pointer">Your payment account details</summary><p className="mt-3 break-all font-mono">{data.address}</p></details>}
       </div>
     );
@@ -119,10 +124,12 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
             </h2>
             <div className="mt-3 space-y-3">
               {m.periods.map((p) => {
-                const status: PeriodStatus =
-                  p.status === "active" && ledger >= p.endTs ? "ended" : p.status;
+                const status: PeriodStatus = p.status === "current" && ledger >= p.endTs ? "ended" : p.status;
                 const key = `${m.slug}:${p.periodId}`;
-                const amount = p.amountUsd ?? p.projectedUsd;
+                const how = [
+                  p.soldUsd > 0 && `you sold ${formatAmount(p.soldUsd)}`,
+                  p.boughtUsd > 0 && `you bought ${formatAmount(p.boughtUsd)}`,
+                ].filter(Boolean).join(" and ");
                 return (
                   <div
                     key={key}
@@ -130,7 +137,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                   >
                     <div>
                       <p className="flex items-center gap-2 font-medium text-slate-900">
-                        Period #{p.periodId}
+                        Period {p.periodId + 1}
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[status].className}`}
                         >
@@ -138,8 +145,8 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                         </span>
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        Your share {percent(p.shareBps)} of {formatAmount(p.totalUsd)} ·{" "}
-                        {status === "active"
+                        {how ? `In this period ${how}` : "You took part in this period"} ·{" "}
+                        {status === "current"
                           ? `ends in ${formatCountdown(p.endTs - ledger)}`
                           : `ended ${formatTs(p.endTs)}`}
                       </p>
@@ -147,32 +154,16 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-xs uppercase tracking-wider text-slate-400">
-                          {p.amountUsd === null ? "Growing reward" : "Your reward"}
+                          {status === "current" ? "Growing reward" : "Your reward"}
                         </p>
                         <p className="text-xl font-semibold tabular-nums text-emerald-600">
-                          {formatAmount(amount)}
+                          {formatAmount(p.amountUsd)}
                         </p>
                       </div>
-                      {status === "active" && (
-                        <span className="text-xs text-slate-400">Available after the period closes</span>
+                      {status === "current" && (
+                        <span className="text-xs text-slate-400">Claim it when the period ends</span>
                       )}
-                      {status === "ended" && (
-                        <button
-                          onClick={() =>
-                            void act(
-                              key,
-                              `Closing period #${p.periodId}`,
-                              `Closed period #${p.periodId}`,
-                              `/api/rewards/marketplace/${m.slug}/periods/${p.periodId}/close`,
-                            )
-                          }
-                          disabled={busy !== null}
-                          className="rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                        >
-                          Close period
-                        </button>
-                      )}
-                      {status === "closed" && p.claimed && (
+                      {status === "ended" && p.claimed && (
                         <span className="text-xs font-medium text-emerald-700">
                           ✓ Collected
                           {p.claimTxHash && (
@@ -187,13 +178,13 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                           )}
                         </span>
                       )}
-                      {status === "closed" && !p.claimed && (p.amountUsd ?? 0) > 0 && (
+                      {status === "ended" && !p.claimed && p.amountUsd > 0 && (
                         <button
                           onClick={() =>
                             void act(
                               key,
-                              `Claiming your period #${p.periodId} reward`,
-                              `Claimed period #${p.periodId}`,
+                              `Claiming your period ${p.periodId + 1} reward`,
+                              `Claimed period ${p.periodId + 1}`,
                               `/api/rewards/marketplace/${m.slug}/periods/${p.periodId}/claim`,
                             )
                           }
@@ -203,7 +194,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
                           {busy === key ? "Collecting…" : "Collect reward"}
                         </button>
                       )}
-                      {status === "closed" && !p.claimed && (p.amountUsd ?? 0) === 0 && (
+                      {status === "ended" && !p.claimed && p.amountUsd === 0 && (
                         <span className="text-xs text-slate-400">No reward this period</span>
                       )}
                     </div>
@@ -214,7 +205,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
           </section>
         );
       })}
-      <details className="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed text-slate-500"><summary className="cursor-pointer font-medium text-slate-700">How your rewards and payment account work</summary><p className="mt-3">Amounts and shares are verified on Stellar. Each period’s rules are fixed when it starts. Compaki manages your payment account and signs collection requests for you; rewards can only be paid to the registered member’s address. Demo rewards have no monetary value.</p></details>
+      <details className="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed text-slate-500"><summary className="cursor-pointer font-medium text-slate-700">How your rewards and payment account work</summary><p className="mt-3">Each period, the marketplace’s rewards fund is shared between its sellers (by how much they sold) and its buyers (by how much they bought). Your amount is read from the contract on Stellar. Only you can collect it, and it is always paid to the wallet you sold or bought with. Demo rewards have no monetary value.</p></details>
     </div>
   );
 }

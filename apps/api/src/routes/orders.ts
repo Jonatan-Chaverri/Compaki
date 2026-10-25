@@ -249,6 +249,7 @@ orders.post("/:id/pay", async (c) => {
     // payment" is simulated by minting demo money); returning buyers get
     // topped up if their balance can't cover the order.
     let buyerSecretEncrypted: string;
+    let buyerAddress: string;
     if (wallet.kind === "none") {
       const account = await createCustodialAccount({
         startingUsd: Math.max(100, Math.ceil(remainingUsd)),
@@ -261,9 +262,11 @@ orders.post("/:id/pay", async (c) => {
         },
       });
       buyerSecretEncrypted = account.secretEncrypted;
+      buyerAddress = account.publicKey;
     } else {
       await topUpDemoBalance(wallet.address, remainingUsd);
       buyerSecretEncrypted = wallet.secretEncrypted;
+      buyerAddress = wallet.address;
     }
     const buyerSecret = decryptSecret(buyerSecretEncrypted);
 
@@ -271,7 +274,7 @@ orders.post("/:id/pay", async (c) => {
     // settles so a failure mid-order can be retried without re-charging.
     for (const item of unsettled) {
       const settleStart = Date.now();
-      const { txHash, rewardsPeriodId } = await purchase({
+      const { txHash, receipt } = await purchase({
         buyerSecret,
         marketplaceId: onChainId,
         vendorPublicKey: vendorAddressFor(order, item) as string,
@@ -281,8 +284,9 @@ orders.post("/:id/pay", async (c) => {
         order,
         item,
         buyerId: sessionUser.id,
+        buyerAddress,
         txHash,
-        rewardsPeriodId,
+        receipt,
         settleSeconds: Math.max(1, Math.round((Date.now() - settleStart) / 1000)),
         shipping,
       });

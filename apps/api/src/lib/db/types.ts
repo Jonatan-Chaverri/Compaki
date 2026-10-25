@@ -20,11 +20,19 @@ export interface SplitSnapshot {
   platformBps?: number;
   platformAmountUsd?: number;
   /**
-   * Community Rewards marketplaces: the on-chain period the community share
-   * was booked to (returned by the purchase transaction). Absent for classic
-   * marketplaces and for sales predating Community Rewards.
+   * Community Rewards marketplaces: the on-chain period the sale was booked
+   * to (returned by the purchase transaction). Absent for other marketplaces
+   * and for sales predating Community Rewards.
    */
   rewardsPeriodId?: number | null;
+  /**
+   * Fundraising marketplaces: the round the community share was added to.
+   * Null once a stopped or direct-payout fundraiser reached its target.
+   */
+  fundraiseRound?: number | null;
+  /** On-chain addresses of the two parties (absent on older sales). */
+  buyerAddress?: string;
+  vendorAddress?: string;
 }
 
 export function parseSplitSnapshot(raw: string): SplitSnapshot {

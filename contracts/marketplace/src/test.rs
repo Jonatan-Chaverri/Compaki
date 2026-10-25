@@ -230,7 +230,7 @@ fn marketplace_ids_increment() {
     assert_eq!(b, 1);
 }
 
-// ─── Community Rewards ──────────────────────────────────────────────────────
+// ─── Community Rewards & Fundraising ────────────────────────────────────────
 //
 // Setup uses mock_all_auths() for convenience on the happy path only. Every
 // authorization claim is verified separately: positive paths assert the exact
@@ -238,7 +238,7 @@ fn marketplace_ids_increment() {
 // (`set_auths(&[])` / targeted `mock_auths`) so a missing signature really
 // fails.
 
-mod rewards {
+mod community {
     use super::super::*;
     use super::std;
     use soroban_sdk::{
@@ -247,754 +247,639 @@ mod rewards {
         vec, Address, Env, IntoVal, Symbol, Vec,
     };
 
-    const HOUR: u64 = 3_600;
-    const T0: u64 = 1_700_000_000;
+    pub const DAY: u64 = 86_400;
+    pub const PERIOD: u64 = 30 * DAY;
+    pub const T0: u64 = 1_700_000_000;
+    /// $1.00 in stroops.
+    pub const USD: i128 = 10_000_000;
 
-    struct R<'a> {
-        env: Env,
-        contract: Address,
-        client: MarketplaceContractClient<'a>,
-        token: TokenClient<'a>,
-        token_admin: StellarAssetClient<'a>,
-        admin: Address,
-        operator: Address,
-        vendor: Address,
-        buyer: Address,
-        a: Address,
-        b: Address,
-        c: Address,
-        /// Rewards marketplace, 88% vendor / 5% operator / 5% community
-        /// (+ 2% platform fee).
-        id: u64,
-        platform: Address,
+    pub struct C<'a> {
+        pub env: Env,
+        pub contract: Address,
+        pub client: MarketplaceContractClient<'a>,
+        pub token: TokenClient<'a>,
+        pub token_admin: StellarAssetClient<'a>,
+        pub admin: Address,
+        pub operator: Address,
+        pub v1: Address,
+        pub v2: Address,
+        pub b1: Address,
+        pub b2: Address,
     }
 
-    fn setup<'a>() -> R<'a> {
+    pub fn setup<'a>() -> C<'a> {
         let env = Env::default();
         env.mock_all_auths();
         env.ledger().set_timestamp(T0);
 
-        let issuer = Address::generate(&env);
-        let sac = env.register_stellar_asset_contract_v2(issuer);
+        let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
         let token = TokenClient::new(&env, &sac.address());
         let token_admin = StellarAssetClient::new(&env, &sac.address());
-
         let contract = env.register_contract(None, MarketplaceContract);
         let client = MarketplaceContractClient::new(&env, &contract);
         let admin = Address::generate(&env);
-        let platform = Address::generate(&env);
-        client.initialize(&admin, &sac.address(), &platform);
+        client.initialize(&admin, &sac.address(), &Address::generate(&env));
 
-        let operator = Address::generate(&env);
-        let vendor = Address::generate(&env);
-        let buyer = Address::generate(&env);
-        let id = client.create_rewards_marketplace(&operator, &8_800, &500, &500);
-        client.register_vendor(&id, &vendor);
-        token_admin.mint(&buyer, &1_000_000_000_000);
-
-        R {
-            a: Address::generate(&env),
-            b: Address::generate(&env),
-            c: Address::generate(&env),
+        let c = C {
+            operator: Address::generate(&env),
+            v1: Address::generate(&env),
+            v2: Address::generate(&env),
+            b1: Address::generate(&env),
+            b2: Address::generate(&env),
             env,
             contract,
             client,
             token,
             token_admin,
             admin,
-            operator,
-            vendor,
-            buyer,
-            id,
-            platform,
+        };
+        for who in [&c.b1, &c.b2, &c.v1, &c.v2] {
+            c.token_admin.mint(who, &(10_000 * USD));
         }
+        c
     }
 
-    /// Opens a 50/30/20 period for members a/b/c ending in one hour.
-    fn open_abc(r: &R) -> u32 {
-        r.client.open_period(
-            &r.id,
-            &vec![&r.env, r.a.clone(), r.b.clone(), r.c.clone()],
-            &vec![&r.env, 5_000u32, 3_000, 2_000],
-            &(r.env.ledger().timestamp() + HOUR),
-        )
+    /// Rewards marketplace: 88% vendor / 5% operator / 5% community (+ 2%
+    /// platform fee), 30-day periods, pool 60% vendors / 40% buyers.
+    pub fn rewards_marketplace(c: &C) -> u64 {
+        let id = c
+            .client
+            .create_rewards_marketplace(&c.operator, &8_800, &500, &500, &PERIOD, &6_000);
+        c.client.register_vendor(&id, &c.v1);
+        c.client.register_vendor(&id, &c.v2);
+        id
     }
 
-    fn advance(r: &R, seconds: u64) {
-        let now = r.env.ledger().timestamp();
-        r.env.ledger().set_timestamp(now + seconds);
+    pub fn advance(c: &C, seconds: u64) {
+        let now = c.env.ledger().timestamp();
+        c.env.ledger().set_timestamp(now + seconds);
     }
 
-    // 1. Purchase splits vendor / operator / treasury.
-    #[test]
-    fn purchase_funds_vendor_operator_and_treasury() {
-        let r = setup();
-        let pid = open_abc(&r);
+    mod rewards {
+        use super::*;
 
-        // $100.00 → 88 / 5 / 5 + 2 platform.
-        let booked = r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
-        assert_eq!(booked, Some(pid));
+        #[test]
+        fn purchase_books_the_current_period() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            let receipt = c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            assert_eq!(
+                receipt,
+                PurchaseReceipt {
+                    vendor_amount: 88 * USD,
+                    operator_amount: 5 * USD,
+                    community_amount: 5 * USD,
+                    platform_amount: 2 * USD,
+                    period: Some(0),
+                    round: None,
+                }
+            );
+            assert_eq!(c.token.balance(&c.contract), 5 * USD);
+            assert_eq!(
+                c.client.get_period(&id, &0),
+                PeriodTotals {
+                    vendor_pool: 3 * USD,
+                    buyer_pool: 2 * USD,
+                    vendor_volume: 100 * USD,
+                    buyer_volume: 100 * USD,
+                    total_claimed: 0,
+                }
+            );
+            let status = c.client.rewards_status(&id);
+            assert_eq!(status.start_ts, T0);
+            assert_eq!(status.period_seconds, PERIOD);
+            assert_eq!((status.vendor_pool_bps, status.buyer_pool_bps), (6_000, 4_000));
+            assert_eq!(status.current_period, 0);
+            assert_eq!(status.total_contributed, 5 * USD);
+        }
 
-        assert_eq!(r.token.balance(&r.vendor), 880_000_000);
-        assert_eq!(r.token.balance(&r.operator), 50_000_000);
-        assert_eq!(r.token.balance(&r.platform), 20_000_000);
-        // Community share sits in the contract, not in any operator/admin account.
-        assert_eq!(r.token.balance(&r.contract), 50_000_000);
-        assert_eq!(r.client.get_period(&r.id, &pid).total_contributed, 50_000_000);
-        assert_eq!(r.client.rewards_status(&r.id).total_contributed, 50_000_000);
-        // On-chain config shows the contract itself as the community fund.
-        assert_eq!(r.client.get_marketplace(&r.id).community_fund, r.contract);
-    }
+        #[test]
+        fn rewards_follow_sales_and_purchases() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            // $400 of sales → $20 community: $12 for vendors, $8 for buyers.
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            c.client.purchase(&id, &c.b2, &c.v2, &(300 * USD));
+            advance(&c, PERIOD);
 
-    // 2. Several purchases accumulate in the same period.
-    #[test]
-    fn contributions_accumulate_within_period() {
-        let r = setup();
-        let pid = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000); // +50_000_000
-        advance(&r, 60);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &200_000_000); // +10_000_000
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &101); // 88, 5, platform 2, community 6 (dust)
+            let before = [&c.v1, &c.v2, &c.b1, &c.b2].map(|a| c.token.balance(a));
+            assert_eq!(c.client.claim(&id, &0, &c.v1), 3 * USD); // 12 × 100/400
+            assert_eq!(c.client.claim(&id, &0, &c.v2), 9 * USD); // 12 × 300/400
+            assert_eq!(c.client.claim(&id, &0, &c.b1), 2 * USD); // 8 × 100/400
+            assert_eq!(c.client.claim(&id, &0, &c.b2), 6 * USD); // 8 × 300/400
+            let after = [&c.v1, &c.v2, &c.b1, &c.b2].map(|a| c.token.balance(a));
+            assert_eq!(
+                [after[0] - before[0], after[1] - before[1], after[2] - before[2], after[3] - before[3]],
+                [3 * USD, 9 * USD, 2 * USD, 6 * USD]
+            );
+            assert_eq!(c.token.balance(&c.contract), 0);
+            assert_eq!(c.client.rewards_status(&id).total_claimed, 20 * USD);
+            assert_eq!(c.client.get_period(&id, &0).total_claimed, 20 * USD);
+        }
 
-        let period = r.client.get_period(&r.id, &pid);
-        assert_eq!(period.total_contributed, 60_000_006);
-        assert_eq!(r.token.balance(&r.contract), 60_000_006);
-    }
+        #[test]
+        fn claim_rules() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
 
-    // 3. + 4. + 5. Close after end, fixed-share allocation, successful claims.
-    #[test]
-    fn close_allocates_fixed_shares_and_members_claim() {
-        let r = setup();
-        let pid = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &2_000_000_000); // community 100_000_000
-        advance(&r, HOUR);
+            // Running estimate while the period is open; no claim yet.
+            let view = c.client.get_reward(&id, &0, &c.b1);
+            assert_eq!(view.amount, 2 * USD);
+            assert!(!view.period_ended && !view.claimed);
+            assert_eq!(c.client.try_claim(&id, &0, &c.b1), Err(Ok(Error::PeriodNotEnded)));
+            assert_eq!(c.client.try_claim(&id, &1, &c.b1), Err(Ok(Error::PeriodNotFound)));
+            assert_eq!(c.client.try_get_reward(&id, &1, &c.b1), Err(Ok(Error::PeriodNotFound)));
 
-        assert_eq!(r.client.close_period(&r.id, &pid), 100_000_000);
-        assert!(r.client.get_period(&r.id, &pid).closed);
+            advance(&c, PERIOD);
+            assert!(c.client.get_reward(&id, &0, &c.b1).period_ended);
+            assert_eq!(c.client.claim(&id, &0, &c.b1), 2 * USD);
+            assert!(c.client.get_reward(&id, &0, &c.b1).claimed);
+            assert_eq!(c.client.try_claim(&id, &0, &c.b1), Err(Ok(Error::AlreadyClaimed)));
+            // Someone who neither sold nor bought in the period.
+            assert_eq!(c.client.try_claim(&id, &0, &c.b2), Err(Ok(Error::NothingToClaim)));
+            // A period without any sale has nothing for anyone.
+            assert_eq!(c.client.try_claim(&id, &1, &c.b1), Err(Ok(Error::PeriodNotEnded)));
+            advance(&c, PERIOD);
+            assert_eq!(c.client.try_claim(&id, &1, &c.b1), Err(Ok(Error::NothingToClaim)));
+        }
 
-        let ents = r.client.get_entitlements(&r.id, &pid);
-        assert_eq!(ents.len(), 3);
-        assert_eq!(ents.get(0).unwrap().amount, 50_000_000);
-        assert_eq!(ents.get(1).unwrap().amount, 30_000_000);
-        assert_eq!(ents.get(2).unwrap().amount, 20_000_000);
+        #[test]
+        fn periods_follow_automatically() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(0));
+            advance(&c, PERIOD - 1);
+            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(0));
+            advance(&c, 1);
+            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(1));
+            // Months without sales leave no gap to fill: sales just land in
+            // whichever period is current.
+            advance(&c, 5 * PERIOD);
+            assert_eq!(c.client.purchase(&id, &c.b2, &c.v2, &(100 * USD)).period, Some(6));
+            assert_eq!(c.client.rewards_status(&id).current_period, 6);
 
-        assert_eq!(r.client.claim(&r.id, &pid, &r.a), 50_000_000);
-        assert_eq!(r.client.claim(&r.id, &pid, &r.b), 30_000_000);
-        assert_eq!(r.client.claim(&r.id, &pid, &r.c), 20_000_000);
-        assert_eq!(r.token.balance(&r.a), 50_000_000);
-        assert_eq!(r.token.balance(&r.b), 30_000_000);
-        assert_eq!(r.token.balance(&r.c), 20_000_000);
-        assert_eq!(r.token.balance(&r.contract), 0);
-        assert!(r.client.get_entitlement(&r.id, &pid, &r.a).claimed);
+            // Each period is shared only among its own participants.
+            assert_eq!(c.client.get_reward(&id, &0, &c.b1).amount, 4 * USD);
+            assert_eq!(c.client.get_reward(&id, &1, &c.b1).amount, 2 * USD);
+            assert_eq!(c.client.get_reward(&id, &6, &c.b1).amount, 0);
+            assert_eq!(c.client.get_reward(&id, &6, &c.b2).amount, 2 * USD);
+            assert_eq!(c.client.get_period(&id, &3).vendor_volume, 0);
+        }
 
-        let status = r.client.rewards_status(&r.id);
-        assert_eq!(status.total_contributed, status.total_claimed);
-    }
+        #[test]
+        fn vendor_buying_from_itself_counts_on_both_sides() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            c.client.purchase(&id, &c.v1, &c.v1, &(100 * USD));
+            let view = c.client.get_reward(&id, &0, &c.v1);
+            assert_eq!((view.vendor_volume, view.buyer_volume), (100 * USD, 100 * USD));
+            advance(&c, PERIOD);
+            assert_eq!(c.client.claim(&id, &0, &c.v1), 5 * USD);
+        }
 
-    // 6. Second claim is rejected and moves no money.
-    #[test]
-    fn second_claim_rejected() {
-        let r = setup();
-        let pid = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
-        advance(&r, HOUR);
-        r.client.close_period(&r.id, &pid);
-        r.client.claim(&r.id, &pid, &r.a);
-        let before = r.token.balance(&r.contract);
+        /// Selling to yourself to win a bigger share of other people's pool
+        /// always loses money: the operator and platform shares of the fake
+        /// sales are gone for good, and what comes back is at most what the
+        /// fake sales put in plus the share taken from others, which is
+        /// exactly cancelled by the share of its own contribution given away.
+        #[test]
+        fn wash_trading_never_pays() {
+            let c = setup();
+            for wash in [1, 50, 100, 1_000, 5_000] {
+                let start = c.token.balance(&c.v1);
+                let id2 = rewards_marketplace(&c);
+                c.client.purchase(&id2, &c.b1, &c.v2, &(100 * USD));
+                c.client.purchase(&id2, &c.v1, &c.v1, &(wash * USD));
+                advance(&c, PERIOD);
+                let period = c.client.rewards_status(&id2).current_period - 1;
+                c.client.claim(&id2, &period, &c.v1);
+                let net = c.token.balance(&c.v1) - start;
+                // Loses at least the 5% operator + 2% platform shares.
+                assert!(net <= -(wash * USD * 7 / 100), "wash {wash}: net {net}");
+            }
+        }
 
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &r.a),
-            Err(Ok(Error::AlreadyClaimed))
-        );
-        assert_eq!(r.token.balance(&r.contract), before);
-    }
+        #[test]
+        fn rounding_never_overpays() {
+            let c = setup();
+            let id = c
+                .client
+                .create_rewards_marketplace(&c.operator, &3_267, &3_267, &3_266, &PERIOD, &3_333);
+            c.client.register_vendor(&id, &c.v1);
+            c.client.register_vendor(&id, &c.v2);
+            let buyers: std::vec::Vec<Address> = (0..7).map(|_| Address::generate(&c.env)).collect();
+            for (i, b) in buyers.iter().enumerate() {
+                c.token_admin.mint(b, &1_000_000);
+                let vendor = if i % 2 == 0 { &c.v1 } else { &c.v2 };
+                c.client.purchase(&id, b, vendor, &(97 + 13 * i as i128));
+            }
+            let totals = c.client.get_period(&id, &0);
+            advance(&c, PERIOD);
+            let mut paid = 0;
+            for who in buyers.iter().chain([&c.v1, &c.v2]) {
+                if let Ok(Ok(amount)) = c.client.try_claim(&id, &0, who) {
+                    paid += amount;
+                }
+            }
+            let pools = totals.vendor_pool + totals.buyer_pool;
+            assert!(paid <= pools);
+            assert!(pools - paid < 9, "dust {} must stay under one stroop per participant", pools - paid);
+            assert_eq!(c.token.balance(&c.contract), pools - paid);
+        }
 
-    // 7. Claiming from an open period is rejected.
-    #[test]
-    fn claim_before_close_rejected() {
-        let r = setup();
-        let pid = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &r.a),
-            Err(Ok(Error::PeriodNotClosed))
-        );
-        // Still rejected after the end date until someone closes it.
-        advance(&r, HOUR);
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &r.a),
-            Err(Ok(Error::PeriodNotClosed))
-        );
-        assert_eq!(
-            r.client.try_get_entitlements(&r.id, &pid),
-            Err(Ok(Error::PeriodNotClosed))
-        );
-    }
+        #[test]
+        fn whole_pool_to_one_side() {
+            let c = setup();
+            for (vendor_pool, vendor_gets, buyer_gets) in [(10_000u32, 5 * USD, 0), (0, 0, 5 * USD)] {
+                let id = c
+                    .client
+                    .create_rewards_marketplace(&c.operator, &8_800, &500, &500, &PERIOD, &vendor_pool);
+                c.client.register_vendor(&id, &c.v1);
+                c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+                advance(&c, PERIOD);
+                let k = c.client.rewards_status(&id).current_period - 1;
+                assert_eq!(c.client.get_reward(&id, &k, &c.v1).amount, vendor_gets);
+                assert_eq!(c.client.get_reward(&id, &k, &c.b1).amount, buyer_gets);
+            }
+        }
 
-    // 8. Closing before the ledger reaches end_ts is rejected.
-    #[test]
-    fn premature_close_rejected() {
-        let r = setup();
-        let pid = open_abc(&r);
-        advance(&r, HOUR - 1);
-        assert_eq!(
-            r.client.try_close_period(&r.id, &pid),
-            Err(Ok(Error::PeriodNotEnded))
-        );
-        advance(&r, 1);
-        r.client.close_period(&r.id, &pid);
-        // And a closed period can't be closed (re-allocated) again.
-        assert_eq!(
-            r.client.try_close_period(&r.id, &pid),
-            Err(Ok(Error::PeriodAlreadyClosed))
-        );
-    }
+        #[test]
+        fn invalid_configurations_rejected() {
+            let c = setup();
+            let create = |community: u32, period: u64, pool: u32| {
+                c.client.try_create_rewards_marketplace(
+                    &c.operator,
+                    &(9_800 - 500 - community),
+                    &500,
+                    &community,
+                    &period,
+                    &pool,
+                )
+            };
+            assert_eq!(create(0, PERIOD, 5_000), Err(Ok(Error::InvalidSplit)));
+            assert_eq!(create(500, MIN_PERIOD_SECONDS - 1, 5_000), Err(Ok(Error::InvalidRewardsConfig)));
+            assert_eq!(create(500, MAX_PERIOD_SECONDS + 1, 5_000), Err(Ok(Error::InvalidRewardsConfig)));
+            assert_eq!(create(500, PERIOD, 10_001), Err(Ok(Error::InvalidRewardsConfig)));
+            assert_eq!(
+                c.client.try_create_rewards_marketplace(&c.operator, &8_800, &500, &600, &PERIOD, &5_000),
+                Err(Ok(Error::InvalidSplit))
+            );
+            assert!(create(500, MIN_PERIOD_SECONDS, 0).is_ok());
+            assert!(create(500, MAX_PERIOD_SECONDS, 10_000).is_ok());
+        }
 
-    // 9. Committed shares cannot be modified.
-    #[test]
-    fn committed_shares_cannot_be_modified() {
-        let r = setup();
-        let pid = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
-        let committed = r.client.get_period(&r.id, &pid);
+        #[test]
+        fn nobody_can_withdraw_the_treasury() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            advance(&c, PERIOD);
+            let treasury = c.token.balance(&c.contract);
+            assert_eq!(treasury, 5 * USD);
 
-        // The operator tries to replace the running period's rules with a
-        // 100% allocation to a new address.
-        let attacker = Address::generate(&r.env);
-        let attempt = r.client.try_open_period(
-            &r.id,
-            &vec![&r.env, attacker.clone()],
-            &vec![&r.env, 10_000u32],
-            &(r.env.ledger().timestamp() + HOUR),
-        );
-        assert_eq!(attempt, Err(Ok(Error::PeriodActive)));
-        assert_eq!(r.client.get_period(&r.id, &pid), committed);
+            // (a) Admin and operator took no part in the period.
+            assert_eq!(c.client.try_claim(&id, &0, &c.admin), Err(Ok(Error::NothingToClaim)));
+            assert_eq!(c.client.try_claim(&id, &0, &c.operator), Err(Ok(Error::NothingToClaim)));
 
-        // After the end, a NEW period may be opened, but it is a separate
-        // period: the ended one keeps its rules and contributions.
-        advance(&r, HOUR);
-        let next = r.client.open_period(
-            &r.id,
-            &vec![&r.env, attacker.clone()],
-            &vec![&r.env, 10_000u32],
-            &(r.env.ledger().timestamp() + HOUR),
-        );
-        assert_eq!(next, pid + 1);
-        assert_eq!(r.client.get_period(&r.id, &pid), committed);
-        r.client.close_period(&r.id, &pid);
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &attacker),
-            Err(Ok(Error::NotBeneficiary))
-        );
-        assert_eq!(r.client.claim(&r.id, &pid, &r.a), 25_000_000);
-    }
-
-    // Purchases with no active period fail atomically (no silent fallback).
-    #[test]
-    fn purchase_without_active_period_rejected() {
-        let r = setup();
-        // No period opened yet.
-        assert_eq!(
-            r.client.try_purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000),
-            Err(Ok(Error::NoActivePeriod))
-        );
-        let pid = open_abc(&r);
-        advance(&r, HOUR); // expired, not closed
-        assert_eq!(
-            r.client.try_purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000),
-            Err(Ok(Error::NoActivePeriod))
-        );
-        r.client.close_period(&r.id, &pid);
-        assert_eq!(
-            r.client.try_purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000),
-            Err(Ok(Error::NoActivePeriod))
-        );
-        // Nothing moved, nothing booked.
-        assert_eq!(r.token.balance(&r.buyer), 1_000_000_000_000);
-        assert_eq!(r.token.balance(&r.vendor), 0);
-        assert_eq!(r.token.balance(&r.contract), 0);
-        assert_eq!(r.client.get_period(&r.id, &pid).total_contributed, 0);
-    }
-
-    // 10. Neither the contract admin nor the operator can move treasury funds.
-    #[test]
-    fn admin_and_operator_cannot_withdraw_treasury() {
-        let r = setup();
-        let pid = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
-        advance(&r, HOUR);
-        r.client.close_period(&r.id, &pid);
-        let treasury = r.token.balance(&r.contract);
-        assert_eq!(treasury, 50_000_000);
-
-        // (a) Neither can claim: they are not beneficiaries.
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &r.admin),
-            Err(Ok(Error::NotBeneficiary))
-        );
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &r.operator),
-            Err(Ok(Error::NotBeneficiary))
-        );
-
-        // (b) The operator cannot list itself as a beneficiary.
-        advance(&r, 1);
-        assert_eq!(
-            r.client.try_open_period(
-                &r.id,
-                &vec![&r.env, r.operator.clone()],
-                &vec![&r.env, 10_000u32],
-                &(r.env.ledger().timestamp() + HOUR),
-            ),
-            Err(Ok(Error::InvalidBeneficiaries))
-        );
-
-        // (c) Going around the contract: a token transfer out of the contract
-        //     authorized by the admin and the operator (strict auth mode).
-        //     Positive control first: the same harness lets the operator move
-        //     its OWN funds, so the failures below are about whose funds move.
-        r.env.mock_auths(&[MockAuth {
-            address: &r.operator,
-            invoke: &MockAuthInvoke {
-                contract: &r.token.address,
-                fn_name: "transfer",
-                args: (&r.operator, &r.admin, 1i128).into_val(&r.env),
-                sub_invokes: &[],
-            },
-        }]);
-        r.token.transfer(&r.operator, &r.admin, &1);
-        for thief in [&r.admin, &r.operator] {
-            r.env.mock_auths(&[MockAuth {
-                address: thief,
+            // (b) Going around the contract: a token transfer out of the
+            //     contract authorized by the admin or the operator. Positive
+            //     control first: the operator can move its OWN funds.
+            c.env.mock_auths(&[MockAuth {
+                address: &c.operator,
                 invoke: &MockAuthInvoke {
-                    contract: &r.token.address,
+                    contract: &c.token.address,
                     fn_name: "transfer",
-                    args: (&r.contract, thief, treasury).into_val(&r.env),
+                    args: (&c.operator, &c.admin, 1i128).into_val(&c.env),
                     sub_invokes: &[],
                 },
             }]);
-            let res = r.token.try_transfer(&r.contract, thief, &treasury);
-            assert!(res.is_err(), "transfer out of the treasury must fail");
-        }
-
-        // (d) The operator signing a claim on behalf of a member fails: the
-        //     member's own signature is required.
-        r.env.mock_auths(&[MockAuth {
-            address: &r.operator,
-            invoke: &MockAuthInvoke {
-                contract: &r.contract,
-                fn_name: "claim",
-                args: (r.id, pid, &r.a).into_val(&r.env),
-                sub_invokes: &[],
-            },
-        }]);
-        assert!(r.client.try_claim(&r.id, &pid, &r.a).is_err());
-
-        assert_eq!(r.token.balance(&r.contract), treasury);
-        assert_eq!(r.token.balance(&r.admin), 1); // the control transfer only
-        assert_eq!(r.token.balance(&r.operator), 50_000_000 - 1); // its sale share
-    }
-
-    // 11. Two marketplaces sharing one contract balance stay isolated.
-    #[test]
-    fn marketplaces_are_isolated() {
-        let r = setup();
-        let op2 = Address::generate(&r.env);
-        let vendor2 = Address::generate(&r.env);
-        let id2 = r.client.create_rewards_marketplace(&op2, &7_800, &1_000, &1_000);
-        r.client.register_vendor(&id2, &vendor2);
-
-        let p1 = open_abc(&r);
-        let x = Address::generate(&r.env);
-        let p2 = r.client.open_period(
-            &id2,
-            &vec![&r.env, x.clone()],
-            &vec![&r.env, 10_000u32],
-            &(T0 + HOUR),
-        );
-        assert_eq!((p1, p2), (0, 0)); // same period id, different marketplaces
-
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000); // +50_000_000 to mkt 1
-        r.client.purchase(&id2, &r.buyer, &vendor2, &1_000_000_000); // +100_000_000 to mkt 2
-        assert_eq!(r.token.balance(&r.contract), 150_000_000);
-        assert_eq!(r.client.get_period(&r.id, &p1).total_contributed, 50_000_000);
-        assert_eq!(r.client.get_period(&id2, &p2).total_contributed, 100_000_000);
-
-        // Vendor of marketplace 1 is not registered in marketplace 2.
-        assert_eq!(
-            r.client.try_purchase(&id2, &r.buyer, &r.vendor, &1_000),
-            Err(Ok(Error::VendorNotRegistered))
-        );
-
-        advance(&r, HOUR);
-        r.client.close_period(&r.id, &p1);
-        r.client.close_period(&id2, &p2);
-
-        // Members of one marketplace can't claim the other's period.
-        assert_eq!(r.client.try_claim(&id2, &p2, &r.a), Err(Ok(Error::NotBeneficiary)));
-        assert_eq!(r.client.try_claim(&r.id, &p1, &x), Err(Ok(Error::NotBeneficiary)));
-
-        assert_eq!(r.client.claim(&id2, &p2, &x), 100_000_000);
-        // Marketplace 1's funds are untouched by marketplace 2's payout.
-        assert_eq!(r.token.balance(&r.contract), 50_000_000);
-        assert_eq!(r.client.rewards_status(&r.id).total_claimed, 0);
-        assert_eq!(r.client.claim(&r.id, &p1, &r.a), 25_000_000);
-        assert_eq!(r.client.claim(&r.id, &p1, &r.b), 15_000_000);
-        assert_eq!(r.client.claim(&r.id, &p1, &r.c), 10_000_000);
-        assert_eq!(r.token.balance(&r.contract), 0);
-    }
-
-    // 12. Consecutive periods of one marketplace keep separate books.
-    #[test]
-    fn periods_are_isolated() {
-        let r = setup();
-        let p0 = open_abc(&r);
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000); // 50_000_000 → p0
-        advance(&r, HOUR);
-
-        let d = Address::generate(&r.env);
-        let p1 = r.client.open_period(
-            &r.id,
-            &vec![&r.env, d.clone()],
-            &vec![&r.env, 10_000u32],
-            &(r.env.ledger().timestamp() + HOUR),
-        );
-        assert_eq!(r.client.purchase(&r.id, &r.buyer, &r.vendor, &400_000_000), Some(p1)); // 20_000_000 → p1
-
-        assert_eq!(r.client.get_period(&r.id, &p0).total_contributed, 50_000_000);
-        assert_eq!(r.client.get_period(&r.id, &p1).total_contributed, 20_000_000);
-
-        // p0 can close while p1 is running; p1 cannot.
-        r.client.close_period(&r.id, &p0);
-        assert_eq!(r.client.try_close_period(&r.id, &p1), Err(Ok(Error::PeriodNotEnded)));
-        // d is a member of p1 only.
-        assert_eq!(r.client.try_claim(&r.id, &p0, &d), Err(Ok(Error::NotBeneficiary)));
-        assert_eq!(r.client.try_claim(&r.id, &p1, &r.a), Err(Ok(Error::PeriodNotClosed)));
-
-        advance(&r, HOUR);
-        r.client.close_period(&r.id, &p1);
-        assert_eq!(r.client.claim(&r.id, &p1, &d), 20_000_000);
-        assert_eq!(r.client.try_claim(&r.id, &p1, &r.a), Err(Ok(Error::NotBeneficiary)));
-        assert_eq!(r.client.claim(&r.id, &p0, &r.a), 25_000_000);
-        assert_eq!(r.client.get_period(&r.id, &p0).total_claimed, 25_000_000);
-        assert_eq!(r.client.get_period(&r.id, &p1).total_claimed, 20_000_000);
-    }
-
-    // 13. Rounding: entitlements always sum to exactly the period total.
-    #[test]
-    fn rounding_distributes_every_stroop() {
-        let r = setup();
-        let pid = r.client.open_period(
-            &r.id,
-            &vec![&r.env, r.a.clone(), r.b.clone(), r.c.clone()],
-            &vec![&r.env, 3_333u32, 3_333, 3_334],
-            &(T0 + HOUR),
-        );
-        // community = 200 - 176 - 10 - 4 (platform) = 10 stroops.
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &200);
-        advance(&r, HOUR);
-        r.client.close_period(&r.id, &pid);
-
-        // floor(10 * 3333 / 10000) = 3, 3, floor(10 * 3334 / 10000) = 3 → 9;
-        // the 1 leftover stroop goes to the first member.
-        let ents = r.client.get_entitlements(&r.id, &pid);
-        let amounts: std::vec::Vec<i128> = ents.iter().map(|e| e.amount).collect();
-        assert_eq!(amounts, std::vec![4, 3, 3]);
-
-        for m in [&r.a, &r.b, &r.c] {
-            r.client.claim(&r.id, &pid, m);
-        }
-        assert_eq!(r.token.balance(&r.contract), 0); // no inaccessible residue
-        let p = r.client.get_period(&r.id, &pid);
-        assert_eq!(p.total_claimed, p.total_contributed);
-    }
-
-    #[test]
-    fn rounding_holds_for_awkward_totals() {
-        // Property-style sweep: for many totals and a 7-way uneven split the
-        // entitlements sum exactly to the total and each is at most 1 stroop
-        // away from its exact proportional share (a member can get exactly +1
-        // when its share divides evenly and it also receives leftover dust).
-        let shares: [u32; 7] = [1, 1_999, 2_500, 1_234, 3_000, 766, 500];
-        for total in [1i128, 6, 7, 13, 9_999, 10_001, 123_456_789, 999_999_999_999] {
-            let r = setup();
-            let members: std::vec::Vec<Address> =
-                (0..shares.len()).map(|_| Address::generate(&r.env)).collect();
-            let mut bvec: Vec<Address> = Vec::new(&r.env);
-            let mut svec: Vec<u32> = Vec::new(&r.env);
-            for (m, s) in members.iter().zip(shares.iter()) {
-                bvec.push_back(m.clone());
-                svec.push_back(*s);
+            c.token.transfer(&c.operator, &c.admin, &1);
+            for thief in [&c.admin, &c.operator] {
+                c.env.mock_auths(&[MockAuth {
+                    address: thief,
+                    invoke: &MockAuthInvoke {
+                        contract: &c.token.address,
+                        fn_name: "transfer",
+                        args: (&c.contract, thief, treasury).into_val(&c.env),
+                        sub_invokes: &[],
+                    },
+                }]);
+                assert!(c.token.try_transfer(&c.contract, thief, &treasury).is_err());
             }
-            let pid = r.client.open_period(&r.id, &bvec, &svec, &(T0 + HOUR));
-            // Buy ~20x so the community share lands near `total`; the exact
-            // period total (5% + rounding dust) is read back from the chain.
-            r.token_admin.mint(&r.buyer, &(total * 20));
-            r.client.purchase(&r.id, &r.buyer, &r.vendor, &(total * 20));
-            let total = r.client.get_period(&r.id, &pid).total_contributed;
-            advance(&r, HOUR);
-            r.client.close_period(&r.id, &pid);
 
-            let ents = r.client.get_entitlements(&r.id, &pid);
-            let sum: i128 = ents.iter().map(|e| e.amount).sum();
-            assert_eq!(sum, total);
-            for e in ents.iter() {
-                let exact = total * e.share_bps as i128;
-                let diff = e.amount * 10_000 - exact;
-                assert!(diff > -10_000 && diff <= 10_000, "at most one stroop off");
+            // (c) The operator signing a claim for a participant fails.
+            c.env.mock_auths(&[MockAuth {
+                address: &c.operator,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "claim",
+                    args: (id, 0u32, &c.b1).into_val(&c.env),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert!(c.client.try_claim(&id, &0, &c.b1).is_err());
+            assert_eq!(c.token.balance(&c.contract), treasury);
+        }
+
+        #[test]
+        fn marketplaces_are_isolated() {
+            let c = setup();
+            let a = rewards_marketplace(&c);
+            let b = rewards_marketplace(&c);
+            c.client.purchase(&a, &c.b1, &c.v1, &(100 * USD));
+            c.client.purchase(&b, &c.b2, &c.v2, &(300 * USD));
+            advance(&c, PERIOD);
+            assert_eq!(c.client.try_claim(&a, &0, &c.b2), Err(Ok(Error::NothingToClaim)));
+            assert_eq!(c.client.claim(&a, &0, &c.b1), 2 * USD);
+            assert_eq!(c.client.claim(&b, &0, &c.b2), 6 * USD);
+            assert_eq!(c.client.get_period(&a, &0).buyer_pool, 2 * USD);
+        }
+
+        #[test]
+        fn required_authorizations() {
+            let c = setup();
+            let e = &c.env;
+            let id = c
+                .client
+                .create_rewards_marketplace(&c.operator, &8_800, &500, &500, &PERIOD, &6_000);
+            assert_eq!(e.auths().len(), 1);
+            assert_eq!(e.auths()[0].0, c.operator);
+            c.client.register_vendor(&id, &c.v1);
+
+            // purchase: exactly the buyer (covering the token sub-transfers).
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            let auths = e.auths();
+            assert_eq!(auths.len(), 1);
+            assert_eq!(auths[0].0, c.b1);
+
+            // claim: exactly the participant.
+            advance(&c, PERIOD);
+            c.client.claim(&id, &0, &c.v1);
+            assert_eq!(
+                e.auths(),
+                std::vec![(
+                    c.v1.clone(),
+                    AuthorizedInvocation {
+                        function: AuthorizedFunction::Contract((
+                            c.contract.clone(),
+                            Symbol::new(e, "claim"),
+                            (id, 0u32, c.v1.clone()).into_val(e),
+                        )),
+                        sub_invocations: std::vec![],
+                    }
+                )]
+            );
+
+            // Strict mode: no signatures at all.
+            e.set_auths(&[]);
+            assert!(c.client.try_claim(&id, &0, &c.b1).is_err());
+            assert!(c.client.try_purchase(&id, &c.b1, &c.v1, &1_000).is_err());
+            assert!(c
+                .client
+                .try_create_rewards_marketplace(&c.operator, &8_800, &500, &500, &PERIOD, &6_000)
+                .is_err());
+            assert!(c.client.try_register_vendor(&id, &c.b2).is_err());
+
+            // b1 claiming with its own signature works; it can't pay someone else.
+            e.mock_auths(&[MockAuth {
+                address: &c.b1,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "claim",
+                    args: (id, 0u32, &c.b1).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert_eq!(c.client.claim(&id, &0, &c.b1), 2 * USD);
+        }
+
+        #[test]
+        fn classic_marketplace_unchanged() {
+            let c = setup();
+            let fund = Address::generate(&c.env);
+            let id = c.client.create_marketplace(&c.operator, &fund, &8_800, &800, &200);
+            c.client.register_vendor(&id, &c.v1);
+            let receipt = c.client.purchase(&id, &c.b1, &c.v1, &(42 * USD));
+            assert_eq!((receipt.period, receipt.round), (None, None));
+            assert_eq!(c.token.balance(&fund), 8_400_000);
+            assert_eq!(c.token.balance(&c.contract), 0);
+            assert_eq!(c.client.try_rewards_status(&id), Err(Ok(Error::RewardsNotEnabled)));
+            assert_eq!(c.client.try_get_fundraise(&id), Err(Ok(Error::FundraiseNotEnabled)));
+        }
+    }
+
+    mod fundraise {
+        use super::*;
+
+        pub struct F<'a> {
+            pub c: C<'a>,
+            pub id: u64,
+            pub r1: Address,
+            pub r2: Address,
+        }
+
+        /// 88% / 5% / 5% community; $10 target paid 70% / 30% to r1 / r2.
+        pub fn fundraiser<'a>(policy: GoalPolicy) -> F<'a> {
+            let c = setup();
+            let (r1, r2) = (Address::generate(&c.env), Address::generate(&c.env));
+            let id = c.client.create_fundraise_marketplace(
+                &c.operator,
+                &8_800,
+                &500,
+                &500,
+                &(10 * USD),
+                &vec![&c.env, r1.clone(), r2.clone()],
+                &vec![&c.env, 7_000u32, 3_000],
+                &policy,
+            );
+            c.client.register_vendor(&id, &c.v1);
+            F { c, id, r1, r2 }
+        }
+
+        /// Two $100 sales raise the $10 target; then anyone releases it.
+        fn reach_and_release(f: &F) {
+            let c = &f.c;
+            assert_eq!(c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD)).round, Some(0));
+            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            c.client.purchase(&f.id, &c.b2, &c.v1, &(100 * USD));
+            assert_eq!(c.client.release_fundraise(&f.id), 10 * USD);
+            assert_eq!(c.token.balance(&f.r1), 7 * USD);
+            assert_eq!(c.token.balance(&f.r2), 3 * USD);
+            assert_eq!(c.token.balance(&c.contract), 0);
+        }
+
+        #[test]
+        fn raises_until_target_then_anyone_releases() {
+            let f = fundraiser(GoalPolicy::Stop);
+            let c = &f.c;
+            c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            let state = c.client.get_fundraise(&f.id);
+            assert_eq!((state.raised, state.round, state.goal_reached), (5 * USD, 0, false));
+            assert_eq!(c.token.balance(&c.contract), 5 * USD);
+            c.client.purchase(&f.id, &c.b2, &c.v1, &(100 * USD));
+
+            // Permissionless: no signature at all is needed.
+            c.env.set_auths(&[]);
+            assert_eq!(c.client.release_fundraise(&f.id), 10 * USD);
+            assert_eq!(c.env.auths(), std::vec![]);
+            let state = c.client.get_fundraise(&f.id);
+            assert_eq!((state.raised, state.round, state.goal_reached), (0, 1, true));
+            assert_eq!((state.total_raised, state.total_released), (10 * USD, 10 * USD));
+            assert_eq!(c.token.balance(&f.r1), 7 * USD);
+            assert_eq!(c.token.balance(&f.r2), 3 * USD);
+        }
+
+        #[test]
+        fn release_pays_everything_raised_even_above_target() {
+            let f = fundraiser(GoalPolicy::NewRound);
+            let c = &f.c;
+            c.client.purchase(&f.id, &c.b1, &c.v1, &(300 * USD)); // $15 raised
+            assert_eq!(c.client.release_fundraise(&f.id), 15 * USD);
+            assert_eq!(c.token.balance(&f.r1), 10 * USD + 5_000_000); // $10.50
+            assert_eq!(c.token.balance(&f.r2), 4 * USD + 5_000_000); // $4.50
+        }
+
+        #[test]
+        fn stop_gives_later_community_shares_to_the_vendor() {
+            let f = fundraiser(GoalPolicy::Stop);
+            let c = &f.c;
+            reach_and_release(&f);
+            let vendor_before = c.token.balance(&c.v1);
+            let receipt = c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            assert_eq!(receipt.vendor_amount, 93 * USD);
+            assert_eq!((receipt.community_amount, receipt.round), (0, None));
+            assert_eq!(c.token.balance(&c.v1) - vendor_before, 93 * USD);
+            assert_eq!(c.token.balance(&c.contract), 0);
+            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+        }
+
+        #[test]
+        fn new_round_raises_again_toward_the_same_target() {
+            let f = fundraiser(GoalPolicy::NewRound);
+            let c = &f.c;
+            reach_and_release(&f);
+            assert_eq!(c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD)).round, Some(1));
+            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            assert_eq!(c.client.release_fundraise(&f.id), 10 * USD);
+            assert_eq!(c.token.balance(&f.r1), 14 * USD);
+            assert_eq!(c.client.get_fundraise(&f.id).round, 2);
+        }
+
+        #[test]
+        fn direct_pays_recipients_with_every_later_sale() {
+            let f = fundraiser(GoalPolicy::Direct);
+            let c = &f.c;
+            reach_and_release(&f);
+            let receipt = c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            assert_eq!((receipt.community_amount, receipt.round), (5 * USD, None));
+            assert_eq!(c.token.balance(&f.r1), 7 * USD + 35_000_000);
+            assert_eq!(c.token.balance(&f.r2), 3 * USD + 15_000_000);
+            assert_eq!(c.token.balance(&c.contract), 0);
+            assert_eq!(c.client.get_fundraise(&f.id).total_released, 15 * USD);
+        }
+
+        #[test]
+        fn release_rounding_pays_every_stroop() {
+            let c = setup();
+            let rs: std::vec::Vec<Address> = (0..3).map(|_| Address::generate(&c.env)).collect();
+            let id = c.client.create_fundraise_marketplace(
+                &c.operator,
+                &8_800,
+                &500,
+                &500,
+                &1,
+                &Vec::from_slice(&c.env, &rs),
+                &vec![&c.env, 3_333u32, 3_333, 3_334],
+                &GoalPolicy::NewRound,
+            );
+            c.client.register_vendor(&id, &c.v1);
+            c.client.purchase(&id, &c.b1, &c.v1, &101); // 101 - 88 - 5 - 2 = 6 raised
+            c.client.purchase(&id, &c.b1, &c.v1, &(7 * USD + 3));
+            let raised = c.client.get_fundraise(&id).raised;
+            assert_eq!(c.client.release_fundraise(&id), raised);
+            let paid: i128 = rs.iter().map(|r| c.token.balance(r)).sum();
+            assert_eq!(paid, raised);
+            assert_eq!(c.token.balance(&c.contract), 0);
+        }
+
+        #[test]
+        fn invalid_configurations_rejected() {
+            let c = setup();
+            let e = &c.env;
+            let (x, y) = (Address::generate(e), Address::generate(e));
+            let create = |community: u32, target: i128, rs: Vec<Address>, shares: Vec<u32>| {
+                c.client.try_create_fundraise_marketplace(
+                    &c.operator,
+                    &(9_800 - 500 - community),
+                    &500,
+                    &community,
+                    &target,
+                    &rs,
+                    &shares,
+                    &GoalPolicy::Stop,
+                )
+            };
+            let two = vec![e, x.clone(), y.clone()];
+            let half = vec![e, 5_000u32, 5_000];
+            assert_eq!(create(0, USD, two.clone(), half.clone()), Err(Ok(Error::InvalidSplit)));
+            assert_eq!(create(500, 0, two.clone(), half.clone()), Err(Ok(Error::InvalidGoal)));
+            assert_eq!(create(500, -1, two.clone(), half.clone()), Err(Ok(Error::InvalidGoal)));
+            let bad = Err(Ok(Error::InvalidRecipients));
+            assert_eq!(create(500, USD, vec![e], vec![e]), bad);
+            assert_eq!(create(500, USD, two.clone(), vec![e, 10_000u32]), bad);
+            assert_eq!(create(500, USD, two.clone(), vec![e, 6_000u32, 3_000]), bad);
+            assert_eq!(create(500, USD, two.clone(), vec![e, 10_000u32, 0]), bad);
+            assert_eq!(create(500, USD, vec![e, x.clone(), x.clone()], half.clone()), bad);
+            assert_eq!(create(500, USD, vec![e, x.clone(), c.contract.clone()], half.clone()), bad);
+            let many: std::vec::Vec<Address> = (0..21).map(|_| Address::generate(e)).collect();
+            let mut shares = std::vec![476u32; 21];
+            shares[0] = 10_000 - 476 * 20;
+            assert_eq!(
+                create(500, USD, Vec::from_slice(e, &many), Vec::from_slice(e, &shares)),
+                bad
+            );
+            assert!(create(500, USD, two, half).is_ok());
+        }
+
+        #[test]
+        fn nobody_can_take_the_raised_funds() {
+            let f = fundraiser(GoalPolicy::Stop);
+            let c = &f.c;
+            c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            let held = c.token.balance(&c.contract);
+            for thief in [&c.admin, &c.operator] {
+                c.env.mock_auths(&[MockAuth {
+                    address: thief,
+                    invoke: &MockAuthInvoke {
+                        contract: &c.token.address,
+                        fn_name: "transfer",
+                        args: (&c.contract, thief, held).into_val(&c.env),
+                        sub_invokes: &[],
+                    },
+                }]);
+                assert!(c.token.try_transfer(&c.contract, thief, &held).is_err());
             }
+            // Below target, nothing can be released, not even to the recipients.
+            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            assert_eq!(c.token.balance(&c.contract), held);
+            // Rewards entry points don't apply to a fundraiser and vice versa.
+            c.env.mock_all_auths();
+            assert_eq!(c.client.try_claim(&f.id, &0, &c.b1), Err(Ok(Error::RewardsNotEnabled)));
+            let rewards = rewards_marketplace(c);
+            assert_eq!(c.client.try_release_fundraise(&rewards), Err(Ok(Error::FundraiseNotEnabled)));
         }
-    }
 
-    // 14. Invalid configurations are rejected.
-    #[test]
-    fn invalid_configurations_rejected() {
-        let r = setup();
-        let e = &r.env;
-        let end = T0 + HOUR;
-        let bad = |members: Vec<Address>, shares: Vec<u32>| {
-            r.client.try_open_period(&r.id, &members, &shares, &end)
-        };
-        let invalid = Err(Ok(Error::InvalidBeneficiaries));
-
-        // Empty list.
-        assert_eq!(bad(Vec::new(e), Vec::new(e)), invalid);
-        // Length mismatch.
-        assert_eq!(bad(vec![e, r.a.clone()], vec![e, 5_000u32, 5_000]), invalid);
-        // Shares don't sum to 10_000 (under / over).
-        assert_eq!(bad(vec![e, r.a.clone(), r.b.clone()], vec![e, 5_000u32, 4_999]), invalid);
-        assert_eq!(bad(vec![e, r.a.clone(), r.b.clone()], vec![e, 5_000u32, 5_001]), invalid);
-        // u32 overflow must not wrap into a valid sum.
-        assert_eq!(
-            bad(vec![e, r.a.clone(), r.b.clone()], vec![e, u32::MAX, 10_001]),
-            invalid
-        );
-        // Zero share.
-        assert_eq!(
-            bad(vec![e, r.a.clone(), r.b.clone()], vec![e, 10_000u32, 0]),
-            invalid
-        );
-        // Duplicate member.
-        assert_eq!(
-            bad(vec![e, r.a.clone(), r.a.clone()], vec![e, 5_000u32, 5_000]),
-            invalid
-        );
-        // Forbidden addresses: the operator and the contract itself.
-        assert_eq!(bad(vec![e, r.operator.clone()], vec![e, 10_000u32]), invalid);
-        assert_eq!(bad(vec![e, r.contract.clone()], vec![e, 10_000u32]), invalid);
-        // More than MAX_BENEFICIARIES.
-        let mut many: Vec<Address> = Vec::new(e);
-        let mut many_shares: Vec<u32> = Vec::new(e);
-        for i in 0..(MAX_BENEFICIARIES + 1) {
-            many.push_back(Address::generate(e));
-            many_shares.push_back(if i == 0 { 10_000 - MAX_BENEFICIARIES } else { 1 });
+        #[test]
+        fn rules_are_public() {
+            let f = fundraiser(GoalPolicy::Direct);
+            let state = f.c.client.get_fundraise(&f.id);
+            assert_eq!(state.target, 10 * USD);
+            assert_eq!(state.recipients, vec![&f.c.env, f.r1.clone(), f.r2.clone()]);
+            assert_eq!(state.shares_bps, vec![&f.c.env, 7_000u32, 3_000]);
+            assert_eq!(state.policy, GoalPolicy::Direct);
         }
-        assert_eq!(bad(many, many_shares), invalid);
-        // Exactly MAX_BENEFICIARIES is fine (checked last so state stays clean above).
-
-        // End date in the past / now / too far in the future.
-        let one = || vec![e, r.a.clone()];
-        let full = || vec![e, 10_000u32];
-        assert_eq!(
-            r.client.try_open_period(&r.id, &one(), &full(), &T0),
-            Err(Ok(Error::InvalidPeriodEnd))
-        );
-        assert_eq!(
-            r.client.try_open_period(&r.id, &one(), &full(), &(T0 - 1)),
-            Err(Ok(Error::InvalidPeriodEnd))
-        );
-        assert_eq!(
-            r.client
-                .try_open_period(&r.id, &one(), &full(), &(T0 + MAX_PERIOD_SECONDS + 1)),
-            Err(Ok(Error::InvalidPeriodEnd))
-        );
-
-        // Rewards functions on a classic marketplace.
-        let fund = Address::generate(e);
-        let classic = r
-            .client
-            .create_marketplace(&r.operator, &fund, &8_800, &500, &500);
-        assert_eq!(
-            r.client.try_open_period(&classic, &one(), &full(), &end),
-            Err(Ok(Error::RewardsNotEnabled))
-        );
-        assert_eq!(
-            r.client.try_rewards_status(&classic),
-            Err(Ok(Error::RewardsNotEnabled))
-        );
-        assert_eq!(
-            r.client.try_open_period(&99, &one(), &full(), &end),
-            Err(Ok(Error::MarketplaceNotFound))
-        );
-        // Rewards marketplace with a 0% community share / a bad split.
-        assert_eq!(
-            r.client.try_create_rewards_marketplace(&r.operator, &8_800, &1_000, &0),
-            Err(Ok(Error::InvalidSplit))
-        );
-        assert_eq!(
-            r.client.try_create_rewards_marketplace(&r.operator, &8_800, &1_000, &1),
-            Err(Ok(Error::InvalidSplit))
-        );
-        // Classic marketplace pointing its fund at the contract (would strand funds).
-        assert_eq!(
-            r.client
-                .try_create_marketplace(&r.operator, &r.contract, &8_800, &500, &500),
-            Err(Ok(Error::InvalidAddress))
-        );
-        // Unknown period ids.
-        assert_eq!(r.client.try_close_period(&r.id, &7), Err(Ok(Error::PeriodNotFound)));
-        assert_eq!(r.client.try_claim(&r.id, &7, &r.a), Err(Ok(Error::PeriodNotFound)));
-
-        // Nothing above opened a period.
-        assert_eq!(r.client.rewards_status(&r.id).period_count, 0);
-
-        // MAX_BENEFICIARIES exactly is accepted.
-        let mut max: Vec<Address> = Vec::new(e);
-        let mut max_shares: Vec<u32> = Vec::new(e);
-        for _ in 0..MAX_BENEFICIARIES {
-            max.push_back(Address::generate(e));
-            max_shares.push_back(BPS_DENOM / MAX_BENEFICIARIES);
-        }
-        r.client.open_period(&r.id, &max, &max_shares, &end);
-    }
-
-    #[test]
-    fn empty_period_has_nothing_to_claim() {
-        let r = setup();
-        let pid = open_abc(&r);
-        advance(&r, HOUR);
-        assert_eq!(r.client.close_period(&r.id, &pid), 0);
-        assert_eq!(
-            r.client.try_claim(&r.id, &pid, &r.a),
-            Err(Ok(Error::NothingToClaim))
-        );
-    }
-
-    // 15. The real authorizations each entry point requires.
-    #[test]
-    fn required_authorizations() {
-        let r = setup();
-        let e = &r.env;
-        let end = T0 + HOUR;
-        let members = vec![e, r.a.clone(), r.b.clone(), r.c.clone()];
-        let shares = vec![e, 5_000u32, 3_000, 2_000];
-
-        // open_period: exactly the operator.
-        let pid = r.client.open_period(&r.id, &members, &shares, &end);
-        assert_eq!(
-            e.auths(),
-            std::vec![(
-                r.operator.clone(),
-                AuthorizedInvocation {
-                    function: AuthorizedFunction::Contract((
-                        r.contract.clone(),
-                        Symbol::new(e, "open_period"),
-                        (r.id, members.clone(), shares.clone(), end).into_val(e),
-                    )),
-                    sub_invocations: std::vec![],
-                }
-            )]
-        );
-
-        // purchase: exactly the buyer (covering the token sub-transfers).
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
-        let auths = e.auths();
-        assert_eq!(auths.len(), 1);
-        assert_eq!(auths[0].0, r.buyer);
-
-        // close_period: permissionless — no authorization required.
-        advance(&r, HOUR);
-        r.client.close_period(&r.id, &pid);
-        assert_eq!(e.auths(), std::vec![]);
-
-        // claim: exactly the member.
-        r.client.claim(&r.id, &pid, &r.a);
-        assert_eq!(
-            e.auths(),
-            std::vec![(
-                r.a.clone(),
-                AuthorizedInvocation {
-                    function: AuthorizedFunction::Contract((
-                        r.contract.clone(),
-                        Symbol::new(e, "claim"),
-                        (r.id, pid, r.a.clone()).into_val(e),
-                    )),
-                    sub_invocations: std::vec![],
-                }
-            )]
-        );
-
-        // ── Strict mode: no signatures at all ──
-        e.set_auths(&[]);
-        assert!(r.client.try_claim(&r.id, &pid, &r.b).is_err());
-        assert!(r
-            .client
-            .try_open_period(&r.id, &members, &shares, &(e.ledger().timestamp() + HOUR))
-            .is_err());
-        assert!(r
-            .client
-            .try_purchase(&r.id, &r.buyer, &r.vendor, &1_000)
-            .is_err());
-        assert!(r
-            .client
-            .try_create_rewards_marketplace(&r.operator, &8_800, &500, &500)
-            .is_err());
-        assert!(r.client.try_register_vendor(&r.id, &r.buyer).is_err());
-
-        // A stranger (not the operator) cannot open a period.
-        let stranger = Address::generate(e);
-        e.mock_auths(&[MockAuth {
-            address: &stranger,
-            invoke: &MockAuthInvoke {
-                contract: &r.contract,
-                fn_name: "open_period",
-                args: (r.id, members.clone(), shares.clone(), e.ledger().timestamp() + HOUR)
-                    .into_val(e),
-                sub_invokes: &[],
-            },
-        }]);
-        assert!(r
-            .client
-            .try_open_period(&r.id, &members, &shares, &(e.ledger().timestamp() + HOUR))
-            .is_err());
-
-        // Member b claiming with its own signature works in strict mode too.
-        e.mock_auths(&[MockAuth {
-            address: &r.b,
-            invoke: &MockAuthInvoke {
-                contract: &r.contract,
-                fn_name: "claim",
-                args: (r.id, pid, &r.b).into_val(e),
-                sub_invokes: &[],
-            },
-        }]);
-        assert_eq!(r.client.claim(&r.id, &pid, &r.b), 15_000_000);
-        // Member b's signature can't be reused to pay member c.
-        e.mock_auths(&[MockAuth {
-            address: &r.b,
-            invoke: &MockAuthInvoke {
-                contract: &r.contract,
-                fn_name: "claim",
-                args: (r.id, pid, &r.c).into_val(e),
-                sub_invokes: &[],
-            },
-        }]);
-        assert!(r.client.try_claim(&r.id, &pid, &r.c).is_err());
-        assert!(!r.client.get_entitlement(&r.id, &pid, &r.c).claimed);
-    }
-
-    // Classic (non-rewards) marketplaces behave exactly as before.
-    #[test]
-    fn classic_marketplace_unchanged() {
-        let r = setup();
-        let fund = Address::generate(&r.env);
-        let id = r
-            .client
-            .create_marketplace(&r.operator, &fund, &8_800, &800, &200);
-        r.client.register_vendor(&id, &r.vendor);
-        assert_eq!(r.client.purchase(&id, &r.buyer, &r.vendor, &420_000_000), None);
-        assert_eq!(r.token.balance(&fund), 8_400_000);
-        assert_eq!(r.token.balance(&r.contract), 0);
     }
 }
 

@@ -10,6 +10,7 @@ import { useState } from "react";
 import { LiveBalance } from "@/components/live-balance";
 import { ProductVisual } from "@/components/shell";
 import { formatDateTime, formatUsd } from "@/lib/format";
+import type { CommunityMode } from "@/lib/rewards";
 
 import { RewardsPanel } from "./rewards-panel";
 
@@ -51,7 +52,7 @@ export function OperatorDashboard({
   name,
   slug,
   regenerativeEnabled,
-  rewardsEnabled,
+  communityMode,
   demoImpersonation,
   splits,
   operatorAccount,
@@ -66,7 +67,7 @@ export function OperatorDashboard({
   name: string;
   slug: string;
   regenerativeEnabled: boolean;
-  rewardsEnabled: boolean;
+  communityMode: CommunityMode;
   demoImpersonation: boolean;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
   operatorAccount: string | null;
@@ -84,7 +85,7 @@ export function OperatorDashboard({
   catalog: CatalogRow[];
 }) {
   const [tab, setTab] = useState<Tab>(initialTab === "community" && splits.communityBps > 0 ? "community" : "overview");
-  const tabs: Tab[] = rewardsEnabled
+  const tabs: Tab[] = communityMode !== "classic"
     ? ["overview", "rewards", "vendors", "products"]
     : ["overview", "vendors", "products"];
   if (splits.communityBps > 0) tabs.push("community");
@@ -95,7 +96,7 @@ export function OperatorDashboard({
         <Link href={`/m/${slug}`} className="button-secondary button-small">View storefront<Icon name="arrow" className="h-4 w-4" /></Link>
       </PageHeading>
       <div className="dashboard-tabs" aria-label="Marketplace sections">
-        {tabs.map(t => <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium capitalize text-slate-500"><Icon name={t === "overview" ? "grid" : (t === "rewards" || t === "community") ? "leaf" : t === "vendors" ? "people" : "bag"} className="h-4 w-4" />{t === "rewards" ? "Community rewards" : t === "vendors" ? "Sellers" : t === "community" ? "Community story" : t}</button>)}
+        {tabs.map(t => <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium capitalize text-slate-500"><Icon name={t === "overview" ? "grid" : (t === "rewards" || t === "community") ? "leaf" : t === "vendors" ? "people" : "bag"} className="h-4 w-4" />{t === "rewards" ? (communityMode === "fundraise" ? "Fundraising" : "Community rewards") : t === "vendors" ? "Sellers" : t === "community" ? "Community story" : t}</button>)}
       </div>
       {tab === "overview" && <div className="account-intro"><Icon name="leaf" className="h-5 w-5 shrink-0" /><span>Every sale supports your people: <strong>{splits.vendorBps / 100}% to sellers</strong> · {splits.operatorBps / 100}% to your marketplace · {splits.communityBps / 100}% to the community.{regenerativeEnabled && " Community contributions are enabled."}</span></div>}
 
@@ -120,7 +121,7 @@ export function OperatorDashboard({
               <RevenueRow label="Vendors" amount={stats.vendorRevenue} dot="bg-navy-900" />
               <RevenueRow label="Your marketplace" amount={stats.operatorRevenue} dot="bg-slate-400" />
               <RevenueRow
-                label={rewardsEnabled ? "Community rewards" : "Community fund"}
+                label={communityMode === "rewards" ? "Community rewards" : communityMode === "fundraise" ? "Fundraising" : "Community fund"}
                 amount={stats.communityRevenue}
                 dot="bg-emerald-500"
               />
@@ -178,7 +179,7 @@ export function OperatorDashboard({
       )}
 
       {tab === "rewards" && <RewardsPanel slug={slug} />}
-      {tab === "community" && <CommunityEditor slug={slug} initial={community} rewardsEnabled={rewardsEnabled} />}
+      {tab === "community" && <CommunityEditor slug={slug} initial={community} mode={communityMode} />}
 
       {tab === "vendors" && (
         <section className="mt-6">

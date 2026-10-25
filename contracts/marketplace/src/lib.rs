@@ -4,24 +4,32 @@
 //! `marketplace_id` with its own revenue-split config and vendor registry.
 //! On-chain responsibilities are deliberately minimal: split config, vendor
 //! registration, atomic payment splitting (vendor / operator / community plus
-//! Compaki's fixed platform fee) and — for marketplaces created with Community
-//! Rewards — a protected community treasury distributed to registered members
-//! per period. Everything else (catalog, sessions, images) lives off-chain.
+//! Compaki's fixed platform fee) and what happens to the community share.
+//! Everything else (catalog, sessions, images) lives off-chain.
+//!
+//! The community share of a marketplace follows one of three modes, fixed when
+//! the marketplace is created:
+//! - Classic: paid straight to a community fund account with every sale.
+//! - Community Rewards: held by THIS contract and shared, per fixed-length
+//!   period, between the period's vendors and buyers in proportion to what
+//!   each one sold and bought. Periods follow automatically from the creation
+//!   time; nobody opens or closes them.
+//! - Fundraising: held by THIS contract until a target is reached, then
+//!   released to recipient wallets at fixed shares. What happens after the
+//!   target (stop, start a new round, or pay recipients directly) is chosen at
+//!   creation.
 //!
 //! Every payment leg is a direct token transfer from the buyer to its
 //! recipient inside the `purchase` call; the contract only holds tokens for
-//! the Community Rewards treasury.
+//! rewards and fundraising marketplaces.
 //!
-//! Community Rewards invariants (see README "Guarantees"):
-//! - The community share of a rewards marketplace is held by THIS contract and
-//!   booked to exactly one (marketplace, period). There is no admin, withdraw
-//!   or upgrade function: the only way tokens leave the treasury is `claim`,
-//!   which pays a registered member their own, fixed entitlement once.
-//! - A period's beneficiaries and shares are fixed when it opens (before any
-//!   contribution) and can never be edited. A new period can only be opened
-//!   once the previous one has ended.
-//! - A purchase on a rewards marketplace with no active period is rejected
-//!   (atomically) instead of routing the community share elsewhere.
+//! Treasury invariants (see README "Guarantees"):
+//! - There is no admin, withdraw or upgrade function. Tokens leave the
+//!   treasury only through `claim` (a participant's own reward, once per
+//!   period, to that participant) and `release_fundraise` (the raised amount,
+//!   to the recipients fixed at creation).
+//! - Every rule (period length, vendor/buyer pools, target, recipients,
+//!   shares, policy) is fixed at creation and can never be edited.
 
 #![no_std]
 
@@ -35,17 +43,17 @@ pub const BPS_DENOM: u32 = 10_000;
 pub const PLATFORM_FEE_BPS: u32 = 200;
 /// What a marketplace's vendor / operator / community shares must add up to.
 pub const MARKETPLACE_SHARE_BPS: u32 = BPS_DENOM - PLATFORM_FEE_BPS;
-/// Hard cap on beneficiaries per period. Keeps `close_period` (which writes one
-/// entitlement per member) well inside Soroban's per-transaction limits.
-pub const MAX_BENEFICIARIES: u32 = 20;
-/// Longest allowed period. Prevents funds being locked for an unbounded time
-/// by a far-future end date.
+/// Hard cap on fundraising recipients. Keeps `release_fundraise` (one transfer
+/// per recipient) and direct payouts well inside Soroban's per-tx limits.
+pub const MAX_RECIPIENTS: u32 = 20;
+/// Rewards period length bounds. The app offers 30 / 90 / 180 / 365 days;
+/// one minute is the floor so demos can show a whole period quickly.
+pub const MIN_PERIOD_SECONDS: u64 = 60;
 pub const MAX_PERIOD_SECONDS: u64 = 366 * 24 * 60 * 60;
 
 // Storage TTL management (ledgers close every ~5s). Every entry touched by a
 // call is bumped to ~30 days when it has less than ~25 days left. Archived
-// persistent entries are restorable, never deleted, but bumping keeps the
-// normal flows from needing a restore.
+// persistent entries are restored automatically when a transaction uses them.
 const DAY_IN_LEDGERS: u32 = 17_280;
 const TTL_EXTEND_TO: u32 = 30 * DAY_IN_LEDGERS;
 const TTL_THRESHOLD: u32 = 25 * DAY_IN_LEDGERS;
@@ -63,25 +71,27 @@ pub enum Error {
     /// The marketplace was not created with Community Rewards.
     RewardsNotEnabled = 7,
     /// Empty/oversized list, length mismatch, zero share, duplicate, shares
-    /// not summing to 10_000, or a forbidden address (operator / contract).
-    InvalidBeneficiaries = 8,
-    /// Rewards marketplace purchase while no period is accepting contributions.
-    NoActivePeriod = 9,
+    /// not summing to 10_000, or the contract itself as a recipient.
+    InvalidRecipients = 8,
+    /// Period length out of bounds, or a vendor pool above 100%.
+    InvalidRewardsConfig = 9,
+    /// A period that has not started yet.
     PeriodNotFound = 10,
-    /// `close_period` before the period's end timestamp.
+    /// `claim` before the period's end.
     PeriodNotEnded = 11,
-    PeriodAlreadyClosed = 12,
-    /// `claim` / entitlement lookup on a period that is not closed yet.
-    PeriodNotClosed = 13,
-    NotBeneficiary = 14,
-    AlreadyClaimed = 15,
-    NothingToClaim = 16,
-    /// `open_period` while the latest period is still running.
-    PeriodActive = 17,
-    InvalidPeriodEnd = 18,
-    Overflow = 19,
-    /// The community fund of a classic marketplace cannot be this contract.
-    InvalidAddress = 20,
+    /// The address did not sell or buy in that period (or its reward rounds
+    /// down to zero).
+    NothingToClaim = 12,
+    AlreadyClaimed = 13,
+    /// The marketplace was not created with a fundraising target.
+    FundraiseNotEnabled = 14,
+    /// `release_fundraise` while the current round is below the target.
+    GoalNotReached = 15,
+    /// A fundraising target of zero or less.
+    InvalidGoal = 16,
+    Overflow = 17,
+    /// The contract itself as a community fund or platform recipient.
+    InvalidAddress = 18,
 }
 
 #[contracttype]
@@ -98,33 +108,39 @@ pub enum DataKey {
     Vendor(u64, Address),
     /// Community Rewards state; present only for rewards marketplaces.
     Rewards(u64),
-    /// Period, keyed by (marketplace_id, period_id).
+    /// Rewards period totals, keyed by (marketplace_id, period).
     Period(u64, u32),
-    /// Member entitlement, written at close: (marketplace_id, period_id, member).
-    Entitlement(u64, u32, Address),
+    /// What one address sold and bought in a period, and whether it claimed:
+    /// (marketplace_id, period, address).
+    Participation(u64, u32, Address),
+    /// Fundraising state; present only for fundraising marketplaces.
+    Fundraise(u64),
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MarketplaceConfig {
     pub operator: Address,
-    /// For rewards marketplaces this is the contract's own address: the
-    /// community share stays in the contract treasury.
+    /// For rewards and fundraising marketplaces this is the contract's own
+    /// address: the community share stays in the contract treasury.
     pub community_fund: Address,
     pub vendor_bps: u32,
     pub operator_bps: u32,
     pub community_bps: u32,
 }
 
-/// Per-marketplace treasury bookkeeping.
+/// Community Rewards rules (fixed at creation) and lifetime totals.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardsState {
-    /// Number of periods ever opened; ids are 0..period_count.
-    pub period_count: u32,
-    /// Lifetime community contributions received by this marketplace.
+    /// Period k runs from start_ts + k * period_seconds (inclusive) to
+    /// start_ts + (k + 1) * period_seconds (exclusive).
+    pub start_ts: u64,
+    pub period_seconds: u64,
+    /// Part of each period's community pool shared among its vendors; the
+    /// rest (10_000 - vendor_pool_bps) is shared among its buyers.
+    pub vendor_pool_bps: u32,
     pub total_contributed: i128,
-    /// Lifetime rewards paid out to members of this marketplace.
     pub total_claimed: i128,
 }
 
@@ -132,35 +148,99 @@ pub struct RewardsState {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardsStatus {
-    pub period_count: u32,
+    pub start_ts: u64,
+    pub period_seconds: u64,
+    pub vendor_pool_bps: u32,
+    pub buyer_pool_bps: u32,
+    /// The period purchases are currently booked to.
+    pub current_period: u32,
     pub total_contributed: i128,
     pub total_claimed: i128,
     /// Ledger timestamp at which this view was evaluated.
     pub now: u64,
 }
 
+/// One period's pools and the sales volume they are shared over. Every
+/// purchase adds its amount to both volumes (it has one vendor and one buyer).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Period {
-    /// Contributions are accepted while start_ts <= ledger time < end_ts.
-    pub start_ts: u64,
-    pub end_ts: u64,
-    /// Fixed at open; parallel to `shares_bps`.
-    pub beneficiaries: Vec<Address>,
-    pub shares_bps: Vec<u32>,
-    pub total_contributed: i128,
+pub struct PeriodTotals {
+    pub vendor_pool: i128,
+    pub buyer_pool: i128,
+    pub vendor_volume: i128,
+    pub buyer_volume: i128,
     pub total_claimed: i128,
-    pub closed: bool,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Entitlement {
-    pub member: Address,
-    pub share_bps: u32,
-    /// Final amount, computed once at close.
-    pub amount: i128,
+pub struct Participation {
+    /// Sales this address made as a vendor in the period.
+    pub vendor_volume: i128,
+    /// Purchases this address made as a buyer in the period.
+    pub buyer_volume: i128,
     pub claimed: bool,
+}
+
+/// Read-only view of one address's reward for one period.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardView {
+    pub vendor_volume: i128,
+    pub buyer_volume: i128,
+    /// Final once the period has ended; a running estimate before that.
+    pub amount: i128,
+    pub period_ended: bool,
+    pub claimed: bool,
+}
+
+/// What a fundraising marketplace does once a round reaches its target and
+/// the raised amount is released to the recipients.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GoalPolicy {
+    /// Fundraising ends: later sales give their community share to the vendor.
+    Stop,
+    /// A new round starts from zero toward the same target and recipients.
+    NewRound,
+    /// Later sales pay their community share straight to the recipients.
+    Direct,
+}
+
+/// Fundraising rules (fixed at creation) and progress.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundraiseState {
+    pub target: i128,
+    /// Fixed at creation; parallel to `shares_bps`, which sum to 10_000.
+    pub recipients: Vec<Address>,
+    pub shares_bps: Vec<u32>,
+    pub policy: GoalPolicy,
+    /// The round currently raising (0-based); increments on every release.
+    pub round: u32,
+    /// Held by the contract for the current round.
+    pub raised: i128,
+    pub total_raised: i128,
+    pub total_released: i128,
+    /// True once the first round has been released.
+    pub goal_reached: bool,
+}
+
+/// What a purchase actually paid; returned by `purchase` and the amounts of
+/// its event. The community amount is 0 when a stopped fundraiser gave it to
+/// the vendor.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PurchaseReceipt {
+    pub vendor_amount: i128,
+    pub operator_amount: i128,
+    pub community_amount: i128,
+    pub platform_amount: i128,
+    /// Rewards marketplaces: the period the purchase was booked to.
+    pub period: Option<u32>,
+    /// Fundraising marketplaces: the round the community share was added to
+    /// (None once a Stop / Direct fundraiser has reached its target).
+    pub round: Option<u32>,
 }
 
 /// Payload of the event emitted on every purchase.
@@ -196,50 +276,99 @@ fn bump(env: &Env, key: &DataKey) {
         .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
 }
 
+fn load<T: soroban_sdk::TryFromVal<Env, soroban_sdk::Val>>(env: &Env, key: &DataKey) -> Option<T> {
+    let value = env.storage().persistent().get(key);
+    if value.is_some() {
+        bump(env, key);
+    }
+    value
+}
+
+fn save<T: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &DataKey, value: &T) {
+    env.storage().persistent().set(key, value);
+    bump(env, key);
+}
+
 fn load_config(env: &Env, marketplace_id: u64) -> Result<MarketplaceConfig, Error> {
-    let key = DataKey::Config(marketplace_id);
-    let config = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(Error::MarketplaceNotFound)?;
-    bump(env, &key);
-    Ok(config)
+    load(env, &DataKey::Config(marketplace_id)).ok_or(Error::MarketplaceNotFound)
 }
 
 fn load_rewards(env: &Env, marketplace_id: u64) -> Result<RewardsState, Error> {
     load_config(env, marketplace_id)?;
-    let key = DataKey::Rewards(marketplace_id);
-    let state = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(Error::RewardsNotEnabled)?;
-    bump(env, &key);
-    Ok(state)
+    load(env, &DataKey::Rewards(marketplace_id)).ok_or(Error::RewardsNotEnabled)
 }
 
-fn save_rewards(env: &Env, marketplace_id: u64, state: &RewardsState) {
-    let key = DataKey::Rewards(marketplace_id);
-    env.storage().persistent().set(&key, state);
-    bump(env, &key);
+fn load_fundraise(env: &Env, marketplace_id: u64) -> Result<FundraiseState, Error> {
+    load_config(env, marketplace_id)?;
+    load(env, &DataKey::Fundraise(marketplace_id)).ok_or(Error::FundraiseNotEnabled)
 }
 
-fn load_period(env: &Env, marketplace_id: u64, period_id: u32) -> Result<Period, Error> {
-    let key = DataKey::Period(marketplace_id, period_id);
-    let period = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(Error::PeriodNotFound)?;
-    bump(env, &key);
-    Ok(period)
+fn load_period(env: &Env, marketplace_id: u64, period: u32) -> PeriodTotals {
+    load(env, &DataKey::Period(marketplace_id, period)).unwrap_or(PeriodTotals {
+        vendor_pool: 0,
+        buyer_pool: 0,
+        vendor_volume: 0,
+        buyer_volume: 0,
+        total_claimed: 0,
+    })
 }
 
-fn save_period(env: &Env, marketplace_id: u64, period_id: u32, period: &Period) {
-    let key = DataKey::Period(marketplace_id, period_id);
-    env.storage().persistent().set(&key, period);
-    bump(env, &key);
+fn load_participation(env: &Env, marketplace_id: u64, period: u32, who: &Address) -> Participation {
+    load(env, &DataKey::Participation(marketplace_id, period, who.clone())).unwrap_or(Participation {
+        vendor_volume: 0,
+        buyer_volume: 0,
+        claimed: false,
+    })
+}
+
+fn current_period(state: &RewardsState, now: u64) -> u32 {
+    ((now - state.start_ts) / state.period_seconds) as u32
+}
+
+fn period_end(state: &RewardsState, period: u32) -> u64 {
+    state.start_ts + (period as u64 + 1) * state.period_seconds
+}
+
+fn bps_of(amount: i128, bps: u32) -> Result<i128, Error> {
+    Ok(amount.checked_mul(bps as i128).ok_or(Error::Overflow)? / BPS_DENOM as i128)
+}
+
+/// An address's share of a period: its fraction of the vendor volume times
+/// the vendor pool plus its fraction of the buyer volume times the buyer pool.
+/// Each part rounds down, so a period never pays out more than its pools;
+/// the dust (under one stroop per participant) stays in the treasury.
+fn reward_of(totals: &PeriodTotals, p: &Participation) -> Result<i128, Error> {
+    let part = |pool: i128, mine: i128, all: i128| -> Result<i128, Error> {
+        if mine == 0 || all == 0 {
+            return Ok(0);
+        }
+        Ok(pool.checked_mul(mine).ok_or(Error::Overflow)? / all)
+    };
+    let vendor = part(totals.vendor_pool, p.vendor_volume, totals.vendor_volume)?;
+    let buyer = part(totals.buyer_pool, p.buyer_volume, totals.buyer_volume)?;
+    vendor.checked_add(buyer).ok_or(Error::Overflow)
+}
+
+/// Splits `amount` by `shares_bps`: each recipient gets the floor of its
+/// share, and the r stroops left over (r < number of recipients) go one each
+/// to the first r recipients. The parts sum to exactly `amount`.
+fn split_by_shares(env: &Env, amount: i128, shares_bps: &Vec<u32>) -> Result<Vec<i128>, Error> {
+    let mut parts: Vec<i128> = Vec::new(env);
+    let mut allocated: i128 = 0;
+    for share in shares_bps.iter() {
+        let part = bps_of(amount, share)?;
+        allocated += part;
+        parts.push_back(part);
+    }
+    let mut remainder = amount - allocated;
+    for i in 0..parts.len() {
+        if remainder == 0 {
+            break;
+        }
+        parts.set(i, parts.get_unchecked(i) + 1);
+        remainder -= 1;
+    }
+    Ok(parts)
 }
 
 fn token_client(env: &Env) -> Result<token::Client<'_>, Error> {
@@ -264,16 +393,50 @@ fn validate_split(vendor_bps: u32, operator_bps: u32, community_bps: u32) -> Res
     Ok(())
 }
 
-/// Shared by both create functions. Caller has already authorized + validated.
+fn validate_recipients(env: &Env, recipients: &Vec<Address>, shares_bps: &Vec<u32>) -> Result<(), Error> {
+    let n = recipients.len();
+    if n == 0 || n > MAX_RECIPIENTS || n != shares_bps.len() {
+        return Err(Error::InvalidRecipients);
+    }
+    let contract_address = env.current_contract_address();
+    let mut sum: u32 = 0;
+    for i in 0..n {
+        let recipient = recipients.get_unchecked(i);
+        let share = shares_bps.get_unchecked(i);
+        if share == 0 || recipient == contract_address {
+            return Err(Error::InvalidRecipients);
+        }
+        for j in 0..i {
+            if recipients.get_unchecked(j) == recipient {
+                return Err(Error::InvalidRecipients);
+            }
+        }
+        sum = sum.checked_add(share).ok_or(Error::InvalidRecipients)?;
+    }
+    if sum != BPS_DENOM {
+        return Err(Error::InvalidRecipients);
+    }
+    Ok(())
+}
+
+/// Checks shared by the three create functions; returns nothing on success.
+fn check_create(env: &Env, operator: &Address, vendor_bps: u32, operator_bps: u32, community_bps: u32) -> Result<(), Error> {
+    if !env.storage().instance().has(&DataKey::Admin) {
+        return Err(Error::NotInitialized);
+    }
+    bump_instance(env);
+    operator.require_auth();
+    validate_split(vendor_bps, operator_bps, community_bps)
+}
+
+/// Shared by the create functions. Caller has already authorized + validated.
 fn store_marketplace(env: &Env, config: MarketplaceConfig) -> u64 {
     let id: u64 = env
         .storage()
         .instance()
         .get(&DataKey::NextId)
         .unwrap_or(0u64);
-    let key = DataKey::Config(id);
-    env.storage().persistent().set(&key, &config);
-    bump(env, &key);
+    save(env, &DataKey::Config(id), &config);
     env.storage().instance().set(&DataKey::NextId, &(id + 1));
 
     env.events().publish((symbol_short!("market"), id), config);
@@ -317,13 +480,8 @@ impl MarketplaceContract {
         operator_bps: u32,
         community_bps: u32,
     ) -> Result<u64, Error> {
-        if !env.storage().instance().has(&DataKey::Admin) {
-            return Err(Error::NotInitialized);
-        }
-        bump_instance(&env);
-        operator.require_auth();
-        validate_split(vendor_bps, operator_bps, community_bps)?;
-        // Tokens sent here outside the rewards bookkeeping would be stranded.
+        check_create(&env, &operator, vendor_bps, operator_bps, community_bps)?;
+        // Tokens sent here outside the treasury bookkeeping would be stranded.
         if community_fund == env.current_contract_address() {
             return Err(Error::InvalidAddress);
         }
@@ -341,24 +499,27 @@ impl MarketplaceContract {
     }
 
     /// Registers a Community Rewards marketplace: the community share of each
-    /// purchase is held by this contract and distributed per period.
-    /// `community_bps` must be > 0 and the three shares must sum to 9_800 (the
-    /// remaining 2% is the platform fee). The mode is fixed at creation.
+    /// purchase is held by this contract and, per period of `period_seconds`
+    /// starting now, shared among that period's vendors (`vendor_pool_bps` of
+    /// the pool) and buyers (the rest), in proportion to what each one sold or
+    /// bought. `community_bps` must be > 0. Everything is fixed at creation.
     pub fn create_rewards_marketplace(
         env: Env,
         operator: Address,
         vendor_bps: u32,
         operator_bps: u32,
         community_bps: u32,
+        period_seconds: u64,
+        vendor_pool_bps: u32,
     ) -> Result<u64, Error> {
-        if !env.storage().instance().has(&DataKey::Admin) {
-            return Err(Error::NotInitialized);
-        }
-        bump_instance(&env);
-        operator.require_auth();
-        validate_split(vendor_bps, operator_bps, community_bps)?;
+        check_create(&env, &operator, vendor_bps, operator_bps, community_bps)?;
         if community_bps == 0 {
             return Err(Error::InvalidSplit);
+        }
+        if !(MIN_PERIOD_SECONDS..=MAX_PERIOD_SECONDS).contains(&period_seconds)
+            || vendor_pool_bps > BPS_DENOM
+        {
+            return Err(Error::InvalidRewardsConfig);
         }
 
         let id = store_marketplace(
@@ -371,15 +532,67 @@ impl MarketplaceContract {
                 community_bps,
             },
         );
-        save_rewards(
+        let state = RewardsState {
+            start_ts: env.ledger().timestamp(),
+            period_seconds,
+            vendor_pool_bps,
+            total_contributed: 0,
+            total_claimed: 0,
+        };
+        save(&env, &DataKey::Rewards(id), &state);
+        env.events().publish((symbol_short!("rewards"), id), state);
+        Ok(id)
+    }
+
+    /// Registers a fundraising marketplace: the community share of each
+    /// purchase is held by this contract until the round reaches `target`,
+    /// then `release_fundraise` pays it to `recipients` at `shares_bps`
+    /// (summing to 10_000). `policy` decides what later sales do. Everything
+    /// is fixed at creation and can never be edited.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_fundraise_marketplace(
+        env: Env,
+        operator: Address,
+        vendor_bps: u32,
+        operator_bps: u32,
+        community_bps: u32,
+        target: i128,
+        recipients: Vec<Address>,
+        shares_bps: Vec<u32>,
+        policy: GoalPolicy,
+    ) -> Result<u64, Error> {
+        check_create(&env, &operator, vendor_bps, operator_bps, community_bps)?;
+        if community_bps == 0 {
+            return Err(Error::InvalidSplit);
+        }
+        if target <= 0 {
+            return Err(Error::InvalidGoal);
+        }
+        validate_recipients(&env, &recipients, &shares_bps)?;
+
+        let id = store_marketplace(
             &env,
-            id,
-            &RewardsState {
-                period_count: 0,
-                total_contributed: 0,
-                total_claimed: 0,
+            MarketplaceConfig {
+                operator,
+                community_fund: env.current_contract_address(),
+                vendor_bps,
+                operator_bps,
+                community_bps,
             },
         );
+        let state = FundraiseState {
+            target,
+            recipients,
+            shares_bps,
+            policy,
+            round: 0,
+            raised: 0,
+            total_raised: 0,
+            total_released: 0,
+            goal_reached: false,
+        };
+        save(&env, &DataKey::Fundraise(id), &state);
+        env.events().publish((symbol_short!("fundrais"), id), state);
         Ok(id)
     }
 
@@ -390,9 +603,7 @@ impl MarketplaceContract {
         let config = load_config(&env, marketplace_id)?;
         config.operator.require_auth();
 
-        let key = DataKey::Vendor(marketplace_id, vendor.clone());
-        env.storage().persistent().set(&key, &true);
-        bump(&env, &key);
+        save(&env, &DataKey::Vendor(marketplace_id, vendor.clone()), &true);
 
         env.events()
             .publish((symbol_short!("vendor"), marketplace_id), vendor);
@@ -405,17 +616,20 @@ impl MarketplaceContract {
     /// recipient — each leg a direct transfer from the buyer. The rounding
     /// remainder always goes to the community share so no dust is ever lost.
     ///
-    /// Rewards marketplaces: the community share is transferred to this
-    /// contract and booked to the active period, whose id is returned. With no
-    /// active period the whole purchase fails with `NoActivePeriod`.
-    /// Classic marketplaces return `None`.
+    /// Community share by mode:
+    /// - classic: to the community fund account;
+    /// - rewards: to this contract, booked to the current period together
+    ///   with the vendor's and buyer's volume;
+    /// - fundraising: to this contract for the current round; once a Stop
+    ///   fundraiser has reached its target it goes to the vendor instead, and
+    ///   once a Direct one has, straight to the recipients.
     pub fn purchase(
         env: Env,
         marketplace_id: u64,
         buyer: Address,
         vendor: Address,
         amount: i128,
-    ) -> Result<Option<u32>, Error> {
+    ) -> Result<PurchaseReceipt, Error> {
         bump_instance(&env);
         buyer.require_auth();
         if amount <= 0 {
@@ -423,16 +637,11 @@ impl MarketplaceContract {
         }
 
         let config = load_config(&env, marketplace_id)?;
-        let vendor_key = DataKey::Vendor(marketplace_id, vendor.clone());
-        let registered: bool = env
-            .storage()
-            .persistent()
-            .get(&vendor_key)
-            .unwrap_or(false);
+        let registered: bool =
+            load(&env, &DataKey::Vendor(marketplace_id, vendor.clone())).unwrap_or(false);
         if !registered {
             return Err(Error::VendorNotRegistered);
         }
-        bump(&env, &vendor_key);
 
         let client = token_client(&env)?;
         let platform: Address = env
@@ -443,51 +652,67 @@ impl MarketplaceContract {
 
         // Integer split; vendor, operator and platform shares round down, the
         // remainder (including all rounding dust) goes to the community.
-        let platform_amount = amount
-            .checked_mul(PLATFORM_FEE_BPS as i128)
-            .ok_or(Error::Overflow)?
-            / BPS_DENOM as i128;
-        let vendor_amount = amount
-            .checked_mul(config.vendor_bps as i128)
-            .ok_or(Error::Overflow)?
-            / BPS_DENOM as i128;
-        let operator_amount = amount
-            .checked_mul(config.operator_bps as i128)
-            .ok_or(Error::Overflow)?
-            / BPS_DENOM as i128;
-        let community_amount = amount - vendor_amount - operator_amount - platform_amount;
+        let platform_amount = bps_of(amount, PLATFORM_FEE_BPS)?;
+        let mut vendor_amount = bps_of(amount, config.vendor_bps)?;
+        let operator_amount = bps_of(amount, config.operator_bps)?;
+        let mut community_amount = amount - vendor_amount - operator_amount - platform_amount;
 
-        // Rewards bookkeeping is resolved before any transfer; every leg and
+        // Treasury bookkeeping is resolved before any transfer; every leg and
         // the accounting update happen inside this single invocation.
-        let rewards_period = match env
-            .storage()
-            .persistent()
-            .get::<_, RewardsState>(&DataKey::Rewards(marketplace_id))
-        {
-            None => None,
-            Some(mut state) => {
-                if state.period_count == 0 {
-                    return Err(Error::NoActivePeriod);
-                }
-                let period_id = state.period_count - 1;
-                let mut period = load_period(&env, marketplace_id, period_id)?;
-                let now = env.ledger().timestamp();
-                if period.closed || now < period.start_ts || now >= period.end_ts {
-                    return Err(Error::NoActivePeriod);
-                }
-                period.total_contributed = period
-                    .total_contributed
-                    .checked_add(community_amount)
-                    .ok_or(Error::Overflow)?;
-                state.total_contributed = state
-                    .total_contributed
-                    .checked_add(community_amount)
-                    .ok_or(Error::Overflow)?;
-                save_period(&env, marketplace_id, period_id, &period);
-                save_rewards(&env, marketplace_id, &state);
-                Some(period_id)
+        let mut period = None;
+        let mut round = None;
+        let mut direct_to: Option<(Vec<Address>, Vec<i128>)> = None;
+        if let Some(mut state) = load::<RewardsState>(&env, &DataKey::Rewards(marketplace_id)) {
+            let k = current_period(&state, env.ledger().timestamp());
+            let mut totals = load_period(&env, marketplace_id, k);
+            let vendor_part = bps_of(community_amount, state.vendor_pool_bps)?;
+            totals.vendor_pool += vendor_part;
+            totals.buyer_pool += community_amount - vendor_part;
+            totals.vendor_volume = totals.vendor_volume.checked_add(amount).ok_or(Error::Overflow)?;
+            totals.buyer_volume = totals.buyer_volume.checked_add(amount).ok_or(Error::Overflow)?;
+            save(&env, &DataKey::Period(marketplace_id, k), &totals);
+
+            // The vendor and the buyer may be the same address.
+            let mut seller = load_participation(&env, marketplace_id, k, &vendor);
+            seller.vendor_volume = seller.vendor_volume.checked_add(amount).ok_or(Error::Overflow)?;
+            if buyer == vendor {
+                seller.buyer_volume = seller.buyer_volume.checked_add(amount).ok_or(Error::Overflow)?;
+            } else {
+                let mut shopper = load_participation(&env, marketplace_id, k, &buyer);
+                shopper.buyer_volume = shopper.buyer_volume.checked_add(amount).ok_or(Error::Overflow)?;
+                save(&env, &DataKey::Participation(marketplace_id, k, buyer.clone()), &shopper);
             }
-        };
+            save(&env, &DataKey::Participation(marketplace_id, k, vendor.clone()), &seller);
+
+            state.total_contributed = state
+                .total_contributed
+                .checked_add(community_amount)
+                .ok_or(Error::Overflow)?;
+            save(&env, &DataKey::Rewards(marketplace_id), &state);
+            period = Some(k);
+        } else if let Some(mut state) = load::<FundraiseState>(&env, &DataKey::Fundraise(marketplace_id)) {
+            if !state.goal_reached || state.policy == GoalPolicy::NewRound {
+                state.raised = state.raised.checked_add(community_amount).ok_or(Error::Overflow)?;
+                state.total_raised = state
+                    .total_raised
+                    .checked_add(community_amount)
+                    .ok_or(Error::Overflow)?;
+                save(&env, &DataKey::Fundraise(marketplace_id), &state);
+                round = Some(state.round);
+            } else if state.policy == GoalPolicy::Direct {
+                let parts = split_by_shares(&env, community_amount, &state.shares_bps)?;
+                state.total_released = state
+                    .total_released
+                    .checked_add(community_amount)
+                    .ok_or(Error::Overflow)?;
+                save(&env, &DataKey::Fundraise(marketplace_id), &state);
+                direct_to = Some((state.recipients, parts));
+            } else {
+                // Stop: the fundraiser is over; the vendor keeps that share.
+                vendor_amount += community_amount;
+                community_amount = 0;
+            }
+        }
 
         if vendor_amount > 0 {
             client.transfer(&buyer, &vendor, &vendor_amount);
@@ -495,20 +720,21 @@ impl MarketplaceContract {
         if operator_amount > 0 {
             client.transfer(&buyer, &config.operator, &operator_amount);
         }
-        if community_amount > 0 {
-            // For rewards marketplaces community_fund is this contract.
+        if let Some((recipients, parts)) = direct_to {
+            for i in 0..recipients.len() {
+                let part = parts.get_unchecked(i);
+                if part > 0 {
+                    client.transfer(&buyer, &recipients.get_unchecked(i), &part);
+                }
+            }
+        } else if community_amount > 0 {
+            // For rewards / fundraising marketplaces community_fund is this contract.
             client.transfer(&buyer, &config.community_fund, &community_amount);
         }
         if platform_amount > 0 {
             client.transfer(&buyer, &platform, &platform_amount);
         }
 
-        if let Some(period_id) = rewards_period {
-            env.events().publish(
-                (symbol_short!("contrib"), marketplace_id, period_id),
-                community_amount,
-            );
-        }
         env.events().publish(
             (symbol_short!("purchase"), marketplace_id),
             PurchaseEvent {
@@ -521,192 +747,94 @@ impl MarketplaceContract {
                 platform_amount,
             },
         );
-        Ok(rewards_period)
-    }
-
-    /// Opens the next rewards period, starting now and ending at `end_ts`
-    /// (ledger timestamp, seconds). Only the marketplace operator may call it,
-    /// and only once the previous period has ended. Beneficiaries and shares
-    /// are frozen here and can never be edited.
-    pub fn open_period(
-        env: Env,
-        marketplace_id: u64,
-        beneficiaries: Vec<Address>,
-        shares_bps: Vec<u32>,
-        end_ts: u64,
-    ) -> Result<u32, Error> {
-        bump_instance(&env);
-        let config = load_config(&env, marketplace_id)?;
-        let mut state = load_rewards(&env, marketplace_id)?;
-        config.operator.require_auth();
-
-        let n = beneficiaries.len();
-        if n == 0 || n > MAX_BENEFICIARIES || n != shares_bps.len() {
-            return Err(Error::InvalidBeneficiaries);
-        }
-        let contract_address = env.current_contract_address();
-        let mut sum: u32 = 0;
-        for i in 0..n {
-            let member = beneficiaries.get_unchecked(i);
-            let share = shares_bps.get_unchecked(i);
-            if share == 0 || member == config.operator || member == contract_address {
-                return Err(Error::InvalidBeneficiaries);
-            }
-            for j in 0..i {
-                if beneficiaries.get_unchecked(j) == member {
-                    return Err(Error::InvalidBeneficiaries);
-                }
-            }
-            sum = sum.checked_add(share).ok_or(Error::InvalidBeneficiaries)?;
-        }
-        if sum != BPS_DENOM {
-            return Err(Error::InvalidBeneficiaries);
-        }
-
-        let now = env.ledger().timestamp();
-        if state.period_count > 0 {
-            let last = load_period(&env, marketplace_id, state.period_count - 1)?;
-            if now < last.end_ts {
-                return Err(Error::PeriodActive);
-            }
-        }
-        if end_ts <= now || end_ts - now > MAX_PERIOD_SECONDS {
-            return Err(Error::InvalidPeriodEnd);
-        }
-
-        let period_id = state.period_count;
-        let period = Period {
-            start_ts: now,
-            end_ts,
-            beneficiaries,
-            shares_bps,
-            total_contributed: 0,
-            total_claimed: 0,
-            closed: false,
-        };
-        save_period(&env, marketplace_id, period_id, &period);
-        state.period_count = period_id + 1;
-        save_rewards(&env, marketplace_id, &state);
-
-        env.events().publish(
-            (symbol_short!("p_open"), marketplace_id, period_id),
+        Ok(PurchaseReceipt {
+            vendor_amount,
+            operator_amount,
+            community_amount,
+            platform_amount,
             period,
-        );
-        Ok(period_id)
+            round,
+        })
     }
 
-    /// Closes an ended period and fixes every member's entitlement. Anyone may
-    /// call it once ledger time >= end_ts, so the operator cannot hold
-    /// members' rewards hostage by never closing.
-    ///
-    /// Rounding: each member gets floor(total * share / 10_000); the r stroops
-    /// left over (r < number of members) go one each to the first r members in
-    /// registration order. The entitlements sum to exactly the period total.
-    pub fn close_period(env: Env, marketplace_id: u64, period_id: u32) -> Result<i128, Error> {
-        bump_instance(&env);
-        load_rewards(&env, marketplace_id)?;
-        let mut period = load_period(&env, marketplace_id, period_id)?;
-        if period.closed {
-            return Err(Error::PeriodAlreadyClosed);
-        }
-        if env.ledger().timestamp() < period.end_ts {
-            return Err(Error::PeriodNotEnded);
-        }
-
-        let total = period.total_contributed;
-        let n = period.beneficiaries.len();
-        let mut amounts: Vec<i128> = Vec::new(&env);
-        let mut allocated: i128 = 0;
-        for i in 0..n {
-            let share = period.shares_bps.get_unchecked(i) as i128;
-            let amount = total.checked_mul(share).ok_or(Error::Overflow)? / BPS_DENOM as i128;
-            allocated += amount;
-            amounts.push_back(amount);
-        }
-        let mut remainder = total - allocated;
-        for i in 0..n {
-            let member = period.beneficiaries.get_unchecked(i);
-            let mut amount = amounts.get_unchecked(i);
-            if remainder > 0 {
-                amount += 1;
-                remainder -= 1;
-            }
-            let key = DataKey::Entitlement(marketplace_id, period_id, member.clone());
-            env.storage().persistent().set(
-                &key,
-                &Entitlement {
-                    member,
-                    share_bps: period.shares_bps.get_unchecked(i),
-                    amount,
-                    claimed: false,
-                },
-            );
-            bump(&env, &key);
-        }
-
-        period.closed = true;
-        save_period(&env, marketplace_id, period_id, &period);
-        env.events().publish(
-            (symbol_short!("p_close"), marketplace_id, period_id),
-            total,
-        );
-        Ok(total)
-    }
-
-    /// Pays `member` their entitlement for a closed period. Requires the
-    /// member's own authorization; the payout always goes to `member`.
-    pub fn claim(
-        env: Env,
-        marketplace_id: u64,
-        period_id: u32,
-        member: Address,
-    ) -> Result<i128, Error> {
+    /// Pays `member` their reward for an ended period: their share of the
+    /// vendor pool (by sales) plus their share of the buyer pool (by
+    /// purchases). Requires the member's own authorization; the payout always
+    /// goes to `member`, once.
+    pub fn claim(env: Env, marketplace_id: u64, period: u32, member: Address) -> Result<i128, Error> {
         bump_instance(&env);
         member.require_auth();
         let mut state = load_rewards(&env, marketplace_id)?;
-        let mut period = load_period(&env, marketplace_id, period_id)?;
-        if !period.closed {
-            return Err(Error::PeriodNotClosed);
+        let now = env.ledger().timestamp();
+        if period > current_period(&state, now) {
+            return Err(Error::PeriodNotFound);
         }
-        let key = DataKey::Entitlement(marketplace_id, period_id, member.clone());
-        let mut entitlement: Entitlement = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(Error::NotBeneficiary)?;
-        if entitlement.claimed {
+        if now < period_end(&state, period) {
+            return Err(Error::PeriodNotEnded);
+        }
+        let key = DataKey::Participation(marketplace_id, period, member.clone());
+        let mut participation: Participation = load(&env, &key).ok_or(Error::NothingToClaim)?;
+        if participation.claimed {
             return Err(Error::AlreadyClaimed);
         }
-        if entitlement.amount <= 0 {
+        let mut totals = load_period(&env, marketplace_id, period);
+        let amount = reward_of(&totals, &participation)?;
+        if amount <= 0 {
             return Err(Error::NothingToClaim);
         }
 
-        let amount = entitlement.amount;
-        period.total_claimed = period
-            .total_claimed
-            .checked_add(amount)
-            .ok_or(Error::Overflow)?;
-        // Defence in depth: entitlements sum to the period total by
-        // construction, so this can only trip on a bug.
-        if period.total_claimed > period.total_contributed {
+        totals.total_claimed = totals.total_claimed.checked_add(amount).ok_or(Error::Overflow)?;
+        // Defence in depth: rewards round down so they can never exceed the
+        // pools; this can only trip on a bug.
+        if totals.total_claimed > totals.vendor_pool + totals.buyer_pool {
             return Err(Error::Overflow);
         }
-        state.total_claimed = state
-            .total_claimed
-            .checked_add(amount)
-            .ok_or(Error::Overflow)?;
-        entitlement.claimed = true;
-
-        env.storage().persistent().set(&key, &entitlement);
-        bump(&env, &key);
-        save_period(&env, marketplace_id, period_id, &period);
-        save_rewards(&env, marketplace_id, &state);
+        state.total_claimed = state.total_claimed.checked_add(amount).ok_or(Error::Overflow)?;
+        participation.claimed = true;
+        save(&env, &key, &participation);
+        save(&env, &DataKey::Period(marketplace_id, period), &totals);
+        save(&env, &DataKey::Rewards(marketplace_id), &state);
 
         token_client(&env)?.transfer(&env.current_contract_address(), &member, &amount);
 
         env.events().publish(
-            (symbol_short!("claim"), marketplace_id, period_id),
+            (symbol_short!("claim"), marketplace_id, period),
             (member, amount),
+        );
+        Ok(amount)
+    }
+
+    /// Releases a fundraising round that reached its target: pays everything
+    /// raised in it to the recipients at their fixed shares (rounding as in
+    /// `split_by_shares`) and starts the next round. Anyone may call it, so
+    /// the operator cannot hold the funds back.
+    pub fn release_fundraise(env: Env, marketplace_id: u64) -> Result<i128, Error> {
+        bump_instance(&env);
+        let mut state = load_fundraise(&env, marketplace_id)?;
+        if state.raised < state.target || state.raised <= 0 {
+            return Err(Error::GoalNotReached);
+        }
+        let amount = state.raised;
+        let parts = split_by_shares(&env, amount, &state.shares_bps)?;
+        let released_round = state.round;
+        state.raised = 0;
+        state.round += 1;
+        state.total_released = state.total_released.checked_add(amount).ok_or(Error::Overflow)?;
+        state.goal_reached = true;
+        save(&env, &DataKey::Fundraise(marketplace_id), &state);
+
+        let client = token_client(&env)?;
+        let contract_address = env.current_contract_address();
+        for i in 0..state.recipients.len() {
+            let part = parts.get_unchecked(i);
+            if part > 0 {
+                client.transfer(&contract_address, &state.recipients.get_unchecked(i), &part);
+            }
+        }
+
+        env.events().publish(
+            (symbol_short!("release"), marketplace_id, released_round),
+            amount,
         );
         Ok(amount)
     }
@@ -726,62 +854,54 @@ impl MarketplaceContract {
         load_config(&env, marketplace_id)
     }
 
-    /// Treasury totals and period count of a rewards marketplace, plus the
-    /// ledger time the view was evaluated at.
+    /// Rules, current period and lifetime totals of a rewards marketplace,
+    /// plus the ledger time the view was evaluated at.
     pub fn rewards_status(env: Env, marketplace_id: u64) -> Result<RewardsStatus, Error> {
         let state = load_rewards(&env, marketplace_id)?;
+        let now = env.ledger().timestamp();
         Ok(RewardsStatus {
-            period_count: state.period_count,
+            start_ts: state.start_ts,
+            period_seconds: state.period_seconds,
+            vendor_pool_bps: state.vendor_pool_bps,
+            buyer_pool_bps: BPS_DENOM - state.vendor_pool_bps,
+            current_period: current_period(&state, now),
             total_contributed: state.total_contributed,
             total_claimed: state.total_claimed,
-            now: env.ledger().timestamp(),
+            now,
         })
     }
 
-    pub fn get_period(env: Env, marketplace_id: u64, period_id: u32) -> Result<Period, Error> {
-        load_rewards(&env, marketplace_id)?;
-        load_period(&env, marketplace_id, period_id)
+    /// A period's pools and volumes (all zero for a period without sales).
+    pub fn get_period(env: Env, marketplace_id: u64, period: u32) -> Result<PeriodTotals, Error> {
+        let state = load_rewards(&env, marketplace_id)?;
+        if period > current_period(&state, env.ledger().timestamp()) {
+            return Err(Error::PeriodNotFound);
+        }
+        Ok(load_period(&env, marketplace_id, period))
     }
 
-    /// One member's final entitlement (closed periods only).
-    pub fn get_entitlement(
-        env: Env,
-        marketplace_id: u64,
-        period_id: u32,
-        member: Address,
-    ) -> Result<Entitlement, Error> {
-        load_rewards(&env, marketplace_id)?;
-        if !load_period(&env, marketplace_id, period_id)?.closed {
-            return Err(Error::PeriodNotClosed);
+    /// One address's reward for a period: final once the period has ended,
+    /// a running estimate while it is still current.
+    pub fn get_reward(env: Env, marketplace_id: u64, period: u32, member: Address) -> Result<RewardView, Error> {
+        let state = load_rewards(&env, marketplace_id)?;
+        let now = env.ledger().timestamp();
+        if period > current_period(&state, now) {
+            return Err(Error::PeriodNotFound);
         }
-        env.storage()
-            .persistent()
-            .get(&DataKey::Entitlement(marketplace_id, period_id, member))
-            .ok_or(Error::NotBeneficiary)
+        let participation = load_participation(&env, marketplace_id, period, &member);
+        let totals = load_period(&env, marketplace_id, period);
+        Ok(RewardView {
+            vendor_volume: participation.vendor_volume,
+            buyer_volume: participation.buyer_volume,
+            amount: reward_of(&totals, &participation)?,
+            period_ended: now >= period_end(&state, period),
+            claimed: participation.claimed,
+        })
     }
 
-    /// All entitlements of a closed period, in beneficiary order (bounded by
-    /// MAX_BENEFICIARIES).
-    pub fn get_entitlements(
-        env: Env,
-        marketplace_id: u64,
-        period_id: u32,
-    ) -> Result<Vec<Entitlement>, Error> {
-        load_rewards(&env, marketplace_id)?;
-        let period = load_period(&env, marketplace_id, period_id)?;
-        if !period.closed {
-            return Err(Error::PeriodNotClosed);
-        }
-        let mut out = Vec::new(&env);
-        for member in period.beneficiaries.iter() {
-            let entitlement: Entitlement = env
-                .storage()
-                .persistent()
-                .get(&DataKey::Entitlement(marketplace_id, period_id, member))
-                .ok_or(Error::NotBeneficiary)?;
-            out.push_back(entitlement);
-        }
-        Ok(out)
+    /// Rules and progress of a fundraising marketplace.
+    pub fn get_fundraise(env: Env, marketplace_id: u64) -> Result<FundraiseState, Error> {
+        load_fundraise(&env, marketplace_id)
     }
 }
 

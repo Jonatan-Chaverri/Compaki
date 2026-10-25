@@ -1,5 +1,6 @@
-// Off-chain mirror of the contract's payment split (purchase in
-// contracts/marketplace/src/lib.rs), used to record each sale's breakdown.
+// Payment split constants shared with the contract (purchase in
+// contracts/marketplace/src/lib.rs), and the per-sale breakdown recorded
+// from what the contract actually paid.
 //
 //   - Compaki's platform fee: a fixed 2% of every sale.
 //   - The marketplace's vendor / operator / community shares cover the other
@@ -8,7 +9,7 @@
 //     takes the remainder, so no stroop is ever lost.
 
 import type { SplitSnapshot } from "@/lib/db";
-import { stroopsToUsd } from "@/lib/stellar";
+import { stroopsToUsd, type PurchaseReceipt } from "@/lib/stellar";
 
 export const BPS_DENOM = 10_000;
 export const PLATFORM_FEE_BPS = 200;
@@ -20,26 +21,24 @@ export interface MarketplaceSplit {
   communityBps: number;
 }
 
-/** Builds the frozen per-sale snapshot for a purchase of `amountStroops`. */
+/** Builds the frozen per-sale snapshot from a confirmed purchase's receipt. */
 export function splitSnapshot(
-  amountStroops: bigint,
   split: MarketplaceSplit,
-  rewardsPeriodId: number | null,
+  receipt: PurchaseReceipt,
+  parties: { buyerAddress: string; vendorAddress: string },
 ): SplitSnapshot {
-  const share = (bps: number) => (amountStroops * BigInt(bps)) / BigInt(BPS_DENOM);
-  const vendor = share(split.vendorBps);
-  const operator = share(split.operatorBps);
-  const platform = share(PLATFORM_FEE_BPS);
-  const community = amountStroops - vendor - operator - platform;
   return {
     vendorBps: split.vendorBps,
     operatorBps: split.operatorBps,
     communityBps: split.communityBps,
     platformBps: PLATFORM_FEE_BPS,
-    vendorAmountUsd: stroopsToUsd(vendor),
-    operatorAmountUsd: stroopsToUsd(operator),
-    communityAmountUsd: stroopsToUsd(community),
-    platformAmountUsd: stroopsToUsd(platform),
-    rewardsPeriodId,
+    vendorAmountUsd: stroopsToUsd(receipt.vendorStroops),
+    operatorAmountUsd: stroopsToUsd(receipt.operatorStroops),
+    communityAmountUsd: stroopsToUsd(receipt.communityStroops),
+    platformAmountUsd: stroopsToUsd(receipt.platformStroops),
+    rewardsPeriodId: receipt.period,
+    fundraiseRound: receipt.round,
+    buyerAddress: parties.buyerAddress,
+    vendorAddress: parties.vendorAddress,
   };
 }

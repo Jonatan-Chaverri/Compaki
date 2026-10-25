@@ -1,5 +1,5 @@
-// "My rewards" — Community Rewards periods the session user is a member of,
-// across marketplaces, with on-chain amounts and a claim button.
+// "My rewards" — Community Rewards periods the session user sold or bought
+// in, across marketplaces, with on-chain amounts and a claim button.
 
 
 import { AppHeader, PageHeading, EmptyState } from "@/components/shell";
@@ -17,7 +17,7 @@ export default async function RewardsPage() {
       <div className="min-h-screen bg-slate-50/60">
         <AppHeader />
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
-          <EmptyState icon="leaf" title="Good things grow together." description="If a marketplace has invited you to share in community rewards, sign in to see your share and collect available rewards." href="/login?next=/rewards" action="Sign in to see rewards" />
+          <EmptyState icon="leaf" title="Good things grow together." description="Marketplaces with community rewards share part of every sale with the people who sell and buy there. Sign in to see and collect your share." href="/login?next=/rewards" action="Sign in to see rewards" />
         </main>
       </div>
     );
@@ -28,8 +28,8 @@ export default async function RewardsPage() {
     <div className="min-h-screen bg-slate-50/60">
       <AppHeader />
       <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-3xl px-6 py-12">
-        <PageHeading eyebrow="Your share of the good" title="Community rewards." description="Communities you belong to can set aside a share of each sale for their members. See what’s growing and collect your rewards when a period closes." />
-        <div className="account-intro"><span>01 · Sales grow the fund</span><span>→</span><span>02 · The period closes</span><span>→</span><span>03 · Collect your share</span></div>
+        <PageHeading eyebrow="Your share of the good" title="Community rewards." description="Some marketplaces share part of every sale with the people who sell and buy there. See what’s growing and collect your share when a period ends." />
+        <div className="account-intro"><span>01 · Sales grow the fund</span><span>→</span><span>02 · The period ends</span><span>→</span><span>03 · Collect your share</span></div>
         {res.ok ? (
           <MemberRewards initial={body} />
         ) : (

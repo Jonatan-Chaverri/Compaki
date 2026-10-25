@@ -2,25 +2,35 @@
 //
 // Source of truth split, kept explicit in every payload:
 //   - Confirmed on-chain state (read from the Soroban contract on every
-//     request): treasury totals, periods, beneficiaries, shares, entitlements,
-//     claim status, ledger time.
-//   - Auxiliary off-chain data (Postgres): transaction hashes for explorer
-//     links, display names for addresses, and which sales fed which period.
-// Nothing here derives a balance or a claim right from Postgres.
+//     request): rules, current period, period pools and volumes, treasury
+//     totals, each participant's reward and claim status, ledger time.
+//   - Auxiliary off-chain data (Postgres): which sales fed which period (and
+//     so who took part), display names for addresses, and claim tx hashes.
+// Per-participant amounts in the public view are estimates computed from the
+// on-chain pools; a participant's own claimable amount is always read from
+// the contract (getReward) before it is claimed.
 
 import { parseSplitSnapshot, prisma } from "@/lib/db";
 import {
   ContractError,
-  getRewardsEntitlements,
-  getRewardsPeriod,
+  getPeriodTotals,
   getRewardsStatus,
   stellarConfig,
   stellarExpertContractUrl,
   stroopsToUsd,
+  usdToStroops,
 } from "@/lib/stellar";
 
-/** History shown per marketplace (most recent periods). */
+/** History shown per marketplace (most recent periods with activity). */
 export const PERIOD_HISTORY_LIMIT = 12;
+
+export type CommunityMode = "classic" | "rewards" | "fundraise";
+
+export function communityModeOf(marketplace: { communityMode: string }): CommunityMode {
+  return marketplace.communityMode === "rewards" || marketplace.communityMode === "fundraise"
+    ? marketplace.communityMode
+    : "classic";
+}
 
 /**
  * The marketplace's on-chain id, but only if it was registered in the
@@ -36,17 +46,28 @@ export function boundOnChainId(marketplace: {
   return BigInt(marketplace.contractMarketplaceId);
 }
 
-export type PeriodStatus = "active" | "ended" | "closed";
+/** Display names for Stellar addresses (own wallets and custodial accounts). */
+export async function namesOf(addresses: string[]): Promise<Map<string, string>> {
+  if (addresses.length === 0) return new Map();
+  const users = await prisma.user.findMany({
+    where: { OR: [{ stellarPublicKey: { in: addresses } }, { walletAddress: { in: addresses } }] },
+    select: { name: true, stellarPublicKey: true, walletAddress: true },
+  });
+  return new Map(
+    users.flatMap((u) =>
+      [u.stellarPublicKey, u.walletAddress].filter(Boolean).map((a) => [a as string, u.name] as const),
+    ),
+  );
+}
 
-export interface BeneficiaryView {
+export interface ParticipantView {
   address: string;
   name: string | null;
-  shareBps: number;
-  /** Share of the current period total; final only once the period closes. */
-  projectedUsd: number;
-  /** Final on-chain entitlement (closed periods only). */
-  amountUsd: number | null;
-  claimed: boolean | null;
+  soldUsd: number;
+  boughtUsd: number;
+  /** Share of the on-chain pools by this participant's recorded volume. */
+  estimatedUsd: number;
+  claimedUsd: number | null;
   claimTxHash: string | null;
 }
 
@@ -54,14 +75,14 @@ export interface PeriodView {
   periodId: number;
   startTs: number;
   endTs: number;
-  status: PeriodStatus;
-  totalUsd: number;
+  /** "current": still collecting; "ended": rewards can be claimed. */
+  status: "current" | "ended";
+  vendorPoolUsd: number;
+  buyerPoolUsd: number;
+  salesUsd: number;
   claimedUsd: number;
-  beneficiaries: BeneficiaryView[];
-  openTxHash: string | null;
-  closeTxHash: string | null;
-  /** Sales whose community share was booked to this period (off-chain index). */
-  contributions: { saleId: string; txHash: string; communityUsd: number; createdAt: string }[];
+  salesCount: number;
+  participants: ParticipantView[];
 }
 
 export interface RewardsView {
@@ -73,86 +94,69 @@ export interface RewardsView {
   /** Code of the self-issued testnet demo asset (never Circle USDC). */
   assetCode: string;
   communityBps: number;
+  periodSeconds: number | null;
+  vendorPoolBps: number | null;
+  buyerPoolBps: number | null;
+  startTs: number | null;
+  currentPeriod: number | null;
   ledgerTime: number | null;
   treasury: { contributedUsd: number; claimedUsd: number; heldUsd: number } | null;
-  periodCount: number;
   periods: PeriodView[];
 }
 
-export function periodStatus(period: { closed: boolean; endTs: number }, ledgerTime: number): PeriodStatus {
-  if (period.closed) return "closed";
-  return ledgerTime >= period.endTs ? "ended" : "active";
-}
-
-/** Projected share in stroops, mirroring the contract's floor division. */
-function projectedStroops(total: bigint, shareBps: number): bigint {
-  return (total * BigInt(shareBps)) / 10_000n;
+/** Mirrors the contract's floor division (reward_of). */
+function shareOf(pool: bigint, mine: bigint, all: bigint): bigint {
+  return mine === 0n || all === 0n ? 0n : (pool * mine) / all;
 }
 
 /**
- * Loads the full rewards view of one marketplace from the contract, joined
- * with auxiliary tx hashes / names from Postgres.
+ * Loads the rewards view of one marketplace from the contract, joined with
+ * who took part (from recorded sales), names and claim tx hashes.
  */
 export async function loadRewardsView(marketplace: {
   id: string;
-  rewardsEnabled: boolean;
+  communityMode: string;
   splitCommunityBps: number;
+  rewardsPeriodSeconds: number | null;
+  rewardsVendorPoolBps: number | null;
   contractMarketplaceId: string | null;
   contractId: string | null;
 }): Promise<RewardsView> {
   const contractId = stellarConfig.marketplaceContractId;
   const base: RewardsView = {
-    enabled: marketplace.rewardsEnabled,
+    enabled: communityModeOf(marketplace) === "rewards",
     bound: false,
     contractId,
     contractUrl: stellarExpertContractUrl(contractId),
     assetCode: stellarConfig.usdcCode,
     communityBps: marketplace.splitCommunityBps,
+    periodSeconds: marketplace.rewardsPeriodSeconds,
+    vendorPoolBps: marketplace.rewardsVendorPoolBps,
+    buyerPoolBps:
+      marketplace.rewardsVendorPoolBps === null ? null : 10_000 - marketplace.rewardsVendorPoolBps,
+    startTs: null,
+    currentPeriod: null,
     ledgerTime: null,
     treasury: null,
-    periodCount: 0,
     periods: [],
   };
   const onChainId = boundOnChainId(marketplace);
-  if (!marketplace.rewardsEnabled || onChainId === null) return base;
+  if (!base.enabled || onChainId === null) return base;
 
-  const status = await getRewardsStatus(onChainId);
-  const firstId = Math.max(0, status.periodCount - PERIOD_HISTORY_LIMIT);
-  const ids = Array.from({ length: status.periodCount - firstId }, (_, i) => firstId + i);
-
-  const periods = await Promise.all(
-    ids.map(async (periodId) => {
-      const period = await getRewardsPeriod(onChainId, periodId);
-      const entitlements = period.closed
-        ? await getRewardsEntitlements(onChainId, periodId)
-        : null;
-      return { period, entitlements };
-    }),
-  );
-
-  const addresses = [...new Set(periods.flatMap((p) => p.period.beneficiaries))];
-  const [users, auxPeriods, sales] = await Promise.all([
-    prisma.user.findMany({
-      where: { OR: [{ stellarPublicKey: { in: addresses } }, { walletAddress: { in: addresses } }] },
-      select: { name: true, stellarPublicKey: true, walletAddress: true },
-    }),
-    prisma.rewardsPeriod.findMany({
-      where: { marketplaceId: marketplace.id, contractId, periodId: { in: ids } },
-      include: { claims: true },
-    }),
+  const [status, sales, claims] = await Promise.all([
+    getRewardsStatus(onChainId),
     prisma.sale.findMany({
       where: { product: { marketplaceId: marketplace.id } },
-      select: { id: true, txHash: true, splitSnapshot: true, createdAt: true },
+      select: { amountUsd: true, splitSnapshot: true },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      take: 1_000,
     }),
+    prisma.rewardClaim.findMany({ where: { marketplaceId: marketplace.id, contractId } }),
   ]);
-  const nameOf = new Map(
-    users.flatMap((u) => [u.stellarPublicKey, u.walletAddress].filter(Boolean).map((a) => [a, u.name] as const)),
-  );
-  const auxOf = new Map(auxPeriods.map((p) => [p.periodId, p]));
 
-  const contributionsOf = new Map<number, PeriodView["contributions"]>();
+  // Who sold and bought in each period, by on-chain address.
+  type Volume = { sold: bigint; bought: bigint };
+  const byPeriod = new Map<number, { count: number; volumes: Map<string, Volume> }>();
   for (const sale of sales) {
     let snapshot;
     try {
@@ -160,58 +164,80 @@ export async function loadRewardsView(marketplace: {
     } catch {
       continue;
     }
-    if (snapshot.rewardsPeriodId === undefined || snapshot.rewardsPeriodId === null) continue;
-    const list = contributionsOf.get(snapshot.rewardsPeriodId) ?? [];
-    list.push({
-      saleId: sale.id,
-      txHash: sale.txHash,
-      communityUsd: snapshot.communityAmountUsd,
-      createdAt: sale.createdAt.toISOString(),
-    });
-    contributionsOf.set(snapshot.rewardsPeriodId, list);
+    const k = snapshot.rewardsPeriodId;
+    if (k === undefined || k === null) continue;
+    const entry = byPeriod.get(k) ?? { count: 0, volumes: new Map<string, Volume>() };
+    entry.count += 1;
+    const amount = usdToStroops(sale.amountUsd);
+    const add = (address: string | undefined, side: keyof Volume) => {
+      if (!address) return;
+      const v = entry.volumes.get(address) ?? { sold: 0n, bought: 0n };
+      v[side] += amount;
+      entry.volumes.set(address, v);
+    };
+    add(snapshot.vendorAddress, "sold");
+    add(snapshot.buyerAddress, "bought");
+    byPeriod.set(k, entry);
   }
 
-  const views: PeriodView[] = periods.map(({ period, entitlements }) => {
-    const aux = auxOf.get(period.periodId);
-    const claimTx = new Map(aux?.claims.map((c) => [c.memberAddress, c.txHash]) ?? []);
-    return {
-      periodId: period.periodId,
-      startTs: period.startTs,
-      endTs: period.endTs,
-      status: periodStatus(period, status.ledgerTime),
-      totalUsd: stroopsToUsd(period.totalContributedStroops),
-      claimedUsd: stroopsToUsd(period.totalClaimedStroops),
-      openTxHash: aux?.openTxHash ?? null,
-      closeTxHash: aux?.closeTxHash ?? null,
-      contributions: contributionsOf.get(period.periodId) ?? [],
-      beneficiaries: period.beneficiaries.map((address, i) => {
-        const entitlement = entitlements?.[i];
+  const ids = [...new Set([status.currentPeriod, ...byPeriod.keys()])]
+    .filter((k) => k <= status.currentPeriod)
+    .sort((a, b) => b - a)
+    .slice(0, PERIOD_HISTORY_LIMIT);
+  const totals = await Promise.all(ids.map((k) => getPeriodTotals(onChainId, k)));
+  const names = await namesOf([...new Set([...byPeriod.values()].flatMap((p) => [...p.volumes.keys()]))]);
+  const claimOf = new Map(claims.map((c) => [`${c.periodId}:${c.memberAddress}`, c]));
+
+  const periods: PeriodView[] = ids.map((k, i) => {
+    const t = totals[i];
+    const activity = byPeriod.get(k);
+    const startTs = status.startTs + k * status.periodSeconds;
+    const participants: ParticipantView[] = [...(activity?.volumes ?? new Map<string, Volume>())]
+      .map(([address, v]) => {
+        const claim = claimOf.get(`${k}:${address}`);
+        const estimate =
+          shareOf(t.vendorPoolStroops, v.sold, t.vendorVolumeStroops) +
+          shareOf(t.buyerPoolStroops, v.bought, t.buyerVolumeStroops);
         return {
           address,
-          name: nameOf.get(address) ?? null,
-          shareBps: period.sharesBps[i],
-          projectedUsd: stroopsToUsd(
-            projectedStroops(period.totalContributedStroops, period.sharesBps[i]),
-          ),
-          amountUsd: entitlement ? stroopsToUsd(entitlement.amountStroops) : null,
-          claimed: entitlement ? entitlement.claimed : null,
-          claimTxHash: claimTx.get(address) ?? null,
+          name: names.get(address) ?? null,
+          soldUsd: stroopsToUsd(v.sold),
+          boughtUsd: stroopsToUsd(v.bought),
+          estimatedUsd: stroopsToUsd(estimate),
+          claimedUsd: claim?.amountUsd ?? null,
+          claimTxHash: claim?.txHash ?? null,
         };
-      }),
+      })
+      .sort((a, b) => b.estimatedUsd - a.estimatedUsd);
+    return {
+      periodId: k,
+      startTs,
+      endTs: startTs + status.periodSeconds,
+      status: k < status.currentPeriod ? "ended" : "current",
+      vendorPoolUsd: stroopsToUsd(t.vendorPoolStroops),
+      buyerPoolUsd: stroopsToUsd(t.buyerPoolStroops),
+      salesUsd: stroopsToUsd(t.vendorVolumeStroops),
+      claimedUsd: stroopsToUsd(t.totalClaimedStroops),
+      salesCount: activity?.count ?? 0,
+      participants,
     };
   });
 
   return {
     ...base,
     bound: true,
+    periodSeconds: status.periodSeconds,
+    vendorPoolBps: status.vendorPoolBps,
+    buyerPoolBps: status.buyerPoolBps,
+    startTs: status.startTs,
+    currentPeriod: status.currentPeriod,
     ledgerTime: status.ledgerTime,
-    periodCount: status.periodCount,
     treasury: {
       contributedUsd: stroopsToUsd(status.totalContributedStroops),
       claimedUsd: stroopsToUsd(status.totalClaimedStroops),
       heldUsd: stroopsToUsd(status.totalContributedStroops - status.totalClaimedStroops),
     },
-    periods: views.reverse(),
+    periods,
   };
 }
 
@@ -224,20 +250,16 @@ export function describeContractError(
 ): { status: 400 | 403 | 409; message: string; code: string } | null {
   if (!(error instanceof ContractError)) return null;
   const known: Record<string, [400 | 403 | 409, string]> = {
-    NoActivePeriod: [
-      409,
-      "This marketplace's Community Rewards period isn't open, so checkout is paused until the operator opens a new period.",
-    ],
-    PeriodActive: [409, "A period is still running — its rules are locked until it ends."],
-    PeriodNotEnded: [409, "This period hasn't reached its end time on-chain yet."],
-    PeriodAlreadyClosed: [409, "This period is already closed."],
-    PeriodNotClosed: [409, "Rewards can be claimed once the period is closed."],
-    NotBeneficiary: [403, "You are not a beneficiary of this period."],
+    PeriodNotFound: [409, "That rewards period hasn't started yet."],
+    PeriodNotEnded: [409, "This period hasn't ended on-chain yet; rewards can be claimed after it ends."],
     AlreadyClaimed: [409, "This reward was already claimed."],
     NothingToClaim: [409, "There is nothing to claim for this period."],
-    InvalidBeneficiaries: [400, "The contract rejected the beneficiary list."],
-    InvalidPeriodEnd: [400, "The contract rejected the period end date."],
     RewardsNotEnabled: [400, "Community Rewards is not enabled for this marketplace."],
+    FundraiseNotEnabled: [400, "This marketplace has no fundraising target."],
+    GoalNotReached: [409, "The fundraising target hasn't been reached yet."],
+    InvalidRecipients: [400, "The contract rejected the recipient list."],
+    InvalidRewardsConfig: [400, "The contract rejected the rewards rules."],
+    InvalidGoal: [400, "The contract rejected the fundraising target."],
     Unauthorized: [403, "The contract rejected the authorization."],
   };
   const entry = known[error.errorName];

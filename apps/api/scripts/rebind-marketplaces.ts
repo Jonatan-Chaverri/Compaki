@@ -11,8 +11,10 @@
  *   npm run marketplaces:rebind -- --rewards cafe-de-altura,other-slug
  *
  *   --rewards a,b   register these slugs as Community Rewards marketplaces
- *                   (community share held by the contract). Marketplaces
- *                   already flagged rewardsEnabled are always registered so.
+ *                   (community share held by the contract). Every other
+ *                   marketplace keeps its communityMode; rewards ones
+ *                   without period rules get 30-day periods, 50% sellers /
+ *                   50% buyers.
  *   --adopt         no redeploy happened: just stamp rows that have no
  *                   contractId yet with the current contract (their ids are
  *                   already valid there). Never re-registers anything.
@@ -34,13 +36,22 @@ import "./load-env";
 import { PrismaClient } from "@prisma/client";
 
 import {
+  createFundraiseMarketplace,
   createMarketplace,
   createRewardsMarketplace,
   decryptSecret,
+  getRewardsStatus,
   registerVendor,
   stellarConfig,
+  usdToStroops,
+  type GoalPolicy,
 } from "../src/lib/stellar";
+import { parseFundraiseRecipients } from "../src/lib/fundraise";
 import { BPS_DENOM, PLATFORM_FEE_BPS } from "../src/lib/splits";
+
+/** Defaults for rewards marketplaces created before periods had rules. */
+const DEFAULT_PERIOD_SECONDS = 30 * 24 * 60 * 60;
+const DEFAULT_VENDOR_POOL_BPS = 5_000;
 
 const prisma = new PrismaClient();
 
@@ -90,20 +101,32 @@ async function main(): Promise<void> {
   }
 
   for (const m of marketplaces) {
-    const rewards = m.rewardsEnabled || rewardsSlugs.has(m.slug);
-    const mode = rewards ? "Community Rewards" : "classic";
+    const mode = rewardsSlugs.has(m.slug) ? "rewards" : m.communityMode;
+    const recipients = parseFundraiseRecipients(m.fundraiseRecipients);
+    const periodSeconds = m.rewardsPeriodSeconds ?? DEFAULT_PERIOD_SECONDS;
+    const vendorPoolBps = m.rewardsVendorPoolBps ?? DEFAULT_VENDOR_POOL_BPS;
+    const label =
+      mode === "rewards"
+        ? `Community Rewards (${Math.round(periodSeconds / 86_400)}-day periods, ${vendorPoolBps / 100}% sellers / ${100 - vendorPoolBps / 100}% buyers)`
+        : mode === "fundraise"
+          ? `fundraising ($${m.communityGoalUsd} target, ${m.fundraisePolicy})`
+          : "classic";
     console.log(
-      `• ${m.slug}: ${m.splitVendorBps}/${m.splitOperatorBps}/${m.splitCommunityBps} bps, ${mode}, ${m.vendors.length} vendor(s)`,
+      `• ${m.slug}: ${m.splitVendorBps}/${m.splitOperatorBps}/${m.splitCommunityBps} bps, ${label}, ${m.vendors.length} vendor(s)`,
     );
     if (!m.operator.stellarSecretEncrypted) {
       console.log("    skipped: operator has no payment account");
       continue;
     }
-    if (rewards && m.splitCommunityBps === 0) {
-      console.log("    skipped: Community Rewards needs a community share above 0%");
+    if (mode !== "classic" && m.splitCommunityBps === 0) {
+      console.log("    skipped: rewards and fundraising need a community share above 0%");
       continue;
     }
-    if (!rewards && !m.communityFund?.stellarPublicKey) {
+    if (mode === "fundraise" && (!m.communityGoalUsd || recipients.length === 0 || !m.fundraisePolicy)) {
+      console.log("    skipped: fundraising rules (target, recipients, policy) are missing");
+      continue;
+    }
+    if (mode === "classic" && !m.communityFund?.stellarPublicKey) {
       console.log("    skipped: classic marketplace without a community fund account");
       continue;
     }
@@ -124,12 +147,25 @@ async function main(): Promise<void> {
       operatorBps: m.splitOperatorBps,
       communityBps: m.splitCommunityBps,
     };
-    const created = rewards
-      ? await createRewardsMarketplace(split)
-      : await createMarketplace({
-          ...split,
-          communityFundPublicKey: m.communityFund!.stellarPublicKey!,
-        });
+    const created =
+      mode === "rewards"
+        ? await createRewardsMarketplace({ ...split, periodSeconds, vendorPoolBps })
+        : mode === "fundraise"
+          ? await createFundraiseMarketplace({
+              ...split,
+              targetStroops: usdToStroops(m.communityGoalUsd!),
+              recipients: recipients.map((r) => r.address),
+              sharesBps: recipients.map((r) => r.shareBps),
+              policy: m.fundraisePolicy as GoalPolicy,
+            })
+          : await createMarketplace({
+              ...split,
+              communityFundPublicKey: m.communityFund!.stellarPublicKey!,
+            });
+    const rewardsStartAt =
+      mode === "rewards"
+        ? new Date((await getRewardsStatus(created.marketplaceId)).startTs * 1000)
+        : null;
     console.log(`    marketplace_id ${created.marketplaceId} · tx ${created.txHash}`);
 
     const vendorTx: { membershipId: string; txHash: string }[] = [];
@@ -156,8 +192,11 @@ async function main(): Promise<void> {
           contractMarketplaceId: created.marketplaceId.toString(),
           createTxHash: created.txHash,
           splitVendorBps: vendorBps,
-          rewardsEnabled: rewards,
-          regenerativeEnabled: m.regenerativeEnabled || rewards,
+          communityMode: mode,
+          ...(mode === "rewards"
+            ? { rewardsPeriodSeconds: periodSeconds, rewardsVendorPoolBps: vendorPoolBps, rewardsStartAt }
+            : {}),
+          regenerativeEnabled: m.regenerativeEnabled || mode !== "classic",
         },
       }),
       ...vendorTx.map((v) =>

@@ -11,13 +11,15 @@
 
 import { prisma } from "@/lib/db";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
+import { releaseIfReached } from "@/lib/fundraise";
 import { boundOnChainId } from "@/lib/rewards";
 import { splitSnapshot } from "@/lib/splits";
 import {
   getUsdBalance,
   mintDemoUsd,
   preparePurchase,
-  purchasePeriodOf,
+  purchaseReceiptOf,
+  type PurchaseReceipt,
   stellarExpertTxUrl,
   usdToStroops,
 } from "@/lib/stellar";
@@ -130,23 +132,23 @@ export async function recordSale(params: {
   order: PaymentOrder;
   item: PaymentOrder["items"][number];
   buyerId: string;
+  buyerAddress: string;
   txHash: string;
-  rewardsPeriodId: number | null;
+  receipt: PurchaseReceipt;
   settleSeconds: number;
   shipping: Shipping;
 }) {
   const { order, item, shipping } = params;
   const marketplace = order.marketplace;
-  const { lineUsd, amountStroops } = lineAmount(item);
-  // Mirrors the contract's math (see src/lib/splits.ts).
+  const { lineUsd } = lineAmount(item);
   const snapshot = splitSnapshot(
-    amountStroops,
     {
       vendorBps: marketplace.splitVendorBps,
       operatorBps: marketplace.splitOperatorBps,
       communityBps: marketplace.splitCommunityBps,
     },
-    params.rewardsPeriodId,
+    params.receipt,
+    { buyerAddress: params.buyerAddress, vendorAddress: vendorAddressFor(order, item) ?? "" },
   );
   await prisma.$transaction([
     prisma.sale.create({
@@ -170,6 +172,13 @@ export async function recordSale(params: {
       data: { stock: { decrement: item.quantity } },
     }),
   ]);
+  // A fundraising round that this sale pushed past its target is released
+  // right away (permissionless on-chain; the API just pays the fee).
+  if (params.receipt.round !== null) {
+    void releaseIfReached(marketplace).catch((error) =>
+      console.error("[fundraise] automatic release failed:", error),
+    );
+  }
 }
 
 /** Marks the order COMPLETED and returns the checkout success payload. */
@@ -279,8 +288,9 @@ export async function completePurchaseStep(
       order,
       item,
       buyerId: pending.userId,
+      buyerAddress: pending.signer,
       txHash: result.txHash,
-      rewardsPeriodId: purchasePeriodOf(result.returnValue),
+      receipt: purchaseReceiptOf(result.returnValue),
       settleSeconds: Math.max(1, Math.round((Date.now() - context.startedAt) / 1000)),
       shipping: shippingOf(order),
     });

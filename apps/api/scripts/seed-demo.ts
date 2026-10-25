@@ -4,14 +4,15 @@
  *   Marketplace "Café de Altura" (Community Rewards, 83/10/5 split + Compaki's 2%)
  *   ├─ operator María Castillo
  *   ├─ vendors Don Carlos (coffee) and Finca La Esperanza (2-3 products each)
- *   ├─ community members Escuela Verde (50%), Brigada de Reforestación (30%)
- *   │  and Lucía Fernández (20%), in an open rewards period
+ *   ├─ rewards: each period's community pool goes 60% to that period's
+ *   │  sellers and 40% to its buyers, by what each one sold and bought
  *   └─ 5 historical sales with real on-chain transactions (their community
- *      share is booked to that period in the contract treasury)
+ *      share is booked to the current period in the contract treasury)
  *
  * DEMO_SEED_PASSWORD=<pw> gives every seeded user that password (only users
  * that have none yet), so the presenter can sign in as operator, vendor or
- * member. SEED_PERIOD_MINUTES (default 10) sets the period length.
+ * buyer. SEED_PERIOD_SECONDS (default 600, the testnet demo period) sets the
+ * period length; use 2592000 for monthly.
  *
  * Idempotent: users are reused by email, the marketplace by slug, on-chain
  * steps are skipped when their tx hash is already stored, and sales are only
@@ -32,14 +33,11 @@ import {
   createCustodialAccount,
   createRewardsMarketplace,
   decryptSecret,
-  getRewardsPeriod,
   getRewardsStatus,
-  openRewardsPeriod,
   purchase,
   registerVendor,
   stellarConfig,
   stellarExpertTxUrl,
-  stroopsToUsd,
   usdToStroops,
 } from "../src/lib/stellar";
 
@@ -49,14 +47,9 @@ const SLUG = "cafe-de-altura";
 // Shares of the 98% left after Compaki's fixed 2% platform fee.
 const SPLITS = { vendorBps: 8_300, operatorBps: 1_000, communityBps: 500 };
 const SALES_TARGET = 5;
-const PERIOD_MINUTES = Number(process.env.SEED_PERIOD_MINUTES ?? 10);
+const PERIOD_SECONDS = Number(process.env.SEED_PERIOD_SECONDS ?? 600);
+const VENDOR_POOL_BPS = 6_000;
 const DEMO_PASSWORD = process.env.DEMO_SEED_PASSWORD ?? "";
-
-const MEMBERS = [
-  { name: "Escuela Verde de Tarrazú", email: "escuela@cafedealtura.example", shareBps: 5_000 },
-  { name: "Brigada de Reforestación", email: "brigada@cafedealtura.example", shareBps: 3_000 },
-  { name: "Lucía Fernández", email: "lucia@example.com", shareBps: 2_000 },
-] as const;
 
 const VENDORS = [
   {
@@ -183,7 +176,9 @@ async function main(): Promise<void> {
       splitOperatorBps: SPLITS.operatorBps,
       splitCommunityBps: SPLITS.communityBps,
       regenerativeEnabled: true,
-      rewardsEnabled: true,
+      communityMode: "rewards",
+      rewardsPeriodSeconds: PERIOD_SECONDS,
+      rewardsVendorPoolBps: VENDOR_POOL_BPS,
       operatorId: operator.id,
     },
   });
@@ -198,14 +193,20 @@ async function main(): Promise<void> {
     const result = await createRewardsMarketplace({
       operatorSecret: decryptSecret(operator.stellarSecretEncrypted as string),
       ...SPLITS,
+      periodSeconds: marketplace.rewardsPeriodSeconds ?? PERIOD_SECONDS,
+      vendorPoolBps: marketplace.rewardsVendorPoolBps ?? VENDOR_POOL_BPS,
     });
+    const status = await getRewardsStatus(result.marketplaceId);
     marketplace = await prisma.marketplace.update({
       where: { id: marketplace.id },
       data: {
         contractMarketplaceId: result.marketplaceId.toString(),
         contractId: stellarConfig.marketplaceContractId,
         createTxHash: result.txHash,
-        rewardsEnabled: true,
+        communityMode: "rewards",
+        rewardsPeriodSeconds: status.periodSeconds,
+        rewardsVendorPoolBps: status.vendorPoolBps,
+        rewardsStartAt: new Date(status.startTs * 1000),
       },
     });
     console.log(`  create_rewards_marketplace tx ${result.txHash.slice(0, 8)}…`);
@@ -255,41 +256,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── 3. Community members + an open rewards period ─────────────────────
-  if (marketplace.rewardsEnabled) {
-    const members: User[] = [];
-    for (const m of MEMBERS) {
-      members.push(await ensureUser({ name: m.name, email: m.email, role: "BUYER", startingUsd: 100 }));
-    }
-    const status = await getRewardsStatus(contractMarketplaceId);
-    const latest =
-      status.periodCount > 0
-        ? await getRewardsPeriod(contractMarketplaceId, status.periodCount - 1)
-        : null;
-    if (!latest || status.ledgerTime >= latest.endTs) {
-      console.log(`Opening a ${PERIOD_MINUTES}-minute rewards period (50/30/20)...`);
-      const opened = await openRewardsPeriod({
-        operatorSecret: decryptSecret(operator.stellarSecretEncrypted as string),
-        marketplaceId: contractMarketplaceId,
-        beneficiaries: members.map((m) => m.stellarPublicKey as string),
-        sharesBps: MEMBERS.map((m) => m.shareBps),
-        endTs: status.ledgerTime + PERIOD_MINUTES * 60,
-      });
-      await prisma.rewardsPeriod.create({
-        data: {
-          marketplaceId: marketplace.id,
-          contractId: stellarConfig.marketplaceContractId,
-          periodId: opened.periodId,
-          openTxHash: opened.txHash,
-        },
-      });
-      console.log(`  open_period #${opened.periodId} tx ${opened.txHash.slice(0, 8)}…`);
-    } else {
-      console.log(`Rewards period #${status.periodCount - 1} is already running.`);
-    }
-  }
-
-  // ── 4. Historical sales (real on-chain purchases) ─────────────────────
+  // ── 3. Historical sales (real on-chain purchases) ─────────────────────
   const existingSales = await prisma.sale.count({
     where: { product: { marketplaceId: marketplace.id } },
   });
@@ -317,17 +284,19 @@ async function main(): Promise<void> {
       `  ${buyer.name} buys "${product.name}" ($${product.priceUsd.toFixed(2)})...`,
     );
 
-    const amountStroops = usdToStroops(product.priceUsd);
     const settleStart = Date.now();
-    const { txHash, rewardsPeriodId } = await purchase({
+    const { txHash, receipt } = await purchase({
       buyerSecret: decryptSecret(buyer.stellarSecretEncrypted as string),
       marketplaceId: contractMarketplaceId,
       vendorPublicKey: product.vendor.stellarPublicKey as string,
-      amountStroops,
+      amountStroops: usdToStroops(product.priceUsd),
     });
     const settleSeconds = Math.max(1, Math.round((Date.now() - settleStart) / 1000));
 
-    const snapshot = splitSnapshot(amountStroops, SPLITS, rewardsPeriodId);
+    const snapshot = splitSnapshot(SPLITS, receipt, {
+      buyerAddress: buyer.stellarPublicKey as string,
+      vendorAddress: product.vendor.stellarPublicKey as string,
+    });
 
     // Backdate so the dashboard reads like an operating store, not a fresh seed.
     const hoursAgo = (salesToCreate - i) * 11 + 3;
@@ -346,7 +315,7 @@ async function main(): Promise<void> {
     console.log(`    settled in ${settleSeconds}s · tx ${txHash.slice(0, 8)}…`);
   }
 
-  // ── 5. Summary for the presenter ──────────────────────────────────────
+  // ── 4. Summary for the presenter ──────────────────────────────────────
   const allSales = await prisma.sale.findMany({
     where: { product: { marketplaceId: marketplace.id } },
     orderBy: { createdAt: "desc" },
@@ -357,9 +326,9 @@ async function main(): Promise<void> {
   console.log(`  Storefront:         http://localhost:3000/m/${SLUG}`);
   console.log(`  Operator dashboard: http://localhost:3000/dashboard/${SLUG}`);
   console.log(`  Vendor invite:      http://localhost:3000/m/${SLUG}/join`);
-  console.log(`  Member rewards:     http://localhost:3000/rewards`);
+  console.log(`  Rewards:            http://localhost:3000/rewards`);
   console.log(
-    `  Sign-ins:           ${operator.email} (operator), ${MEMBERS.map((m) => m.email).join(", ")} (members)` +
+    `  Sign-ins:           ${operator.email} (operator), ${VENDORS.map((v) => v.email).join(", ")} (vendors), ${BUYERS.map((b) => b.email).join(", ")} (buyers)` +
       (DEMO_PASSWORD ? " — password from DEMO_SEED_PASSWORD" : " — set DEMO_SEED_PASSWORD to enable"),
   );
   for (const s of allSales) {

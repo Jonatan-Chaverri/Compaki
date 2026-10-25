@@ -2207,7 +2207,66 @@
                 "symbol": "purchase"
               }
             ],
-            "data": "void"
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "community_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 35
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "operator_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 32
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "period"
+                  },
+                  "val": "void"
+                },
+                {
+                  "key": {
+                    "symbol": "platform_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 2
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "round"
+                  },
+                  "val": "void"
+                },
+                {
+                  "key": {
+                    "symbol": "vendor_amount"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 32
+                    }
+                  }
+                }
+              ]
+            }
           }
         }
       },

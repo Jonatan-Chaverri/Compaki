@@ -72,13 +72,33 @@ model Marketplace {
   // Hash of the create_marketplace transaction — the "verified on-chain" link.
   createTxHash         String?
   regenerativeEnabled  Boolean  @default(false)
-  // Community Rewards: the community share is held by the contract and
-  // distributed per period. Fixed when the marketplace is registered on-chain.
-  rewardsEnabled       Boolean  @default(false)
+  // What happens to the community share, fixed when the marketplace is
+  // registered on-chain (the contract enforces it):
+  //   "classic"   paid to the community fund account with every sale;
+  //   "rewards"   held by the contract and shared each period between that
+  //               period's vendors and buyers, in proportion to their sales
+  //               and purchases;
+  //   "fundraise" held by the contract until communityGoalUsd is reached,
+  //               then released to fundraiseRecipients.
+  communityMode        String   @default("classic")
+  // Rewards rules (mirrors of the on-chain config, for display).
+  rewardsPeriodSeconds Int?
+  // Part of each period's pool shared among vendors; buyers get the rest.
+  rewardsVendorPoolBps Int?
+  // Ledger time the contract started counting periods from.
+  rewardsStartAt       DateTime?
+  // Fundraising rules (mirrors of the on-chain config, for display).
+  // "stop" | "new-round" | "direct": what later sales do once the target is
+  // reached and released.
+  fundraisePolicy      String?
+  // [{ address, label, shareBps }], shares summing to 10_000.
+  fundraiseRecipients  Json?
   // Public organizer-authored context, separate from immutable payment rules.
   communityPurpose       String   @default("")
   communityBeneficiaries String   @default("")
   communityDistribution String   @default("")
+  // Optional goal for classic marketplaces; the fixed on-chain target for
+  // fundraising ones.
   communityGoalUsd       Float?
   communityDetailsUpdatedAt DateTime?
   createdAt            DateTime @default(now())
@@ -91,7 +111,8 @@ model Marketplace {
   products   Product[]
   vendors    VendorMembership[]
   orders     Order[]
-  rewardsPeriods RewardsPeriod[]
+  rewardClaims   RewardClaim[]
+  fundraiseReleases FundraiseRelease[]
 
   @@unique([contractId, contractMarketplaceId])
 }
@@ -208,26 +229,13 @@ model Sale {
 // shares, totals, entitlements and claim status are confirmed state in the
 // Soroban contract and are always read from it; these rows only keep the
 // transaction hashes the contract doesn't store, for explorer links.
-model RewardsPeriod {
-  id          String   @id @default(cuid())
-  // Period id inside the contract (per marketplace, starting at 0).
-  periodId    Int
-  // Contract instance the period lives in (see Marketplace.contractId).
-  contractId  String
-  // Null when the period was opened outside the API (e.g. stellar-cli).
-  openTxHash  String?
-  closeTxHash String?
-  createdAt   DateTime @default(now())
-
-  marketplaceId String
-  marketplace   Marketplace   @relation(fields: [marketplaceId], references: [id])
-  claims        RewardClaim[]
-
-  @@unique([marketplaceId, contractId, periodId])
-}
-
+// A confirmed rewards claim (auxiliary: the claim itself is final on-chain;
+// this keeps the explorer link).
 model RewardClaim {
   id            String   @id @default(cuid())
+  // Contract instance and period the claim was made in.
+  contractId    String
+  periodId      Int
   // Stellar address that received the payout.
   memberAddress String
   // Amount returned by the confirmed claim transaction.
@@ -235,8 +243,24 @@ model RewardClaim {
   txHash        String   @unique
   createdAt     DateTime @default(now())
 
-  periodRowId String
-  period      RewardsPeriod @relation(fields: [periodRowId], references: [id])
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
 
-  @@unique([periodRowId, memberAddress])
+  @@unique([marketplaceId, contractId, periodId, memberAddress])
+}
+
+// A confirmed fundraising release (auxiliary, like RewardClaim).
+model FundraiseRelease {
+  id         String   @id @default(cuid())
+  contractId String
+  // Round that was released (0-based).
+  round      Int
+  amountUsd  Float
+  txHash     String   @unique
+  createdAt  DateTime @default(now())
+
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+
+  @@unique([marketplaceId, contractId, round])
 }

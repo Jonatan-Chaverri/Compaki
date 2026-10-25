@@ -1,42 +1,41 @@
-// /api/rewards — Community Rewards.
+// /api/rewards — Community Rewards and fundraising.
 //
-//   GET  /marketplace/:slug                         treasury, periods, beneficiaries (public)
-//   POST /marketplace/:slug/periods                 open a period (operator)
-//   POST /marketplace/:slug/periods/:id/close       close an ended period (operator or beneficiary)
-//   POST /marketplace/:slug/periods/:id/claim       claim the session user's reward
-//                                                   (own wallets: 202 + tx to sign,
-//                                                   finished by POST /api/tx/:id)
-//   POST /marketplace/:slug/guarantees              simulate a forbidden action (operator)
-//   GET  /me                                        session user's rewards across marketplaces
+//   GET  /marketplace/:slug                    rules, periods / fundraising progress (public)
+//   POST /marketplace/:slug/periods/:id/claim  claim the session user's reward for an ended period
+//                                              (own wallets: 202 + tx to sign,
+//                                              finished by POST /api/tx/:id)
+//   POST /marketplace/:slug/fundraise/release  release a round that reached its target (any signed-in user)
+//   POST /marketplace/:slug/guarantees         simulate a forbidden action (operator)
+//   GET  /me                                   session user's rewards across marketplaces
 //
-// Every balance, share and claim right in these payloads is read from the
-// contract (see src/lib/rewards.ts). Postgres only adds tx hashes and names.
-// Members with their own wallet sign their claims in the browser; for
-// custodial accounts the backend signs with the key it holds, so there
-// `require_auth` proves "the backend acted for this user" (README "Custody").
+// Every balance, rule and claim right in these payloads is read from the
+// contract (see src/lib/rewards.ts and src/lib/fundraise.ts). Postgres adds
+// who took part, names and tx hashes. Participants with their own wallet sign
+// their claims in the browser; for custodial accounts the backend signs with
+// the key it holds, so there `require_auth` proves "the backend acted for
+// this user" (README "Custody").
 
 import { Hono } from "hono";
 
-import { prisma } from "@/lib/db";
+import { parseSplitSnapshot, prisma } from "@/lib/db";
+import { loadFundraiseView, releaseIfReached } from "@/lib/fundraise";
+import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import {
   boundOnChainId,
+  communityModeOf,
   describeContractError,
   loadRewardsView,
   PERIOD_HISTORY_LIMIT,
 } from "@/lib/rewards";
-import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import { getSessionUser } from "@/lib/session";
 import { personalWallet, userAddresses } from "@/lib/wallets";
 import {
   claimReward,
-  closeRewardsPeriod,
-  createCustodialAccount,
   decryptSecret,
-  getRewardsPeriod,
+  getFundraise,
+  getReward,
   getRewardsStatus,
   i128Of,
-  isValidAccountAddress,
-  openRewardsPeriod,
   prepareClaim,
   simulateForbiddenAction,
   stellarConfig,
@@ -47,17 +46,18 @@ import {
 
 export const rewards = new Hono();
 
-const MAX_BENEFICIARIES = 20; // mirrors the contract's MAX_BENEFICIARIES
-const MAX_PERIOD_MINUTES = 366 * 24 * 60; // mirrors MAX_PERIOD_SECONDS
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
 const marketplaceSelect = {
   id: true,
   name: true,
   slug: true,
   operatorId: true,
-  rewardsEnabled: true,
+  communityMode: true,
   splitCommunityBps: true,
+  rewardsPeriodSeconds: true,
+  rewardsVendorPoolBps: true,
+  communityGoalUsd: true,
+  fundraisePolicy: true,
+  fundraiseRecipients: true,
   contractMarketplaceId: true,
   contractId: true,
 } as const;
@@ -85,219 +85,18 @@ rewards.get("/marketplace/:slug", async (c) => {
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
 
   const user = await getSessionUser(c);
+  const mode = communityModeOf(marketplace);
   try {
-    const view = await loadRewardsView(marketplace);
     return c.json({
       marketplace: { name: marketplace.name, slug: marketplace.slug },
+      mode,
       canManage: user?.id === marketplace.operatorId,
       viewerAddress: user ? viewerAddressOf(user) : null,
-      rewards: view,
+      rewards: mode === "rewards" ? await loadRewardsView(marketplace) : null,
+      fundraise: mode === "fundraise" ? await loadFundraiseView(marketplace) : null,
     });
   } catch (error) {
-    const { body, status } = errorResponse(error, "Could not read rewards from the contract");
-    return c.json(body, status);
-  }
-});
-
-// ── POST /marketplace/:slug/periods — open a period ───────────────────────
-//
-// Body: { durationMinutes, beneficiaries: [{ email | address, shareBps }] }
-// Emails must belong to existing Compaki users; a custodial payment account
-// is provisioned for any member that doesn't have one yet.
-
-rewards.post("/marketplace/:slug/periods", async (c) => {
-  const user = await getSessionUser(c);
-  if (!user) return c.json({ error: "Sign in as the operator" }, 401);
-  const marketplace = await prisma.marketplace.findUnique({
-    where: { slug: c.req.param("slug") },
-    include: { operator: true },
-  });
-  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
-  if (marketplace.operatorId !== user.id) {
-    return c.json({ error: "Only the marketplace operator can open periods" }, 403);
-  }
-  const onChainId = boundOnChainId(marketplace);
-  if (!marketplace.rewardsEnabled || onChainId === null) {
-    return c.json({ error: "Community Rewards is not enabled for this marketplace" }, 400);
-  }
-  if (!marketplace.operator.stellarSecretEncrypted || !marketplace.operator.stellarPublicKey) {
-    return c.json({ error: "Operator payment account missing" }, 409);
-  }
-
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON" }, 400);
-  }
-  const b = (body ?? {}) as Record<string, unknown>;
-  const durationMinutes = Number(b.durationMinutes);
-  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > MAX_PERIOD_MINUTES) {
-    return c.json({ error: "Duration must be between 1 minute and 366 days" }, 400);
-  }
-  const rawMembers = Array.isArray(b.beneficiaries) ? b.beneficiaries : [];
-  if (rawMembers.length === 0) return c.json({ error: "Add at least one beneficiary" }, 400);
-  if (rawMembers.length > MAX_BENEFICIARIES) {
-    return c.json({ error: `At most ${MAX_BENEFICIARIES} beneficiaries per period` }, 400);
-  }
-
-  const shareTotal = rawMembers.reduce(
-    (acc: number, raw) => acc + Number((raw as Record<string, unknown> | null)?.shareBps),
-    0,
-  );
-  if (shareTotal !== 10_000) {
-    return c.json({ error: `Shares must add up to exactly 100% (got ${shareTotal / 100}%)` }, 400);
-  }
-
-  // Resolve every row to a Stellar address. Validation here gives friendly
-  // messages; the contract re-validates everything on-chain.
-  const resolved: { address: string; shareBps: number }[] = [];
-  for (const raw of rawMembers) {
-    const row = (raw ?? {}) as Record<string, unknown>;
-    const shareBps = Number(row.shareBps);
-    if (!Number.isInteger(shareBps) || shareBps < 1 || shareBps > 10_000) {
-      return c.json({ error: "Each share must be between 0.01% and 100%" }, 400);
-    }
-    const email = typeof row.email === "string" ? row.email.trim().toLowerCase() : "";
-    const address = typeof row.address === "string" ? row.address.trim() : "";
-    if (address) {
-      if (!isValidAccountAddress(address)) {
-        return c.json({ error: `Invalid Stellar address: ${address.slice(0, 12)}…` }, 400);
-      }
-      resolved.push({ address, shareBps });
-      continue;
-    }
-    if (!EMAIL_RE.test(email)) {
-      return c.json({ error: "Each beneficiary needs a member email or a Stellar address" }, 400);
-    }
-    const member = await prisma.user.findUnique({ where: { email } });
-    if (!member) {
-      return c.json({ error: `No Compaki account for ${email} — ask them to sign up first` }, 400);
-    }
-    if (member.walletAddress && !member.walletReadyAt) {
-      return c.json({ error: `${email} hasn't finished setting up their wallet yet` }, 400);
-    }
-    const personal = personalWallet(member);
-    let memberAddress = personal.kind === "none" ? null : personal.address;
-    if (!memberAddress) {
-      const account = await createCustodialAccount();
-      await prisma.user.update({
-        where: { id: member.id },
-        data: {
-          stellarPublicKey: account.publicKey,
-          stellarSecretEncrypted: account.secretEncrypted,
-        },
-      });
-      memberAddress = account.publicKey;
-    }
-    resolved.push({ address: memberAddress, shareBps });
-  }
-
-  if (new Set(resolved.map((r) => r.address)).size !== resolved.length) {
-    return c.json({ error: "Each beneficiary can only appear once" }, 400);
-  }
-  if (resolved.some((r) => r.address === marketplace.operator.stellarPublicKey)) {
-    return c.json({ error: "The operator cannot be a beneficiary of its own community fund" }, 400);
-  }
-
-  try {
-    // End time is anchored to ledger time, not the API server's clock.
-    const { ledgerTime } = await getRewardsStatus(onChainId);
-    const endTs = ledgerTime + durationMinutes * 60;
-    const { periodId, txHash } = await openRewardsPeriod({
-      operatorSecret: decryptSecret(marketplace.operator.stellarSecretEncrypted),
-      marketplaceId: onChainId,
-      beneficiaries: resolved.map((r) => r.address),
-      sharesBps: resolved.map((r) => r.shareBps),
-      endTs,
-    });
-    await prisma.rewardsPeriod.upsert({
-      where: {
-        marketplaceId_contractId_periodId: {
-          marketplaceId: marketplace.id,
-          contractId: stellarConfig.marketplaceContractId,
-          periodId,
-        },
-      },
-      update: { openTxHash: txHash },
-      create: {
-        marketplaceId: marketplace.id,
-        contractId: stellarConfig.marketplaceContractId,
-        periodId,
-        openTxHash: txHash,
-      },
-    });
-    return c.json({ periodId, txHash, verifyUrl: stellarExpertTxUrl(txHash) }, 201);
-  } catch (error) {
-    const { body, status } = errorResponse(error, "Could not open the period");
-    return c.json(body, status);
-  }
-});
-
-// ── POST /marketplace/:slug/periods/:id/close ──────────────────────────────
-//
-// The contract lets anyone close an ended period. The API limits the button
-// to the operator and the period's beneficiaries, signing with their own
-// custodial key (no authorization is required on-chain, only a fee payer).
-
-rewards.post("/marketplace/:slug/periods/:id/close", async (c) => {
-  const user = await getSessionUser(c);
-  if (!user) return c.json({ error: "Sign in first" }, 401);
-  const periodId = Number(c.req.param("id"));
-  if (!Number.isInteger(periodId) || periodId < 0) return c.json({ error: "Invalid period" }, 400);
-
-  const marketplace = await prisma.marketplace.findUnique({
-    where: { slug: c.req.param("slug") },
-    select: { ...marketplaceSelect, operator: { select: { stellarSecretEncrypted: true } } },
-  });
-  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
-  const onChainId = boundOnChainId(marketplace);
-  if (!marketplace.rewardsEnabled || onChainId === null) {
-    return c.json({ error: "Community Rewards is not enabled for this marketplace" }, 400);
-  }
-  if (!marketplace.operator.stellarSecretEncrypted) {
-    return c.json({ error: "Operator payment account missing" }, 409);
-  }
-
-  try {
-    const period = await getRewardsPeriod(onChainId, periodId);
-    const mine = userAddresses(user);
-    const allowed =
-      user.id === marketplace.operatorId || period.beneficiaries.some((b) => mine.includes(b));
-    if (!allowed) {
-      return c.json({ error: "Only the operator or a beneficiary can close this period" }, 403);
-    }
-    // close_period needs no authorization on-chain, only a fee payer: the
-    // marketplace's operator account pays, whoever clicked.
-    const { totalStroops, txHash } = await closeRewardsPeriod({
-      signerSecret: decryptSecret(marketplace.operator.stellarSecretEncrypted),
-      marketplaceId: onChainId,
-      periodId,
-    });
-    await prisma.rewardsPeriod.upsert({
-      where: {
-        marketplaceId_contractId_periodId: {
-          marketplaceId: marketplace.id,
-          contractId: stellarConfig.marketplaceContractId,
-          periodId,
-        },
-      },
-      update: { closeTxHash: txHash },
-      create: {
-        marketplaceId: marketplace.id,
-        contractId: stellarConfig.marketplaceContractId,
-        periodId,
-        closeTxHash: txHash,
-      },
-    });
-    return c.json({
-      periodId,
-      totalUsd: stroopsToUsd(totalStroops),
-      txHash,
-      verifyUrl: stellarExpertTxUrl(txHash),
-    });
-  } catch (error) {
-    const { body, status } = errorResponse(error, "Could not close the period");
+    const { body, status } = errorResponse(error, "Could not read the community fund from the contract");
     return c.json(body, status);
   }
 });
@@ -305,9 +104,11 @@ rewards.post("/marketplace/:slug/periods/:id/close", async (c) => {
 // ── POST /marketplace/:slug/periods/:id/claim ──────────────────────────────
 //
 // Claims for the session user only: the contract pays the address whose
-// authorization it checks. An own wallet signs in the browser (202 + the
-// transaction; POST /api/tx/:id submits it and calls completeClaim); a
-// custodial account is signed by the backend.
+// authorization it checks. The user may have taken part with their own
+// wallet and/or a custodial account; the first one with an unclaimed reward
+// is used. An own wallet signs in the browser (202 + the transaction; POST
+// /api/tx/:id submits it and calls completeClaim); a custodial account is
+// signed by the backend.
 
 /** Auxiliary record for the explorer link; the claim is already final on-chain. */
 async function recordClaim(params: {
@@ -318,28 +119,8 @@ async function recordClaim(params: {
   txHash: string;
 }) {
   try {
-    const periodRow = await prisma.rewardsPeriod.upsert({
-      where: {
-        marketplaceId_contractId_periodId: {
-          marketplaceId: params.marketplaceId,
-          contractId: stellarConfig.marketplaceContractId,
-          periodId: params.periodId,
-        },
-      },
-      update: {},
-      create: {
-        marketplaceId: params.marketplaceId,
-        contractId: stellarConfig.marketplaceContractId,
-        periodId: params.periodId,
-      },
-    });
     await prisma.rewardClaim.create({
-      data: {
-        periodRowId: periodRow.id,
-        memberAddress: params.memberAddress,
-        amountUsd: params.amountUsd,
-        txHash: params.txHash,
-      },
+      data: { ...params, contractId: stellarConfig.marketplaceContractId },
     });
   } catch (dbError) {
     console.error("[rewards] claim confirmed on-chain but not recorded:", params.txHash, dbError);
@@ -363,16 +144,30 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
   const onChainId = boundOnChainId(marketplace);
-  if (!marketplace.rewardsEnabled || onChainId === null) {
+  if (communityModeOf(marketplace) !== "rewards" || onChainId === null) {
     return c.json({ error: "Community Rewards is not enabled for this marketplace" }, 400);
   }
 
   try {
-    const period = await getRewardsPeriod(onChainId, periodId);
-    const notMember = () => c.json({ error: "You are not a beneficiary of this period." }, 403);
+    let ended = true;
+    let claimable: string | null = null;
+    for (const address of userAddresses(user)) {
+      const reward = await getReward(onChainId, periodId, address);
+      ended = reward.periodEnded;
+      if (reward.amountStroops > 0n && !reward.claimed) {
+        claimable = address;
+        break;
+      }
+    }
+    if (!ended) {
+      return c.json({ error: "This period hasn't ended yet; rewards can be claimed after it ends.", code: "PeriodNotEnded" }, 409);
+    }
+    if (!claimable) {
+      return c.json({ error: "You have no unclaimed reward in this period.", code: "NothingToClaim" }, 409);
+    }
 
-    // The user's own wallet is a member: they sign the claim themselves.
-    if (user.walletAddress && period.beneficiaries.includes(user.walletAddress)) {
+    // Their own wallet took part: they sign the claim themselves.
+    if (claimable === user.walletAddress) {
       if (!user.walletReadyAt) {
         return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
       }
@@ -389,16 +184,12 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
         hash: prepared.hash,
         context: { marketplaceId: marketplace.id, periodId },
       });
-      return c.json(signatureRequest(pending, `Claim your period #${periodId} reward`), 202);
+      return c.json(signatureRequest(pending, `Claim your period #${periodId + 1} reward`), 202);
     }
 
-    // Custodial member: the backend signs with the key it holds.
-    if (
-      !user.stellarPublicKey ||
-      !user.stellarSecretEncrypted ||
-      !period.beneficiaries.includes(user.stellarPublicKey)
-    ) {
-      return notMember();
+    // Custodial account: the backend signs with the key it holds.
+    if (claimable !== user.stellarPublicKey || !user.stellarSecretEncrypted) {
+      return c.json({ error: "This reward belongs to an account you can't sign for here." }, 403);
     }
     const { amountStroops, txHash } = await claimReward({
       memberSecret: decryptSecret(user.stellarSecretEncrypted),
@@ -409,7 +200,7 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
     await recordClaim({
       marketplaceId: marketplace.id,
       periodId,
-      memberAddress: user.stellarPublicKey,
+      memberAddress: claimable,
       amountUsd,
       txHash,
     });
@@ -437,27 +228,57 @@ export async function completeClaim(
   return { periodId: context.periodId, amountUsd, verifyUrl: stellarExpertTxUrl(result.txHash) };
 }
 
+// ── POST /marketplace/:slug/fundraise/release ──────────────────────────────
+//
+// Normally the API releases a round right after the sale that reached the
+// target; this is the manual fallback. The contract lets anyone release, so
+// any signed-in user may press the button.
+
+rewards.post("/marketplace/:slug/fundraise/release", async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Sign in first" }, 401);
+  const marketplace = await prisma.marketplace.findUnique({
+    where: { slug: c.req.param("slug") },
+    select: marketplaceSelect,
+  });
+  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+  if (communityModeOf(marketplace) !== "fundraise" || boundOnChainId(marketplace) === null) {
+    return c.json({ error: "This marketplace has no fundraising target" }, 400);
+  }
+  try {
+    const released = await releaseIfReached(marketplace);
+    if (!released) {
+      return c.json({ error: "The fundraising target hasn't been reached yet.", code: "GoalNotReached" }, 409);
+    }
+    return c.json({ ...released, verifyUrl: stellarExpertTxUrl(released.txHash) });
+  } catch (error) {
+    const { body, status } = errorResponse(error, "Could not release the funds");
+    return c.json(body, status);
+  }
+});
+
 // ── POST /marketplace/:slug/guarantees — "try to break it" demo ───────────
 //
-// Body: { kind: "change-rules" | "withdraw" }. Evaluates the forbidden action
-// with the operator's identity against the live contract (simulation with
-// enforced auth — exactly what the network would execute) and reports the
-// rejection. Nothing is submitted.
+// Body: { kind: "claim-for-someone" | "withdraw" }. Evaluates the forbidden
+// action with the operator's identity against the live contract (simulation
+// with enforced auth — exactly what the network would execute) and reports
+// the rejection. Nothing is submitted.
 
 rewards.post("/marketplace/:slug/guarantees", async (c) => {
   const user = await getSessionUser(c);
   if (!user) return c.json({ error: "Sign in as the operator" }, 401);
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug: c.req.param("slug") },
-    include: { operator: { select: { stellarPublicKey: true } } },
+    select: { ...marketplaceSelect, operator: { select: { stellarPublicKey: true } } },
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
   if (marketplace.operatorId !== user.id) {
     return c.json({ error: "Only the marketplace operator can run these checks" }, 403);
   }
+  const mode = communityModeOf(marketplace);
   const onChainId = boundOnChainId(marketplace);
-  if (!marketplace.rewardsEnabled || onChainId === null || !marketplace.operator.stellarPublicKey) {
-    return c.json({ error: "Community Rewards is not enabled for this marketplace" }, 400);
+  if (mode === "classic" || onChainId === null || !marketplace.operator.stellarPublicKey) {
+    return c.json({ error: "This marketplace has no protected community fund" }, 400);
   }
 
   let body: unknown;
@@ -467,31 +288,38 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
     return c.json({ error: "Invalid JSON" }, 400);
   }
   const kind = (body as Record<string, unknown> | null)?.kind;
-  if (kind !== "change-rules" && kind !== "withdraw") {
+  if (kind !== "claim-for-someone" && kind !== "withdraw") {
     return c.json({ error: "Unknown check" }, 400);
+  }
+  if (kind === "claim-for-someone" && mode !== "rewards") {
+    return c.json({ kind, applicable: false, message: "Only rewards marketplaces have claims." });
   }
 
   try {
-    const status = await getRewardsStatus(onChainId);
-    if (kind === "change-rules") {
-      // Without a running period, opening a new one is the normal, allowed
-      // flow — there are no committed rules to change.
-      const latest =
-        status.periodCount > 0 ? await getRewardsPeriod(onChainId, status.periodCount - 1) : null;
-      if (!latest || status.ledgerTime >= latest.endTs) {
-        return c.json({
-          kind,
-          applicable: false,
-          message: "No period is running, so there are no committed rules to change. Open a period first.",
-        });
-      }
+    let held: bigint;
+    let participant: string | undefined;
+    let periodId: number | undefined;
+    if (mode === "rewards") {
+      const status = await getRewardsStatus(onChainId);
+      held = status.totalContributedStroops - status.totalClaimedStroops;
+      // Try a real participant of the latest ended period when there is one.
+      periodId = Math.max(0, status.currentPeriod - 1);
+      const sale = await prisma.sale.findFirst({
+        where: { product: { marketplaceId: marketplace.id } },
+        orderBy: { createdAt: "desc" },
+        select: { splitSnapshot: true },
+      });
+      participant = sale ? parseSplitSnapshot(sale.splitSnapshot).buyerAddress : undefined;
+    } else {
+      held = (await getFundraise(onChainId)).raisedStroops;
     }
-    const held = status.totalContributedStroops - status.totalClaimedStroops;
     const result = await simulateForbiddenAction({
       kind,
       operatorPublicKey: marketplace.operator.stellarPublicKey,
       marketplaceId: onChainId,
       amountStroops: held > 0n ? held : usdToStroops(1),
+      participant,
+      periodId,
     });
     return c.json({ kind, applicable: true, ...result });
   } catch (error) {
@@ -502,9 +330,8 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
 
 // ── GET /me — the session user's rewards ───────────────────────────────────
 //
-// Scans every rewards-enabled marketplace's recent periods on-chain for the
-// user's address. Fine at demo scale; a production version would index the
-// contract's p_open events instead.
+// Finds the rewards periods the user took part in from their recorded sales
+// and purchases, then reads each reward from the contract.
 
 rewards.get("/me", async (c) => {
   const user = await getSessionUser(c);
@@ -513,47 +340,99 @@ rewards.get("/me", async (c) => {
   if (mine.length === 0) return c.json({ address: null, marketplaces: [] });
   const address = viewerAddressOf(user);
 
-  const candidates = await prisma.marketplace.findMany({
+  const sales = await prisma.sale.findMany({
     where: {
-      rewardsEnabled: true,
-      contractId: stellarConfig.marketplaceContractId,
-      contractMarketplaceId: { not: null },
+      OR: [{ buyerId: user.id }, { product: { vendorId: user.id } }],
+      product: {
+        marketplace: {
+          communityMode: "rewards",
+          contractId: stellarConfig.marketplaceContractId,
+          contractMarketplaceId: { not: null },
+        },
+      },
     },
-    select: marketplaceSelect,
+    select: {
+      amountUsd: true,
+      splitSnapshot: true,
+      product: { select: { marketplace: { select: marketplaceSelect } } },
+    },
     orderBy: { createdAt: "desc" },
-    take: 25,
+    take: 1_000,
   });
 
+  // (marketplace, period) → which of the user's addresses took part, and how.
+  type Entry = { sold: number; bought: number; addresses: Set<string> };
+  const byMarketplace = new Map<string, { marketplace: (typeof sales)[number]["product"]["marketplace"]; periods: Map<number, Entry> }>();
+  for (const sale of sales) {
+    let snapshot;
+    try {
+      snapshot = parseSplitSnapshot(sale.splitSnapshot);
+    } catch {
+      continue;
+    }
+    const k = snapshot.rewardsPeriodId;
+    if (k === undefined || k === null) continue;
+    const m = sale.product.marketplace;
+    const group = byMarketplace.get(m.id) ?? { marketplace: m, periods: new Map<number, Entry>() };
+    const entry = group.periods.get(k) ?? { sold: 0, bought: 0, addresses: new Set<string>() };
+    if (snapshot.vendorAddress && mine.includes(snapshot.vendorAddress)) {
+      entry.sold += sale.amountUsd;
+      entry.addresses.add(snapshot.vendorAddress);
+    }
+    if (snapshot.buyerAddress && mine.includes(snapshot.buyerAddress)) {
+      entry.bought += sale.amountUsd;
+      entry.addresses.add(snapshot.buyerAddress);
+    }
+    if (entry.addresses.size > 0) group.periods.set(k, entry);
+    byMarketplace.set(m.id, group);
+  }
+
   try {
-    const views = await Promise.all(
-      candidates.map(async (m) => ({ marketplace: m, view: await loadRewardsView(m) })),
+    const marketplaces = await Promise.all(
+      [...byMarketplace.values()]
+        .filter((g) => g.periods.size > 0)
+        .map(async ({ marketplace, periods }) => {
+          const onChainId = BigInt(marketplace.contractMarketplaceId as string);
+          const [status, claims] = await Promise.all([
+            getRewardsStatus(onChainId),
+            prisma.rewardClaim.findMany({
+              where: { marketplaceId: marketplace.id, contractId: stellarConfig.marketplaceContractId },
+            }),
+          ]);
+          const ids = [...periods.keys()].sort((a, b) => b - a).slice(0, PERIOD_HISTORY_LIMIT);
+          const rows = await Promise.all(
+            ids.map(async (k) => {
+              const entry = periods.get(k) as Entry;
+              const rewards = await Promise.all(
+                [...entry.addresses].map(async (a) => ({ address: a, reward: await getReward(onChainId, k, a) })),
+              );
+              const amount = rewards.reduce((sum, r) => sum + r.reward.amountStroops, 0n);
+              const unclaimed = rewards.some((r) => r.reward.amountStroops > 0n && !r.reward.claimed);
+              const startTs = status.startTs + k * status.periodSeconds;
+              const claimTx = claims.find((cl) => cl.periodId === k && entry.addresses.has(cl.memberAddress));
+              return {
+                periodId: k,
+                startTs,
+                endTs: startTs + status.periodSeconds,
+                status: k < status.currentPeriod ? "ended" : "current",
+                soldUsd: Math.round(entry.sold * 100) / 100,
+                boughtUsd: Math.round(entry.bought * 100) / 100,
+                amountUsd: stroopsToUsd(amount),
+                claimed: amount > 0n && !unclaimed,
+                claimTxHash: claimTx?.txHash ?? null,
+              };
+            }),
+          );
+          return {
+            name: marketplace.name,
+            slug: marketplace.slug,
+            ledgerTime: status.ledgerTime,
+            vendorPoolBps: status.vendorPoolBps,
+            buyerPoolBps: status.buyerPoolBps,
+            periods: rows,
+          };
+        }),
     );
-    const marketplaces = views
-      .map(({ marketplace, view }) => ({
-        name: marketplace.name,
-        slug: marketplace.slug,
-        ledgerTime: view.ledgerTime,
-        periods: view.periods
-          .map((p) => {
-            const member = p.beneficiaries.find((b) => mine.includes(b.address));
-            if (!member) return null;
-            return {
-              periodId: p.periodId,
-              startTs: p.startTs,
-              endTs: p.endTs,
-              status: p.status,
-              totalUsd: p.totalUsd,
-              shareBps: member.shareBps,
-              projectedUsd: member.projectedUsd,
-              amountUsd: member.amountUsd,
-              claimed: member.claimed,
-              claimTxHash: member.claimTxHash,
-              closeTxHash: p.closeTxHash,
-            };
-          })
-          .filter((p) => p !== null),
-      }))
-      .filter((m) => m.periods.length > 0);
     return c.json({ address, historyLimit: PERIOD_HISTORY_LIMIT, marketplaces });
   } catch (error) {
     const { body, status } = errorResponse(error, "Could not read rewards from the contract");

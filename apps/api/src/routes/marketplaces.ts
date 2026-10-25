@@ -11,20 +11,28 @@ import { Hono } from "hono";
 
 import { prisma, parseSplitSnapshot } from "@/lib/db";
 import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails } from "@/lib/community";
-import { boundOnChainId, loadRewardsView, PERIOD_HISTORY_LIMIT } from "@/lib/rewards";
+import { loadFundraiseView, parseFundraiseRecipients, type FundraiseRecipient } from "@/lib/fundraise";
+import { boundOnChainId, communityModeOf, loadRewardsView, PERIOD_HISTORY_LIMIT, type CommunityMode } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
 import { MARKETPLACE_SHARE_BPS, PLATFORM_FEE_BPS } from "@/lib/splits";
 import { getSessionUser } from "@/lib/session";
 import { ownWalletPending, personalWallet } from "@/lib/wallets";
 import {
   createCustodialAccount,
+  createFundraiseMarketplace,
   createMarketplace,
   createRewardsMarketplace,
   decryptSecret,
+  demoTrustlineState,
+  getRewardsStatus,
   getUsdBalance,
+  isTestnet,
+  isValidAccountAddress,
   registerVendor,
   stellarConfig,
   stellarExpertTxUrl,
+  usdToStroops,
+  type GoalPolicy,
 } from "@/lib/stellar";
 import { demoImpersonationEnabled } from "./demo";
 
@@ -41,16 +49,57 @@ interface LaunchInput extends CommunityDetails {
   operatorBps: number;
   communityBps: number;
   regenerativeEnabled: boolean;
-  rewardsEnabled: boolean;
+  communityMode: CommunityMode;
+  /** rewards only */
+  rewardsPeriodSeconds: number | null;
+  rewardsVendorPoolBps: number | null;
+  /** fundraise only (the target is communityGoalUsd) */
+  fundraisePolicy: GoalPolicy | null;
+  fundraiseRecipients: FundraiseRecipient[] | null;
 }
+
+const DAY = 24 * 60 * 60;
+/** Rewards period lengths offered in the wizard: monthly, quarterly, half-yearly, yearly. */
+export const REWARDS_PERIODS = [30 * DAY, 90 * DAY, 180 * DAY, 365 * DAY];
+/** Testnet-only short period, so a demo can show a whole period and its claims. */
+export const DEMO_REWARDS_PERIOD = 10 * 60;
+const GOAL_POLICIES: GoalPolicy[] = ["stop", "new-round", "direct"];
+const MAX_RECIPIENTS = 20; // mirrors the contract's MAX_RECIPIENTS
 
 /** Display name of where the community share goes. */
 export function communityFundLabel(m: {
-  rewardsEnabled: boolean;
+  communityMode: string;
   communityFund: { name: string } | null;
 }): string | null {
-  if (m.rewardsEnabled) return "Community Rewards treasury (on-chain)";
+  const mode = communityModeOf(m);
+  if (mode === "rewards") return "Community Rewards treasury (on-chain)";
+  if (mode === "fundraise") return "Fundraising fund (on-chain)";
   return m.communityFund?.name ?? null;
+}
+
+function parseRecipients(raw: unknown): FundraiseRecipient[] | string {
+  const rows = Array.isArray(raw) ? raw : [];
+  if (rows.length === 0) return "Add at least one wallet to receive the funds";
+  if (rows.length > MAX_RECIPIENTS) return `At most ${MAX_RECIPIENTS} recipient wallets`;
+  const recipients: FundraiseRecipient[] = [];
+  for (const row of rows) {
+    const r = (row ?? {}) as Record<string, unknown>;
+    const address = typeof r.address === "string" ? r.address.trim() : "";
+    const label = typeof r.label === "string" ? r.label.trim() : "";
+    const shareBps = Number(r.shareBps);
+    if (!isValidAccountAddress(address)) return `Invalid Stellar address: ${address.slice(0, 12) || "(empty)"}…`;
+    if (label.length < 2 || label.length > 80) return "Give each recipient a public name (2–80 characters)";
+    if (!Number.isInteger(shareBps) || shareBps < 1 || shareBps > 10_000) {
+      return "Each recipient's share must be between 0.01% and 100%";
+    }
+    recipients.push({ address, label, shareBps });
+  }
+  if (new Set(recipients.map((r) => r.address)).size !== recipients.length) {
+    return "Each wallet can only appear once";
+  }
+  const total = recipients.reduce((sum, r) => sum + r.shareBps, 0);
+  if (total !== 10_000) return `Recipient shares must add up to exactly 100% (got ${total / 100}%)`;
+  return recipients;
 }
 
 function parseInput(body: unknown): LaunchInput | string {
@@ -81,13 +130,40 @@ function parseInput(body: unknown): LaunchInput | string {
     return "Sellers, marketplace and community must add up to 98% (Compaki keeps a fixed 2%)";
   }
 
-  const rewardsEnabled = b.rewardsEnabled === true;
-  if (rewardsEnabled && communityBps === 0) {
-    return "Community Rewards needs a community share above 0%";
+  const communityMode: CommunityMode =
+    b.communityMode === "rewards" || b.communityMode === "fundraise" ? b.communityMode : "classic";
+  if (communityMode !== "classic" && communityBps === 0) {
+    return communityMode === "rewards"
+      ? "Community Rewards needs a community share above 0%"
+      : "Fundraising needs a community share above 0%";
   }
 
-  const community = parseCommunityDetails(b, communityBps > 0);
+  const community = parseCommunityDetails(b, communityBps > 0, communityBps > 0 && communityMode === "classic");
   if (typeof community === "string") return community;
+
+  let rewardsPeriodSeconds: number | null = null;
+  let rewardsVendorPoolBps: number | null = null;
+  let fundraisePolicy: GoalPolicy | null = null;
+  let fundraiseRecipients: FundraiseRecipient[] | null = null;
+  if (communityMode === "rewards") {
+    rewardsPeriodSeconds = Number(b.rewardsPeriodSeconds);
+    const allowed = isTestnet() ? [DEMO_REWARDS_PERIOD, ...REWARDS_PERIODS] : REWARDS_PERIODS;
+    if (!allowed.includes(rewardsPeriodSeconds)) return "Choose how often rewards are shared";
+    rewardsVendorPoolBps = Number(b.rewardsVendorPoolBps);
+    if (!Number.isInteger(rewardsVendorPoolBps) || rewardsVendorPoolBps < 0 || rewardsVendorPoolBps > 10_000) {
+      return "The sellers' and buyers' parts of the rewards must add up to 100%";
+    }
+  }
+  if (communityMode === "fundraise") {
+    if (community.communityGoalUsd === null) return "Set the fundraising target";
+    if (!GOAL_POLICIES.includes(b.fundraisePolicy as GoalPolicy)) {
+      return "Choose what happens when the target is reached";
+    }
+    fundraisePolicy = b.fundraisePolicy as GoalPolicy;
+    const recipients = parseRecipients(b.fundraiseRecipients);
+    if (typeof recipients === "string") return recipients;
+    fundraiseRecipients = recipients;
+  }
 
   return {
     name,
@@ -98,7 +174,11 @@ function parseInput(body: unknown): LaunchInput | string {
     operatorBps,
     communityBps,
     regenerativeEnabled: Boolean(b.regenerativeEnabled) || communityBps > 0,
-    rewardsEnabled,
+    communityMode,
+    rewardsPeriodSeconds,
+    rewardsVendorPoolBps,
+    fundraisePolicy,
+    fundraiseRecipients,
     ...community,
   };
 }
@@ -131,12 +211,17 @@ marketplaces.get("/:slug/community", async (c) => {
     }),
   ]);
   let rewards: Awaited<ReturnType<typeof loadRewardsView>> | null = null;
+  let fundraise: Awaited<ReturnType<typeof loadFundraiseView>> | null = null;
   let communityBalanceUsd: number | null = null;
   let verificationError: string | null = null;
+  const mode = communityModeOf(marketplace);
   try {
-    if (marketplace.rewardsEnabled) {
+    if (mode === "rewards") {
       rewards = await loadRewardsView(marketplace);
       if (!rewards.bound) verificationError = "This marketplace’s rewards fund is not connected yet. Verified amounts and recipients are unavailable.";
+    } else if (mode === "fundraise") {
+      fundraise = await loadFundraiseView(marketplace);
+      if (!fundraise.bound) verificationError = "This marketplace’s fundraising fund is not connected yet. Verified amounts and recipients are unavailable.";
     } else if (marketplace.splitCommunityBps > 0 && marketplace.communityFund?.stellarPublicKey) {
       communityBalanceUsd = await getUsdBalance(marketplace.communityFund.stellarPublicKey);
     }
@@ -148,7 +233,7 @@ marketplaces.get("/:slug/community", async (c) => {
     marketplace: {
       name: marketplace.name, slug: marketplace.slug,
       regenerativeEnabled: marketplace.regenerativeEnabled,
-      rewardsEnabled: marketplace.rewardsEnabled,
+      communityMode: mode,
       ...communityDetailsOf(marketplace),
       communityDetailsUpdatedAt: marketplace.communityDetailsUpdatedAt?.toISOString() ?? null,
       splits: { vendorBps: marketplace.splitVendorBps, operatorBps: marketplace.splitOperatorBps, communityBps: marketplace.splitCommunityBps },
@@ -160,6 +245,7 @@ marketplaces.get("/:slug/community", async (c) => {
     sales: summarizeCommunitySales(sales),
     communityBalanceUsd,
     rewards,
+    fundraise,
     verificationError,
     verifiedAt: new Date().toISOString(),
     historyLimit: PERIOD_HISTORY_LIMIT,
@@ -176,8 +262,11 @@ marketplaces.patch("/:slug/community", async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON" }, 400); }
   if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "Invalid payload" }, 400);
-  const details = parseCommunityDetails(body as Record<string, unknown>, marketplace.splitCommunityBps > 0);
+  const mode = communityModeOf(marketplace);
+  const details = parseCommunityDetails(body as Record<string, unknown>, marketplace.splitCommunityBps > 0, marketplace.splitCommunityBps > 0 && mode === "classic");
   if (typeof details === "string") return c.json({ error: details }, 400);
+  // A fundraising target is part of the contract rules: it can't be edited.
+  if (mode === "fundraise") details.communityGoalUsd = marketplace.communityGoalUsd;
   const updated = await prisma.marketplace.update({ where: { id: marketplace.id }, data: { ...details, communityDetailsUpdatedAt: new Date() } });
   return c.json({ community: communityDetailsOf(updated), updatedAt: updated.communityDetailsUpdatedAt?.toISOString() });
 });
@@ -218,7 +307,7 @@ marketplaces.get("/directory", async (c) => {
       description: m.description,
       category: m.category,
       regenerativeEnabled: m.regenerativeEnabled,
-      rewardsEnabled: m.rewardsEnabled,
+      communityMode: communityModeOf(m),
       splitCommunityBps: m.splitCommunityBps,
       communityFundName: communityFundLabel(m),
       productCount: m._count.products,
@@ -232,9 +321,10 @@ marketplaces.get("/directory", async (c) => {
 //
 // Streams progress as Server-Sent Events while it: provisions custodial
 // payment accounts (operator, plus a community fund account for classic
-// marketplaces), registers the marketplace on-chain (create_marketplace, or
-// create_rewards_marketplace when Community Rewards is on — the community
-// share is then held by the contract), and writes the DB records. Designed to be
+// marketplaces), registers the marketplace on-chain (create_marketplace,
+// create_rewards_marketplace or create_fundraise_marketplace — for the last
+// two the community share is held by the contract), and writes the DB
+// records. Designed to be
 // retried: every step reuses whatever a previous attempt already created
 // (operator by email, marketplace + fund by slug, on-chain id if present).
 
@@ -264,6 +354,18 @@ marketplaces.post("/", async (c) => {
   });
   if (existing && existing.operatorId !== sessionUser.id) {
     return c.json({ error: "That URL is already taken" }, 409);
+  }
+
+  // A release pays every recipient in one transaction, so each wallet must
+  // already accept the demo asset or the funds could never be released.
+  if (input.fundraiseRecipients) {
+    for (const r of input.fundraiseRecipients) {
+      const state = await demoTrustlineState(r.address);
+      if (state !== "ready") {
+        const why = state === "missing" ? "doesn't exist on Stellar testnet" : `doesn't accept ${stellarConfig.usdcCode} yet`;
+        return c.json({ error: `${r.label}'s wallet ${why}. Ask them to sign in to Compaki once with that wallet (or add a ${stellarConfig.usdcCode} trustline), then try again.` }, 400);
+      }
+    }
   }
 
   const operator = await prisma.user.update({
@@ -297,22 +399,30 @@ marketplaces.post("/", async (c) => {
         }
 
         // Marketplace row early (contract id null) so retries can resume.
-        // Once registered on-chain, the split and rewards mode are frozen
+        // Once registered on-chain, the split and community rules are frozen
         // there, so a re-submit must not change them off-chain either.
+        const { communityGoalUsd, ...details } = communityDetailsOf(input);
         const onChainFields = {
           splitVendorBps: input.vendorBps,
           splitOperatorBps: input.operatorBps,
           splitCommunityBps: input.communityBps,
           regenerativeEnabled: input.regenerativeEnabled,
-          rewardsEnabled: input.rewardsEnabled,
+          communityMode: input.communityMode,
+          rewardsPeriodSeconds: input.rewardsPeriodSeconds,
+          rewardsVendorPoolBps: input.rewardsVendorPoolBps,
+          fundraisePolicy: input.fundraisePolicy,
+          fundraiseRecipients: input.fundraiseRecipients ?? undefined,
+          ...(input.communityMode === "fundraise" ? { communityGoalUsd } : {}),
         };
+        const goalField = input.communityMode === "fundraise" ? {} : { communityGoalUsd };
         let marketplace = await prisma.marketplace.upsert({
           where: { slug: input.slug },
           update: {
             name: input.name,
             description: input.description,
             category: input.category,
-            ...communityDetailsOf(input),
+            ...details,
+            ...goalField,
             communityDetailsUpdatedAt: new Date(),
             ...(existing?.contractMarketplaceId ? {} : onChainFields),
           },
@@ -321,7 +431,8 @@ marketplaces.post("/", async (c) => {
             slug: input.slug,
             description: input.description,
             category: input.category,
-            ...communityDetailsOf(input),
+            ...details,
+            ...goalField,
             communityDetailsUpdatedAt: new Date(),
             ...onChainFields,
             operatorId: operatorUser.id,
@@ -329,9 +440,11 @@ marketplaces.post("/", async (c) => {
           include: { communityFund: true },
         });
 
-        // Rewards marketplaces need no fund account: the contract holds it.
+        // Rewards and fundraising marketplaces need no fund account: the
+        // contract holds the community share.
+        const mode = communityModeOf(marketplace);
         let fundUser = marketplace.communityFund;
-        if (!marketplace.rewardsEnabled && !fundUser?.stellarPublicKey) {
+        if (mode === "classic" && !fundUser?.stellarPublicKey) {
           const account = await createCustodialAccount();
           fundUser = fundUser
             ? await prisma.user.update({
@@ -373,8 +486,24 @@ marketplaces.post("/", async (c) => {
             communityBps: marketplace.splitCommunityBps,
           };
           let result;
-          if (marketplace.rewardsEnabled) {
-            result = await createRewardsMarketplace(split);
+          if (mode === "rewards") {
+            result = await createRewardsMarketplace({
+              ...split,
+              periodSeconds: marketplace.rewardsPeriodSeconds ?? REWARDS_PERIODS[0],
+              vendorPoolBps: marketplace.rewardsVendorPoolBps ?? 5_000,
+            });
+          } else if (mode === "fundraise") {
+            const recipients = parseFundraiseRecipients(marketplace.fundraiseRecipients);
+            if (!marketplace.communityGoalUsd || recipients.length === 0 || !marketplace.fundraisePolicy) {
+              throw new Error("Fundraising rules missing");
+            }
+            result = await createFundraiseMarketplace({
+              ...split,
+              targetStroops: usdToStroops(marketplace.communityGoalUsd),
+              recipients: recipients.map((r) => r.address),
+              sharesBps: recipients.map((r) => r.shareBps),
+              policy: marketplace.fundraisePolicy as GoalPolicy,
+            });
           } else {
             if (!fundUser?.stellarPublicKey) {
               throw new Error("Payment accounts missing after provisioning");
@@ -392,9 +521,15 @@ marketplaces.post("/", async (c) => {
 
         // ── 3. Store records ───────────────────────────────────────────
         stepStart("store");
+        // Periods are counted from the ledger time the contract recorded.
+        let rewardsStartAt = marketplace.rewardsStartAt;
+        if (mode === "rewards" && !rewardsStartAt && contractMarketplaceId) {
+          const status = await getRewardsStatus(BigInt(contractMarketplaceId));
+          rewardsStartAt = new Date(status.startTs * 1000);
+        }
         marketplace = await prisma.marketplace.update({
           where: { id: marketplace.id },
-          data: { contractMarketplaceId, createTxHash, contractId },
+          data: { contractMarketplaceId, createTxHash, contractId, rewardsStartAt },
           include: { communityFund: true },
         });
         stepDone("store");
@@ -468,7 +603,7 @@ marketplaces.get("/:slug/storefront", async (c) => {
       description: marketplace.description,
       category: marketplace.category,
       regenerativeEnabled: marketplace.regenerativeEnabled,
-      rewardsEnabled: marketplace.rewardsEnabled,
+      communityMode: communityModeOf(marketplace),
       splitCommunityBps: marketplace.splitCommunityBps,
       communityFundName: communityFundLabel(marketplace),
       ...communityDetailsOf(marketplace),
@@ -541,7 +676,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
     name: marketplace.name,
     slug: marketplace.slug,
     regenerativeEnabled: marketplace.regenerativeEnabled,
-    rewardsEnabled: marketplace.rewardsEnabled,
+    communityMode: communityModeOf(marketplace),
     demoImpersonation: demoImpersonationEnabled(),
     community: communityDetailsOf(marketplace),
     splits: {
@@ -551,9 +686,9 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       platformBps: PLATFORM_FEE_BPS,
     },
     operatorAccount: marketplace.operator.stellarPublicKey,
-    // Rewards marketplaces hold the community share in the contract; the
-    // Community Rewards tab reads that treasury from chain instead.
-    communityAccount: marketplace.rewardsEnabled
+    // Rewards and fundraising marketplaces hold the community share in the
+    // contract; their community tab reads that fund from chain instead.
+    communityAccount: communityModeOf(marketplace) !== "classic"
       ? null
       : marketplace.communityFund?.stellarPublicKey ?? null,
     stats: {

@@ -6,17 +6,23 @@ export interface CommunityDetails {
   communityGoalUsd: number | null;
 }
 
-export function parseCommunityDetails(body: Record<string, unknown>, required: boolean): CommunityDetails | string {
+/**
+ * `required`: the marketplace has a community share, so its purpose must be
+ * explained. `distributionRequired`: classic funds also need the organizer to
+ * explain how money is shared; rewards and fundraising rules are enforced by
+ * the contract and shown from it, so the text is optional there.
+ */
+export function parseCommunityDetails(body: Record<string, unknown>, required: boolean, distributionRequired = required): CommunityDetails | string {
   const limits = [
-    ["communityPurpose", "Community purpose", 20, 2000],
-    ["communityBeneficiaries", "Who benefits", 10, 2000],
-    ["communityDistribution", "Distribution explanation", 20, 4000],
+    ["communityPurpose", "Community purpose", 20, 2000, required],
+    ["communityBeneficiaries", "Who benefits", 10, 2000, required],
+    ["communityDistribution", "Distribution explanation", 20, 4000, distributionRequired],
   ] as const;
   const texts: Record<string, string> = {};
-  for (const [key, label, min, max] of limits) {
+  for (const [key, label, min, max, needed] of limits) {
     if (body[key] !== undefined && typeof body[key] !== "string") return `${label} must be text`;
     const value = typeof body[key] === "string" ? body[key].trim() : "";
-    if ((required && value.length < min) || value.length > max) return `${label} must be ${required ? min : 0}–${max} characters`;
+    if ((needed && value.length < min) || value.length > max) return `${label} must be ${needed ? min : 0}–${max} characters`;
     texts[key] = value;
   }
   const rawGoal = body.communityGoalUsd;

@@ -31,7 +31,7 @@ test("rejects incorrect field types and text beyond the documented limits", () =
   assert.equal(typeof parseCommunityDetails({ ...valid, communityDistribution: "a".repeat(4001) }, true), "string");
 });
 test("public profile edits cannot carry payment rules or recipient wallets", () => {
-  assert.deepEqual(parseCommunityDetails({ ...valid, splitCommunityBps: 9999, operatorId: "other", rewardsEnabled: false, beneficiaries: ["another wallet"] }, true), valid);
+  assert.deepEqual(parseCommunityDetails({ ...valid, splitCommunityBps: 9999, operatorId: "other", communityMode: "classic", beneficiaries: ["another wallet"] }, true), valid);
 });
 const sale = (amount: number, vendor: number, operator: number, community: number) => ({ amountUsd: amount, splitSnapshot: JSON.stringify({ vendorAmountUsd: vendor, operatorAmountUsd: operator, communityAmountUsd: community }) });
 test("accumulated contributions include the full supplied history, beyond the dashboard's 50 rows", () => {

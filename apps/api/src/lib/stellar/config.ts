@@ -61,6 +61,13 @@ export function stroopsToUsd(stroops: bigint): number {
 }
 
 /** True for a well-formed classic account address (G..., ed25519). */
+export const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
+
+/** True on Stellar testnet, where demo-only options (e.g. short rewards periods) are allowed. */
+export function isTestnet(): boolean {
+  return stellarConfig.networkPassphrase === TESTNET_PASSPHRASE;
+}
+
 export function isValidAccountAddress(value: string): boolean {
   return StrKey.isValidEd25519PublicKey(value);
 }

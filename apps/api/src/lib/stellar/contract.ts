@@ -37,19 +37,17 @@ export const CONTRACT_ERRORS: Record<number, string> = {
   5: "VendorNotRegistered",
   6: "InvalidAmount",
   7: "RewardsNotEnabled",
-  8: "InvalidBeneficiaries",
-  9: "NoActivePeriod",
+  8: "InvalidRecipients",
+  9: "InvalidRewardsConfig",
   10: "PeriodNotFound",
   11: "PeriodNotEnded",
-  12: "PeriodAlreadyClosed",
-  13: "PeriodNotClosed",
-  14: "NotBeneficiary",
-  15: "AlreadyClaimed",
-  16: "NothingToClaim",
-  17: "PeriodActive",
-  18: "InvalidPeriodEnd",
-  19: "Overflow",
-  20: "InvalidAddress",
+  12: "NothingToClaim",
+  13: "AlreadyClaimed",
+  14: "FundraiseNotEnabled",
+  15: "GoalNotReached",
+  16: "InvalidGoal",
+  17: "Overflow",
+  18: "InvalidAddress",
 };
 
 /**
@@ -354,13 +352,17 @@ export async function createMarketplace(params: {
 
 /**
  * Registers a Community Rewards marketplace: the community share of each
- * purchase stays in the contract treasury, booked per period.
+ * purchase stays in the contract and, per period of `periodSeconds` (counted
+ * from now), is shared between that period's vendors (`vendorPoolBps`) and
+ * buyers (the rest), in proportion to their sales and purchases.
  */
 export async function createRewardsMarketplace(params: {
   operatorSecret: string;
   vendorBps: number;
   operatorBps: number;
   communityBps: number;
+  periodSeconds: number;
+  vendorPoolBps: number;
 }): Promise<{ marketplaceId: bigint; txHash: string }> {
   const operator = Keypair.fromSecret(params.operatorSecret);
   const { txHash, returnValue } = await invokeContract(
@@ -370,11 +372,70 @@ export async function createRewardsMarketplace(params: {
       scU32(params.vendorBps),
       scU32(params.operatorBps),
       scU32(params.communityBps),
+      scU64(BigInt(params.periodSeconds)),
+      scU32(params.vendorPoolBps),
     ],
     operator,
   );
   if (!returnValue) {
     throw new Error("create_rewards_marketplace returned no value");
+  }
+  return { marketplaceId: scValToNative(returnValue) as bigint, txHash };
+}
+
+/** What a fundraiser does after a round reaches its target (contract `GoalPolicy`). */
+export type GoalPolicy = "stop" | "new-round" | "direct";
+
+const GOAL_POLICY_VARIANT: Record<GoalPolicy, string> = {
+  stop: "Stop",
+  "new-round": "NewRound",
+  direct: "Direct",
+};
+
+/** A unit enum variant is encoded as a vector holding its name. */
+function scGoalPolicy(policy: GoalPolicy): xdr.ScVal {
+  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(GOAL_POLICY_VARIANT[policy])]);
+}
+
+function goalPolicyOf(raw: unknown): GoalPolicy {
+  const name = Array.isArray(raw) ? raw[0] : raw;
+  const entry = Object.entries(GOAL_POLICY_VARIANT).find(([, variant]) => variant === name);
+  if (!entry) throw new Error(`Unknown goal policy ${String(name)}`);
+  return entry[0] as GoalPolicy;
+}
+
+/**
+ * Registers a fundraising marketplace: the community share of each purchase
+ * stays in the contract until a round raises `targetStroops`, then is
+ * released to `recipients` at `sharesBps` (summing to 10_000).
+ */
+export async function createFundraiseMarketplace(params: {
+  operatorSecret: string;
+  vendorBps: number;
+  operatorBps: number;
+  communityBps: number;
+  targetStroops: bigint;
+  recipients: string[];
+  sharesBps: number[];
+  policy: GoalPolicy;
+}): Promise<{ marketplaceId: bigint; txHash: string }> {
+  const operator = Keypair.fromSecret(params.operatorSecret);
+  const { txHash, returnValue } = await invokeContract(
+    "create_fundraise_marketplace",
+    [
+      scAddress(operator.publicKey()),
+      scU32(params.vendorBps),
+      scU32(params.operatorBps),
+      scU32(params.communityBps),
+      scI128(params.targetStroops),
+      xdr.ScVal.scvVec(params.recipients.map(scAddress)),
+      xdr.ScVal.scvVec(params.sharesBps.map(scU32)),
+      scGoalPolicy(params.policy),
+    ],
+    operator,
+  );
+  if (!returnValue) {
+    throw new Error("create_fundraise_marketplace returned no value");
   }
   return { marketplaceId: scValToNative(returnValue) as bigint, txHash };
 }
@@ -397,15 +458,14 @@ export async function registerVendor(params: {
 /**
  * Executes an atomic split purchase, signed by the buyer's custodial key.
  * `amountStroops` is the token amount with 7 decimals (see usdToStroops).
- * For rewards marketplaces `rewardsPeriodId` is the period the community
- * share was booked to; null for classic marketplaces.
+ * The receipt is what the contract actually paid (see PurchaseReceipt).
  */
 export async function purchase(params: {
   buyerSecret: string;
   marketplaceId: bigint;
   vendorPublicKey: string;
   amountStroops: bigint;
-}): Promise<{ txHash: string; rewardsPeriodId: number | null }> {
+}): Promise<{ txHash: string; receipt: PurchaseReceipt }> {
   const buyer = Keypair.fromSecret(params.buyerSecret);
   const { txHash, returnValue } = await invokeContract(
     "purchase",
@@ -417,12 +477,12 @@ export async function purchase(params: {
     ],
     buyer,
   );
-  return { txHash, rewardsPeriodId: purchasePeriodOf(returnValue) };
+  return { txHash, receipt: purchaseReceiptOf(returnValue) };
 }
 
 /**
  * Prepares a purchase for a buyer whose wallet signs in the browser. Submit
- * it with submitUserSignedXdr and decode the result with purchasePeriodOf.
+ * it with submitUserSignedXdr and decode the result with purchaseReceiptOf.
  */
 export async function preparePurchase(params: {
   buyerPublicKey: string;
@@ -447,10 +507,37 @@ export async function preparePurchase(params: {
   );
 }
 
-/** Rewards period a confirmed purchase was booked to (null for classic). */
-export function purchasePeriodOf(returnValue: xdr.ScVal | undefined): number | null {
-  const period = returnValue ? (scValToNative(returnValue) as number | null | undefined) : null;
-  return period ?? null;
+/** What a confirmed purchase paid, as returned by the contract. */
+export interface PurchaseReceipt {
+  vendorStroops: bigint;
+  operatorStroops: bigint;
+  /** 0 when a stopped fundraiser gave the community share to the vendor. */
+  communityStroops: bigint;
+  platformStroops: bigint;
+  /** Rewards marketplaces: the period the purchase was booked to. */
+  period: number | null;
+  /** Fundraising marketplaces: the round the community share was added to. */
+  round: number | null;
+}
+
+export function purchaseReceiptOf(returnValue: xdr.ScVal | undefined): PurchaseReceipt {
+  if (!returnValue) throw new Error("purchase returned no receipt");
+  const raw = scValToNative(returnValue) as {
+    vendor_amount: bigint;
+    operator_amount: bigint;
+    community_amount: bigint;
+    platform_amount: bigint;
+    period?: number | null;
+    round?: number | null;
+  };
+  return {
+    vendorStroops: BigInt(raw.vendor_amount),
+    operatorStroops: BigInt(raw.operator_amount),
+    communityStroops: BigInt(raw.community_amount),
+    platformStroops: BigInt(raw.platform_amount),
+    period: raw.period ?? null,
+    round: raw.round ?? null,
+  };
 }
 
 /** Read-only config lookup via simulation (no transaction submitted). */
@@ -476,79 +563,35 @@ export async function getMarketplace(
 // ── Community Rewards ──────────────────────────────────────────────────────
 
 export interface RewardsStatusOnChain {
-  periodCount: number;
+  startTs: number;
+  periodSeconds: number;
+  vendorPoolBps: number;
+  buyerPoolBps: number;
+  currentPeriod: number;
   totalContributedStroops: bigint;
   totalClaimedStroops: bigint;
   /** Ledger timestamp (seconds) the view was evaluated at. */
   ledgerTime: number;
 }
 
-export interface RewardsPeriodOnChain {
-  periodId: number;
-  startTs: number;
-  endTs: number;
-  beneficiaries: string[];
-  sharesBps: number[];
-  totalContributedStroops: bigint;
+export interface PeriodTotalsOnChain {
+  vendorPoolStroops: bigint;
+  buyerPoolStroops: bigint;
+  vendorVolumeStroops: bigint;
+  buyerVolumeStroops: bigint;
   totalClaimedStroops: bigint;
-  closed: boolean;
 }
 
-export interface EntitlementOnChain {
-  member: string;
-  shareBps: number;
+export interface RewardOnChain {
+  vendorVolumeStroops: bigint;
+  buyerVolumeStroops: bigint;
+  /** Final once the period ended; a running estimate before that. */
   amountStroops: bigint;
+  periodEnded: boolean;
   claimed: boolean;
 }
 
-/**
- * Opens the next rewards period (operator-signed). Shares are basis points
- * parallel to `beneficiaries`; `endTs` is a ledger timestamp in seconds.
- */
-export async function openRewardsPeriod(params: {
-  operatorSecret: string;
-  marketplaceId: bigint;
-  beneficiaries: string[];
-  sharesBps: number[];
-  endTs: number;
-}): Promise<{ periodId: number; txHash: string }> {
-  const operator = Keypair.fromSecret(params.operatorSecret);
-  const { txHash, returnValue } = await invokeContract(
-    "open_period",
-    [
-      scU64(params.marketplaceId),
-      xdr.ScVal.scvVec(params.beneficiaries.map(scAddress)),
-      xdr.ScVal.scvVec(params.sharesBps.map(scU32)),
-      scU64(BigInt(params.endTs)),
-    ],
-    operator,
-  );
-  if (!returnValue) throw new Error("open_period returned no value");
-  return { periodId: scValToNative(returnValue) as number, txHash };
-}
-
-/**
- * Closes an ended period. The contract requires no authorization, so any
- * funded account may sign (the API uses the operator's).
- */
-export async function closeRewardsPeriod(params: {
-  signerSecret: string;
-  marketplaceId: bigint;
-  periodId: number;
-}): Promise<{ totalStroops: bigint; txHash: string }> {
-  const signer = Keypair.fromSecret(params.signerSecret);
-  const { txHash, returnValue } = await invokeContract(
-    "close_period",
-    [scU64(params.marketplaceId), scU32(params.periodId)],
-    signer,
-  );
-  return {
-    totalStroops: returnValue ? BigInt(scValToNative(returnValue) as bigint) : 0n,
-    txHash,
-  };
-}
-
-/** Claims a member's entitlement, signed by the member's own key. */
+/** Claims a participant's reward, signed by the participant's own key. */
 export async function claimReward(params: {
   memberSecret: string;
   marketplaceId: bigint;
@@ -560,13 +603,10 @@ export async function claimReward(params: {
     [scU64(params.marketplaceId), scU32(params.periodId), scAddress(member.publicKey())],
     member,
   );
-  return {
-    amountStroops: returnValue ? BigInt(scValToNative(returnValue) as bigint) : 0n,
-    txHash,
-  };
+  return { amountStroops: i128Of(returnValue), txHash };
 }
 
-/** Prepares a claim for a member whose wallet signs in the browser. */
+/** Prepares a claim for a participant whose wallet signs in the browser. */
 export async function prepareClaim(params: {
   memberPublicKey: string;
   marketplaceId: bigint;
@@ -584,69 +624,135 @@ export async function prepareClaim(params: {
   );
 }
 
-/** Decodes an i128 contract return value (claim amount, close total). */
+/** Decodes an i128 contract return value (claim or release amount). */
 export function i128Of(returnValue: xdr.ScVal | undefined): bigint {
   return returnValue ? BigInt(scValToNative(returnValue) as bigint) : 0n;
 }
 
 export async function getRewardsStatus(marketplaceId: bigint): Promise<RewardsStatusOnChain> {
   const raw = (await simulateContract("rewards_status", [scU64(marketplaceId)])) as {
-    period_count: number;
+    start_ts: bigint;
+    period_seconds: bigint;
+    vendor_pool_bps: number;
+    buyer_pool_bps: number;
+    current_period: number;
     total_contributed: bigint;
     total_claimed: bigint;
     now: bigint;
   };
   return {
-    periodCount: raw.period_count,
+    startTs: Number(raw.start_ts),
+    periodSeconds: Number(raw.period_seconds),
+    vendorPoolBps: Number(raw.vendor_pool_bps),
+    buyerPoolBps: Number(raw.buyer_pool_bps),
+    currentPeriod: Number(raw.current_period),
     totalContributedStroops: BigInt(raw.total_contributed),
     totalClaimedStroops: BigInt(raw.total_claimed),
     ledgerTime: Number(raw.now),
   };
 }
 
-export async function getRewardsPeriod(
+export async function getPeriodTotals(
   marketplaceId: bigint,
   periodId: number,
-): Promise<RewardsPeriodOnChain> {
-  const raw = (await simulateContract("get_period", [
-    scU64(marketplaceId),
-    scU32(periodId),
-  ])) as {
-    start_ts: bigint;
-    end_ts: bigint;
-    beneficiaries: string[];
-    shares_bps: number[];
-    total_contributed: bigint;
+): Promise<PeriodTotalsOnChain> {
+  const raw = (await simulateContract("get_period", [scU64(marketplaceId), scU32(periodId)])) as {
+    vendor_pool: bigint;
+    buyer_pool: bigint;
+    vendor_volume: bigint;
+    buyer_volume: bigint;
     total_claimed: bigint;
-    closed: boolean;
   };
   return {
-    periodId,
-    startTs: Number(raw.start_ts),
-    endTs: Number(raw.end_ts),
-    beneficiaries: raw.beneficiaries,
-    sharesBps: raw.shares_bps.map(Number),
-    totalContributedStroops: BigInt(raw.total_contributed),
+    vendorPoolStroops: BigInt(raw.vendor_pool),
+    buyerPoolStroops: BigInt(raw.buyer_pool),
+    vendorVolumeStroops: BigInt(raw.vendor_volume),
+    buyerVolumeStroops: BigInt(raw.buyer_volume),
     totalClaimedStroops: BigInt(raw.total_claimed),
-    closed: raw.closed,
   };
 }
 
-/** Final entitlements of a closed period, in beneficiary order. */
-export async function getRewardsEntitlements(
+/** One address's reward for a period, as the contract computes it. */
+export async function getReward(
   marketplaceId: bigint,
   periodId: number,
-): Promise<EntitlementOnChain[]> {
-  const raw = (await simulateContract("get_entitlements", [
+  member: string,
+): Promise<RewardOnChain> {
+  const raw = (await simulateContract("get_reward", [
     scU64(marketplaceId),
     scU32(periodId),
-  ])) as { member: string; share_bps: number; amount: bigint; claimed: boolean }[];
-  return raw.map((e) => ({
-    member: e.member,
-    shareBps: Number(e.share_bps),
-    amountStroops: BigInt(e.amount),
-    claimed: e.claimed,
-  }));
+    scAddress(member),
+  ])) as {
+    vendor_volume: bigint;
+    buyer_volume: bigint;
+    amount: bigint;
+    period_ended: boolean;
+    claimed: boolean;
+  };
+  return {
+    vendorVolumeStroops: BigInt(raw.vendor_volume),
+    buyerVolumeStroops: BigInt(raw.buyer_volume),
+    amountStroops: BigInt(raw.amount),
+    periodEnded: raw.period_ended,
+    claimed: raw.claimed,
+  };
+}
+
+// ── Fundraising ────────────────────────────────────────────────────────────
+
+export interface FundraiseOnChain {
+  targetStroops: bigint;
+  recipients: string[];
+  sharesBps: number[];
+  policy: GoalPolicy;
+  round: number;
+  raisedStroops: bigint;
+  totalRaisedStroops: bigint;
+  totalReleasedStroops: bigint;
+  goalReached: boolean;
+}
+
+export async function getFundraise(marketplaceId: bigint): Promise<FundraiseOnChain> {
+  const raw = (await simulateContract("get_fundraise", [scU64(marketplaceId)])) as {
+    target: bigint;
+    recipients: string[];
+    shares_bps: number[];
+    policy: unknown;
+    round: number;
+    raised: bigint;
+    total_raised: bigint;
+    total_released: bigint;
+    goal_reached: boolean;
+  };
+  return {
+    targetStroops: BigInt(raw.target),
+    recipients: raw.recipients,
+    sharesBps: raw.shares_bps.map(Number),
+    policy: goalPolicyOf(raw.policy),
+    round: Number(raw.round),
+    raisedStroops: BigInt(raw.raised),
+    totalRaisedStroops: BigInt(raw.total_raised),
+    totalReleasedStroops: BigInt(raw.total_released),
+    goalReached: raw.goal_reached,
+  };
+}
+
+/**
+ * Releases a round that reached its target. The contract requires no
+ * authorization, so any funded account may submit it; the API pays the fee
+ * with the demo-asset issuer account.
+ */
+export async function releaseFundraise(params: {
+  signerSecret: string;
+  marketplaceId: bigint;
+}): Promise<{ amountStroops: bigint; txHash: string }> {
+  const signer = Keypair.fromSecret(params.signerSecret);
+  const { txHash, returnValue } = await invokeContract(
+    "release_fundraise",
+    [scU64(params.marketplaceId)],
+    signer,
+  );
+  return { amountStroops: i128Of(returnValue), txHash };
 }
 
 /**
@@ -709,18 +815,23 @@ export type ForbiddenActionResult =
  * rejection. Nothing is ever submitted. Each check first runs a positive
  * control through the same harness, so a rejection can't be an artefact of
  * the simulation setup.
- *   - "change-rules": while a period runs, the operator re-opens it sending
- *     100% to a different address. Control: the operator's authorization is
- *     accepted (the contract gets past require_auth to its PeriodActive rule).
+ *   - "claim-for-someone": the operator signs a claim for a participant's
+ *     address (the payout would go to the participant, but the contract
+ *     requires the participant's own signature). Control:
+ *     the operator signing a claim for its OWN address passes authorization
+ *     (the contract then answers with its own rule, e.g. NothingToClaim).
  *   - "withdraw": the operator moves treasury tokens out of the contract via
  *     the token contract, bypassing the marketplace contract. Control: the
  *     same call moving the operator's OWN tokens is accepted.
  */
 export async function simulateForbiddenAction(params: {
-  kind: "change-rules" | "withdraw";
+  kind: "claim-for-someone" | "withdraw";
   operatorPublicKey: string;
   marketplaceId: bigint;
   amountStroops: bigint;
+  /** claim-for-someone: the participant and period to try. */
+  participant?: string;
+  periodId?: number;
 }): Promise<ForbiddenActionResult> {
   const attempt = async (run: () => Promise<void>) => {
     try {
@@ -732,19 +843,23 @@ export async function simulateForbiddenAction(params: {
     }
   };
 
-  if (params.kind === "change-rules") {
-    const outsider = Keypair.random().publicKey();
-    const reason = await attempt(() =>
-      simulateSignedBy(params.operatorPublicKey, stellarConfig.marketplaceContractId, "open_period", [
+  if (params.kind === "claim-for-someone") {
+    const periodId = params.periodId ?? 0;
+    const claimAs = (member: string) =>
+      simulateSignedBy(params.operatorPublicKey, stellarConfig.marketplaceContractId, "claim", [
         scU64(params.marketplaceId),
-        xdr.ScVal.scvVec([scAddress(outsider)]),
-        xdr.ScVal.scvVec([scU32(10_000)]),
-        scU64(BigInt(Math.floor(Date.now() / 1000) + 3_600)),
-      ]),
-    );
-    // A contract-level error (not "Unauthorized") means the operator's
-    // authorization was accepted and the contract's own rule said no.
-    const control = reason !== null && reason !== "Unauthorized" ? "operator auth accepted" : "n/a";
+        scU32(periodId),
+        scAddress(member),
+      ]);
+    // A contract-level error (not "Unauthorized") for its own address means
+    // the operator's authorization was accepted by the harness.
+    const controlReason = await attempt(() => claimAs(params.operatorPublicKey));
+    if (controlReason === "Unauthorized") {
+      throw new Error("claim check: positive control failed (Unauthorized)");
+    }
+    const participant = params.participant ?? Keypair.random().publicKey();
+    const reason = await attempt(() => claimAs(participant));
+    const control = "operator claiming for its own address: authorization accepted";
     return reason === null ? { rejected: false, control } : { rejected: true, reason, control };
   }
 

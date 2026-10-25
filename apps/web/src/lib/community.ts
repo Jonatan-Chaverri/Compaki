@@ -1,4 +1,4 @@
-import type { RewardsView } from "./rewards";
+import type { CommunityMode, FundraiseView, RewardsView } from "./rewards";
 
 export interface CommunityDetails {
   communityPurpose: string;
@@ -16,19 +16,29 @@ export const emptyCommunityDraft: CommunityDraft = { communityPurpose: "", commu
 export function communityDraft(details: CommunityDetails): CommunityDraft {
   return { ...details, communityGoalUsd: details.communityGoalUsd === null ? "" : String(details.communityGoalUsd) };
 }
-export function communityDraftValid(value: CommunityDraft): boolean {
-  const goal = Number(value.communityGoalUsd);
+export function goalValid(raw: string): boolean {
+  const goal = Number(raw);
+  return Number.isFinite(goal) && goal > 0 && goal <= 1_000_000_000 && Math.abs(goal * 100 - Math.round(goal * 100)) < 0.00001;
+}
+/**
+ * Classic funds need the organizer to explain how money is shared; rewards
+ * and fundraising rules are enforced by the contract, so that text is
+ * optional there, and a fundraiser's target is set (and validated) with its
+ * rules instead.
+ */
+export function communityDraftValid(value: CommunityDraft, mode: CommunityMode = "classic"): boolean {
+  const distribution = value.communityDistribution.trim().length;
   return value.communityPurpose.trim().length >= 20 && value.communityPurpose.trim().length <= 2000 &&
     value.communityBeneficiaries.trim().length >= 10 && value.communityBeneficiaries.trim().length <= 2000 &&
-    value.communityDistribution.trim().length >= 20 && value.communityDistribution.trim().length <= 4000 &&
-    (value.communityGoalUsd === "" || (Number.isFinite(goal) && goal > 0 && goal <= 1_000_000_000 && Math.abs(goal * 100 - Math.round(goal * 100)) < 0.00001));
+    (mode === "classic" ? distribution >= 20 : true) && distribution <= 4000 &&
+    (mode === "fundraise" || value.communityGoalUsd === "" || goalValid(value.communityGoalUsd));
 }
 export function communitySubmission(value: CommunityDraft): CommunityDetails {
   return { ...value, communityGoalUsd: value.communityGoalUsd === "" ? null : Number(value.communityGoalUsd) };
 }
 export interface CommunityPayload {
   marketplace: CommunityDetails & {
-    name: string; slug: string; regenerativeEnabled: boolean; rewardsEnabled: boolean;
+    name: string; slug: string; regenerativeEnabled: boolean; communityMode: CommunityMode;
     communityDetailsUpdatedAt: string | null;
     splits: { vendorBps: number; operatorBps: number; communityBps: number };
     operator: { name: string; address: string | null };
@@ -39,6 +49,7 @@ export interface CommunityPayload {
   sales: { salesCount: number; grossUsd: number; vendorUsd: number; operatorUsd: number; communityUsd: number; unclassifiedSales: number };
   communityBalanceUsd: number | null;
   rewards: RewardsView | null;
+  fundraise: FundraiseView | null;
   verificationError: string | null;
   verifiedAt: string;
   historyLimit: number;

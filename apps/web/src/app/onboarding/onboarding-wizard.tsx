@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CommunityFields } from "@/components/community-fields";
+import {
+  CommunityRulesFields,
+  communityRulesError,
+  communityRulesSubmission,
+  defaultCommunityRules,
+} from "@/components/community-rules";
 import { emptyCommunityDraft, communityDraftValid, communitySubmission } from "@/lib/community";
 import { AppHeader } from "@/components/shell";
 import { MarketArt } from "@/components/market-art";
@@ -70,8 +76,9 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
   // Step 2
   const [splits, setSplits] = useState<Splits>({ vendor: 93, operator: 5, community: 0 });
   const [regenerative, setRegenerative] = useState(false);
-  const [rewards, setRewards] = useState(false);
+  const [rules, setRules] = useState(defaultCommunityRules);
   const [community, setCommunity] = useState(emptyCommunityDraft);
+  const mode = regenerative ? rules.mode : "classic";
 
   // Step 3 (launch)
   const [launchStates, setLaunchStates] = useState<Record<LaunchStepId, LaunchStepState>>({
@@ -149,8 +156,8 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           operatorBps: splits.operator * 100,
           communityBps: splits.community * 100,
           regenerativeEnabled: regenerative,
-          rewardsEnabled: regenerative && rewards,
           ...communitySubmission(community),
+          ...communityRulesSubmission({ ...rules, mode }),
         }),
       });
 
@@ -192,7 +199,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
     } finally {
       launchInFlight.current = false;
     }
-  }, [name, slug, description, category, splits, regenerative, rewards, community]);
+  }, [name, slug, description, category, splits, regenerative, rules, mode, community]);
 
   const startLaunch = () => {
     setStep(2);
@@ -346,28 +353,15 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                   />
                 </label>
                 {regenerative && (
-                  <label className="mt-4 flex cursor-pointer items-start justify-between gap-4 border-t border-emerald-100 pt-4">
-                    <span>
-                      <span className="text-sm font-medium text-slate-900">
-                        Share community rewards with members
-                      </span>
-                      <span className="mt-1 block text-xs text-slate-600">
-                        Save the community contribution in a protected fund and share it with members you choose. Each period has fixed shares. You must open a rewards period before accepting sales. This choice is permanent after launch.
-                      </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={rewards}
-                      onChange={(e) => setRewards(e.target.checked)}
-                      className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600"
-                    />
-                  </label>
+                  <div className="mt-4 border-t border-emerald-100 pt-4">
+                    <CommunityRulesFields value={rules} onChange={setRules} communityPercent={splits.community} />
+                  </div>
                 )}
               </div>
-              {regenerative && <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/50 p-5"><CommunityFields value={community} onChange={setCommunity} rewardsEnabled={rewards} /></div>}
-              {regenerative && rewards && splits.community === 0 && (
+              {regenerative && <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/50 p-5"><CommunityFields value={community} onChange={setCommunity} mode={mode} /></div>}
+              {mode !== "classic" && splits.community === 0 && (
                 <p className="mt-2 text-xs text-amber-700">
-                  Community Rewards needs a community share above 0%.
+                  {mode === "rewards" ? "Community Rewards" : "Fundraising"} needs a community share above 0%.
                 </p>
               )}
 
@@ -384,7 +378,12 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                   </li>
                   {splits.community > 0 && (
                     <li>
-                      The community fund receives <strong className="text-slate-900">${splits.community.toFixed(2)}</strong>
+                      {mode === "rewards"
+                        ? "The rewards fund saves "
+                        : mode === "fundraise"
+                          ? "The fundraising fund saves "
+                          : "The community fund receives "}
+                      <strong className="text-slate-900">${splits.community.toFixed(2)}</strong>
                     </li>
                   )}
                   <li>
@@ -398,7 +397,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
               <div role="note" className="mt-3 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 <span aria-hidden>⚠</span>
                 <span>
-                  <strong>These percentages can&apos;t be changed after launch.</strong> They&apos;re written into the
+                  <strong>These percentages{mode !== "classic" ? " and community rules" : ""} can&apos;t be changed after launch.</strong> They&apos;re written into the
                   smart contract that pays out every sale{name ? ` at ${name}` : ""}. To use different ones later
                   you&apos;d need to launch a new marketplace.
                 </span>
@@ -407,7 +406,11 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 onBack={() => setStep(0)}
                 onNext={startLaunch}
                 nextLabel="Launch my marketplace"
-                nextDisabled={(regenerative && rewards && splits.community === 0) || (splits.community > 0 && !communityDraftValid(community))}
+                nextDisabled={
+                  (mode !== "classic" && splits.community === 0) ||
+                  (splits.community > 0 && !communityDraftValid(community, mode)) ||
+                  communityRulesError({ ...rules, mode }) !== null
+                }
               />
             </StepCard>
           )}

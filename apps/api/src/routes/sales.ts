@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 
 import { prisma, parseSplitSnapshot } from "@/lib/db";
+import { communityModeOf } from "@/lib/rewards";
 import { stellarExpertTxUrl } from "@/lib/stellar";
 
 export const sales = new Hono();
@@ -39,13 +40,28 @@ sales.get("/:id/receipt", async (c) => {
     return c.json({ error: "Receipt not found" }, 404);
   }
 
+  // A fundraiser that reached its target with the "stop" policy gives the
+  // community share of later sales to the vendor (the contract's receipt
+  // says so: community 0, no round).
+  const mode = communityModeOf(marketplace);
+  const stoppedFundraiser =
+    mode === "fundraise" && snapshot.communityBps > 0 && snapshot.communityAmountUsd === 0 && snapshot.fundraiseRound === null;
+  const communityRecipient =
+    snapshot.rewardsPeriodId !== undefined && snapshot.rewardsPeriodId !== null
+      ? `Community Rewards fund · period ${snapshot.rewardsPeriodId + 1}`
+      : snapshot.fundraiseRound !== undefined && snapshot.fundraiseRound !== null
+        ? `Fundraising fund · round ${snapshot.fundraiseRound + 1}`
+        : mode === "fundraise"
+          ? "Fundraising recipients (paid directly)"
+          : marketplace.communityFund?.name ?? "Community fund";
+
   const breakdown = [
     {
       key: "vendor",
       role: "Vendor",
       recipient: sale.product.vendor.name,
       amountUsd: snapshot.vendorAmountUsd,
-      percent: snapshot.vendorBps / 100,
+      percent: (snapshot.vendorBps + (stoppedFundraiser ? snapshot.communityBps : 0)) / 100,
     },
     {
       key: "marketplace",
@@ -65,15 +81,12 @@ sales.get("/:id/receipt", async (c) => {
           },
         ]
       : []),
-    ...(snapshot.communityBps > 0
+    ...(snapshot.communityBps > 0 && !stoppedFundraiser
       ? [
           {
             key: "community",
             role: "Community",
-            recipient:
-              snapshot.rewardsPeriodId !== undefined && snapshot.rewardsPeriodId !== null
-                ? `Community Rewards treasury · period #${snapshot.rewardsPeriodId}`
-                : marketplace.communityFund?.name ?? "Community fund",
+            recipient: communityRecipient,
             amountUsd: snapshot.communityAmountUsd,
             percent: snapshot.communityBps / 100,
           },
