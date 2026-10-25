@@ -54,3 +54,23 @@ export interface CommunityPayload {
   verifiedAt: string;
   historyLimit: number;
 }
+
+/** Keep money held now separate from lifetime contributions and the next period. */
+export function communityFundSummary(data: CommunityPayload) {
+  const mode = data.marketplace.communityMode;
+  const rewards = mode === "rewards" && data.rewards?.bound ? data.rewards : null;
+  const fundraise = mode === "fundraise" && data.fundraise?.bound ? data.fundraise : null;
+  const period = rewards?.periods.find(p => p.status === "current" && p.periodId === rewards.currentPeriod) ?? null;
+  const balanceUsd = mode === "rewards" ? rewards?.treasury?.heldUsd ?? null
+    : mode === "fundraise" ? fundraise ? Math.max(0, fundraise.totalRaisedUsd - fundraise.totalReleasedUsd) : null
+    : data.communityBalanceUsd;
+  const nextPoolUsd = period ? period.vendorPoolUsd + period.buyerPoolUsd : null;
+  return {
+    balanceUsd,
+    nextPoolUsd,
+    previousUnclaimedUsd: balanceUsd !== null && nextPoolUsd !== null ? Math.max(0, balanceUsd - nextPoolUsd) : null,
+    period,
+    rewards,
+    fundraise,
+  };
+}

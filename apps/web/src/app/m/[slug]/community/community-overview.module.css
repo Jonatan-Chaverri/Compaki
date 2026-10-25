@@ -1,0 +1,120 @@
+.page { width: 100%; max-width: 1120px; margin: 0 auto; padding: 26px 28px 80px; }
+.topline { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.topline > a { margin: 0; font-size: 11px; }
+.intro { text-align: center; max-width: 760px; margin: 25px auto 24px; }
+.intro h1 { margin: 14px 0 12px; font-size: clamp(28px, 3.2vw, 40px); font-weight: 550; letter-spacing: -1.4px; line-height: 1.2; text-wrap: balance; }
+.intro > p:last-child { color: var(--ink-muted); font-size: 13px; line-height: 1.8; }
+.fundHero { border: 1px solid var(--line-strong); border-radius: 26px; padding: 25px 40px 0; text-align: center; background: var(--feature-bg); color: var(--feature-ink); }
+.fundIcon { display: grid; place-items: center; width: 44px; height: 40px; margin: 0 auto 12px; color: var(--brand-yellow); border: 1px solid #f2c94c40; border-radius: 15px; background: #f2c94c0a; }
+.fundHero h2 { font-size: 13px; font-weight: 500; color: var(--feature-muted); }
+.balance { margin: 12px 0; font-size: clamp(44px, 6.6vw, 82px); font-weight: 550; line-height: 1.12; letter-spacing: -.05em; font-variant-numeric: tabular-nums; color: var(--brand-yellow); overflow-wrap: anywhere; }
+.balanceCaption { font-size: 12px; line-height: 1.8; max-width: 510px; margin: 0 auto; color: var(--feature-muted); }
+.zeroNote { margin-top: 8px; font-size: 11px; color: var(--feature-muted); }
+.nextDistribution { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 22px; padding: 18px 0; border-top: 1px solid #c4d2b52b; text-align: left; }
+.smallLabel { display: block; margin-bottom: 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--feature-muted); }
+.nextDistribution strong { display: block; font-size: 17px; font-weight: 500; letter-spacing: -.4px; }
+.nextDistribution p { color: var(--feature-muted); font-size: 11px; line-height: 1.7; margin-top: 5px; }
+.heroLink { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 12px; border: 1px solid #c4d2b545; border-radius: 10px; padding: 12px 15px; color: var(--feature-ink); font-size: 11px; font-weight: 500; }
+.heroLink:hover { border-color: var(--brand-yellow); color: var(--brand-yellow); }
+.pendingNote { text-align: left; border-top: 1px solid #c4d2b52b; padding: 14px 0 20px; font-size: 11px; line-height: 1.8; color: var(--feature-muted); }
+.update { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 14px 3px 30px; color: var(--ink-soft); font-size: 10px; }
+.update > span { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.update button { font-size: 10px; white-space: nowrap; }
+.purpose { padding: 28px 30px 20px; border: 1px solid var(--line); border-radius: 21px; background: var(--surface-card); }
+.sectionHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.sectionHeader h2 { font-size: 25px; font-weight: 550; letter-spacing: -.8px; line-height: 1.3; margin-top: 8px; }
+.sectionHeader > svg { color: var(--ink-soft); margin-top: 8px; flex-shrink: 0; }
+.sectionHeader p:not(:global(.eyebrow)) { margin-top: 10px; color: var(--ink-muted); font-size: 12px; line-height: 1.8; }
+.narratives { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 25px; }
+.narrative { min-width: 0; }
+.narrative h3 { font-size: 11px; font-weight: 550; color: var(--ink-soft); margin-bottom: 9px; }
+.narrative p { font-size: 15px; line-height: 1.85; white-space: pre-line; overflow-wrap: anywhere; }
+.organizerNote { margin-top: 23px; border-top: 1px solid var(--line); padding-top: 16px; font-size: 11px; }
+.organizerNote summary { cursor: pointer; font-weight: 500; }
+.organizerNote p { font-size: 13px; line-height: 1.85; margin-top: 15px; color: var(--ink-muted); white-space: pre-line; overflow-wrap: anywhere; }
+.organizerNote small { display: block; margin-top: 12px; font-size: 10px; color: var(--ink-soft); line-height: 1.8; }
+.byline { font-size: 9px; color: var(--ink-soft); margin-top: 20px; line-height: 1.8; }
+.section { margin: 40px 0; scroll-margin-top: 140px; }
+.recipientGrid { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 14px; margin-top: 22px; }
+.recipientGrid article { display: flex; align-items: flex-start; flex-direction: column; padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-card); }
+.recipientGrid article > svg { color: var(--ink-soft); width: 19px; height: 19px; margin-bottom: 16px; }
+.recipientGrid article > span { font-size: 11px; color: var(--ink-muted); }
+.recipientGrid strong { margin: 8px 0; font-size: 34px; font-weight: 550; letter-spacing: -1.2px; line-height: 1.25; }
+.recipientGrid p { font-size: 11px; line-height: 1.8; color: var(--ink-muted); }
+.recipientGrid .frequency { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line); }
+.frequency strong { font-size: 23px; letter-spacing: -.6px; color: var(--brand-yellow-ink); }
+.recipientActions { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; margin-top: 20px; }
+.recipientActions > span { color: var(--ink-soft); font-size: 11px; }
+.disclosure { border: 1px solid var(--line); border-radius: 14px; background: var(--surface-card); margin-top: 14px; font-size: 12px; }
+.disclosure > summary { padding: 19px 22px; cursor: pointer; font-weight: 500; }
+.disclosure[open] > summary { border-bottom: 1px solid var(--line); }
+.disclosure > summary:hover { color: var(--accent); }
+.count { display: inline-block; margin-left: 10px; padding: 2px 7px; border-radius: 6px; font-size: 10px; background: var(--surface-soft); color: var(--ink-muted); }
+.detailBody, .technical, .periods, .accountList { padding: 22px; }
+.period + .period { margin-top: 12px; }
+.period > summary { cursor: pointer; font-weight: 550; padding: 12px 0; font-size: 12px; }
+.period > summary > span { margin-left: 12px; color: var(--ink-muted); font-size: 10px; font-weight: 400; }
+.footnote, .technical p, .ruleNote { color: var(--ink-soft); font-size: 11px; line-height: 1.85; }
+.technical p + p, .periods > .footnote { margin-top: 15px; }
+.ruleNote { margin-top: 16px; }
+.warning { border: 1px solid var(--brand-yellow-line); border-radius: 12px; padding: 14px 18px; color: var(--status-warning); background: var(--surface-warm); margin-bottom: 20px; font-size: 12px; line-height: 1.8; }
+.unavailable, .classicRecipient { padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-card); margin-top: 20px; }
+.unavailable, .classicRecipient p { font-size: 12px; line-height: 1.8; color: var(--ink-muted); }
+.classicRecipient > h3 { margin: 13px 0; font-size: 17px; font-weight: 550; }
+.splitBar { display: flex; gap: 4px; height: 12px; border-radius: 5px; overflow: hidden; margin: 22px 0; }
+.splitBar > span { min-width: 0; flex-basis: 0; border-radius: 3px; }
+.sellerShare { background: var(--action); }
+.marketShare { background: var(--warm-accent); }
+.communityShare { background: var(--brand-yellow); }
+.platformShare { background: var(--ink-soft); }
+.splitLegend { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 0 0 24px; }
+.splitLegend > div { display: flex; align-items: flex-start; gap: 9px; }
+.splitLegend > div > span { width: 8px; height: 8px; border-radius: 3px; flex-shrink: 0; margin-top: 4px; }
+.splitLegend p { font-size: 11px; color: var(--ink-muted); }
+.splitLegend strong { display: block; margin-top: 8px; font-size: 21px; font-weight: 550; color: var(--ink); }
+.splitLegend small { display: block; margin-top: 3px; color: var(--ink-soft); font-size: 10px; }
+.accountList { display: grid; gap: 22px; font-size: 12px; }
+.accountList h3 { margin-bottom: 8px; font-weight: 550; }
+.accountList p { font-size: 11px; color: var(--ink-muted); line-height: 1.8; }
+.accountList strong { display: block; margin-top: 12px; font-weight: 500; }
+.history { margin-top: 20px; }
+.history > div { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.history > div:last-child { border-bottom: 0; }
+.history dt { color: var(--ink-muted); font-size: 11px; }
+.history dd { font-size: 13px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.goal { margin-top: 20px; border: 1px solid var(--line); border-radius: 18px; padding: 24px 28px; background: var(--surface-soft); }
+.goal > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; align-items: baseline; }
+.goal h2 { font-size: 13px; font-weight: 500; }
+.goal strong { font-size: 21px; font-weight: 550; }
+.goal strong span { font-size: 13px; color: var(--ink-muted); font-weight: 400; }
+.goal progress { width: 100%; height: 8px; appearance: none; border: 0; border-radius: 8px; overflow: hidden; background: var(--line); margin-top: 16px; }
+.goal progress::-webkit-progress-bar { background: var(--line); }
+.goal progress::-webkit-progress-value { background: var(--accent); border-radius: 8px; }
+.goal progress::-moz-progress-bar { background: var(--accent); }
+.goal > p { font-size: 10px; color: var(--ink-muted); line-height: 1.8; margin-top: 9px; }
+@media (max-width: 700px) {
+  .page { padding: 24px 20px 50px; }
+  .intro { margin: 30px auto 24px; }
+  .intro h1 { letter-spacing: -1px; }
+  .intro :global(.eyebrow) { font-size: 9px; }
+  .fundHero { padding: 28px 23px 0; border-radius: 22px; }
+  .nextDistribution { align-items: flex-start; flex-direction: column; gap: 18px; margin-top: 24px; }
+  .nextDistribution strong { font-size: 16px; }
+  .heroLink { width: 100%; }
+  .update { align-items: flex-start; margin-bottom: 25px; }
+  .purpose { padding: 23px; }
+  .narratives { grid-template-columns: 1fr; gap: 22px; }
+  .sectionHeader h2 { font-size: 22px; }
+  .recipientGrid { grid-template-columns: 1fr 1fr; gap: 11px; }
+  .recipientGrid article { padding: 20px; }
+  .recipientGrid .frequency { grid-column: 1 / -1; }
+  .recipientGrid .frequency > svg { display: none; }
+  .recipientActions > a { width: 100%; justify-content: center; }
+  .recipientActions { gap: 12px; }
+  .splitLegend { grid-template-columns: repeat(2, 1fr); gap: 22px; }
+  .detailBody, .technical, .periods, .accountList { padding: 16px; }
+  .disclosure > summary { padding: 18px; }
+  .history > div { gap: 12px; }
+  .goal { padding: 22px; }
+  .topline { align-items: flex-start; }
+}
