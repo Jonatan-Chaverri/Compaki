@@ -1293,6 +1293,22 @@
     "deletingMarketplace": "Eliminando marketplace…",
     "deleteMarketplaceFailed": "No se pudo eliminar el marketplace. Intenta de nuevo.",
     "deleteMarketplaceSignIn": "Tu sesión terminó. Vuelve a iniciar sesión para eliminar este marketplace.",
-    "deleteMarketplaceOwnerOnly": "Solo el propietario puede eliminar este marketplace."
+    "deleteMarketplaceOwnerOnly": "Solo el propietario puede eliminar este marketplace.",
+    "catalogFilters": "Filtrar productos",
+    "catalogProductName": "Nombre del producto",
+    "catalogSearchPlaceholder": "Buscar por nombre…",
+    "catalogPriceRange": "Precio (USD)",
+    "catalogPriceFrom": "Desde",
+    "catalogPriceTo": "Hasta",
+    "catalogNoPriceLimit": "Sin límite",
+    "catalogPriceReversed": "El precio máximo debe ser igual o mayor que el mínimo.",
+    "catalogPriceInvalid": "Usa precios válidos iguales o mayores que cero.",
+    "catalogSellerHint": "Puedes elegir varios vendedores. Sin selección, se muestran todos.",
+    "catalogShowResults": "Ver {count, plural, =0 {resultados} one {# producto} other {# productos}}",
+    "catalogActiveFilters": "{count, plural, one {# filtro activo} other {# filtros activos}}",
+    "catalogFixPriceTitle": "Revisa el rango de precios",
+    "catalogFixPriceHint": "Corrige los precios del filtro o límpialos para volver a ver los productos.",
+    "catalogNoResults": "No encontramos productos con esa combinación. Prueba otro nombre, rango de precio o vendedor.",
+    "catalogSellersEmpty": "Los vendedores aparecerán aquí cuando publiquen productos."
   }
 }

@@ -618,6 +618,7 @@ marketplaces.get("/:slug/storefront", async (c) => {
       priceUsd: p.priceUsd,
       stock: p.stock,
       imageUrl: p.imageUrl,
+      vendorId: p.vendorId,
       vendorName: p.vendor.name,
     })),
   });

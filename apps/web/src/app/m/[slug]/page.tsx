@@ -3,7 +3,6 @@ import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { Icon } from "@/components/icon";
 import styles from "./storefront-header.module.css";
-import { EmptyState } from "@/components/shell";
 import { notFound } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
@@ -58,11 +57,7 @@ export default async function StorefrontPage(props: { params: Promise<{ slug: st
         </div>}
       </header>
 
-      {products.length === 0 ? (
-        <div className="mt-8"><EmptyState icon="store" title={t("somethingGoodIsOnItsWay")} description={t("theSellersHereAreGettingTheirShelvesReadyComeBackSoon")} href="/marketplaces" action={t("exploreMarketplaces")} /></div>
-      ) : (
-        <ProductGrid slug={marketplace.slug} products={products} />
-      )}
+      <ProductGrid slug={marketplace.slug} products={products} />
     </main>
   );
 }
