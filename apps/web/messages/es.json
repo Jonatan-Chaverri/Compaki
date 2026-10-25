@@ -1234,6 +1234,7 @@
     "dashboardCatalogCount": "{count, plural, one {# producto publicado} other {# productos publicados}}",
     "dashboardSellerCount": "{count, plural, one {# vendedor en tu comunidad} other {# vendedores en tu comunidad}}",
     "dashboardFewerSales": "Mostrar menos ventas",
-    "dashboardMoreSales": "Mostrar las {count, number} ventas recientes"
+    "dashboardMoreSales": "Mostrar las {count, number} ventas recientes",
+    "currentLanguage": "Idioma: {language}"
   }
 }

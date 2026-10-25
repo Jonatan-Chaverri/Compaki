@@ -1,0 +1,53 @@
+/* Yellow is the brand's highlight color; green remains the main action color. */
+:root {
+  --brand-yellow: #f2c94c;
+  --brand-yellow-soft: #fff5cf;
+  --brand-yellow-ink: #6a5015;
+  --brand-yellow-line: #ddc16a;
+  --focus-ring: #c89926;
+}
+:root[data-theme="dark"] {
+  --brand-yellow-soft: #3a321c;
+  --brand-yellow-ink: #f5d67c;
+  --brand-yellow-line: #78662f;
+  --focus-ring: #f2c94c;
+}
+.brand-period { color: var(--brand-yellow); }
+.desktop-nav a[aria-current]::after { height: 3px; border-radius: 3px; background: var(--brand-yellow); }
+.mobile-nav a[aria-current] { color: var(--brand-yellow-ink); border-bottom-color: var(--brand-yellow-line); }
+.filter-chip[aria-pressed="true"], .dashboard-tabs button[aria-pressed="true"] {
+  color: var(--brand-yellow-ink); background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line);
+}
+.theme-options button[aria-checked="true"] { color: var(--brand-yellow-ink); background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line); box-shadow: inset 0 0 0 1px var(--brand-yellow-line); }
+.hero-tag { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line); color: var(--brand-yellow-ink); }
+.onboarding-categories label:has(:checked) { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line); }
+.onboarding-progress li[aria-current="step"] .onboarding-step-number { background: var(--brand-yellow); color: #263c30; border-color: var(--brand-yellow); }
+.header-inner { gap: 24px; }
+.header-actions { gap: 11px; }
+.account-toggle[aria-expanded="true"] { border-color: var(--brand-yellow-line); background: var(--brand-yellow-soft); }
+@media (max-width: 1120px) {
+  .desktop-nav { display: none; }
+  .mobile-nav-toggle { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; margin-left: auto; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); }
+  .header-actions { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .header-inner { gap: 7px; padding: 12px; }
+  .header-inner .brand-logo { font-size: 23px; gap: 4px; }
+  .header-inner .brand-logo img { width: 27px; height: 27px; }
+  .header-actions { gap: 6px; }
+  .header-actions .account-toggle { padding: 4px; min-width: 40px; min-height: 40px; }
+  .header-inner .mobile-nav-toggle { width: 36px; height: 40px; }
+  .login-header { padding-inline: 20px; }
+  .login-header-actions { gap: 8px; }
+  .login-browse { display: none; }
+  .onboarding-header > div { gap: 8px; }
+  .onboarding-exit { display: none; }
+  .onboarding-header .account-toggle { padding: 4px; }
+}
+@media (max-width: 380px) {
+  .header-inner { gap: 6px; }
+  .header-inner .brand-logo { font-size: 22px; }
+  .header-inner .brand-logo img { width: 25px; height: 25px; }
+  .header-actions { gap: 5px; }
+  .header-actions .account-toggle { min-width: 38px; }
+}

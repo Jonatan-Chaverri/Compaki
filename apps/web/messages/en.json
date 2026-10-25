@@ -1234,6 +1234,7 @@
     "dashboardCatalogCount": "{count, plural, one {# published product} other {# published products}}",
     "dashboardSellerCount": "{count, plural, one {# seller in your community} other {# sellers in your community}}",
     "dashboardFewerSales": "Show fewer sales",
-    "dashboardMoreSales": "Show {count, number} recent sales"
+    "dashboardMoreSales": "Show {count, number} recent sales",
+    "currentLanguage": "Language: {language}"
   }
 }

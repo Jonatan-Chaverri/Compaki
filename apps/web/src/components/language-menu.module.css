@@ -1,0 +1,21 @@
+.root { position: relative; flex: 0 0 auto; }
+.toggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-card); color: var(--ink); font-size: 11px; font-weight: 550; white-space: nowrap; cursor: pointer; transition: border-color .15s, background .15s; }
+.toggle:hover, .toggle[aria-expanded="true"] { border-color: var(--brand-yellow-line); background: var(--brand-yellow-soft); }
+.flag { flex-shrink: 0; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 19px; font-weight: 400; line-height: 1.2; }
+.chevron { width: 11px; height: 11px; margin-left: 1px; transform: rotate(90deg); opacity: .6; }
+.toggle[aria-expanded="true"] .chevron { transform: rotate(-90deg); }
+.menu { position: absolute; top: calc(100% + 10px); right: 0; z-index: 65; width: 225px; max-width: calc(100vw - 32px); padding: 8px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-raised); box-shadow: 0 12px 32px var(--shadow); }
+.heading { padding: 6px 9px 10px; color: var(--ink-soft); font-size: 10px; font-weight: 550; letter-spacing: .07em; text-transform: uppercase; }
+.menu > button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 45px; padding: 10px; border: 1px solid transparent; border-radius: 10px; color: var(--ink); font-size: 12px; cursor: pointer; text-align: left; }
+.menu > button + button { margin-top: 4px; }
+.menu > button:hover { background: var(--surface-soft); }
+.menu > button[aria-checked="true"] { border-color: var(--brand-yellow-line); background: var(--brand-yellow-soft); color: var(--brand-yellow-ink); font-weight: 600; }
+.menu > button:disabled { cursor: wait; opacity: .65; }
+.code { margin-left: auto; color: var(--ink-soft); font-size: 9px; font-weight: 500; }
+.check { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: var(--brand-yellow); color: #263c30; }
+.status { padding: 10px; color: var(--ink-muted); font-size: 11px; line-height: 1.6; }
+.spinner { width: 11px; height: 11px; border: 1.5px solid var(--line-strong); border-top-color: var(--ink); border-radius: 50%; animation: language-spin .8s linear infinite; }
+.srOnly { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+@keyframes language-spin { to { transform: rotate(360deg); } }
+@media (max-width: 640px) { .toggle { min-height: 38px; padding: 8px; gap: 5px; font-size: 10px; } .flag { font-size: 18px; } .menu .flag { font-size: 21px; } .menu { right: -5px; } }
+@media (prefers-reduced-motion: reduce) { .toggle { transition: none; } .spinner { animation: none; } }

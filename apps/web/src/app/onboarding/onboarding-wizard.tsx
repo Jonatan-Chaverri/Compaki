@@ -21,6 +21,7 @@ import {
 import { Icon } from "@/components/icon";
 import { MarketArt } from "@/components/market-art";
 import { DemoNotice, Logo } from "@/components/shell";
+import { LanguageMenu } from "@/components/language-menu";
 import { UserMenu } from "@/components/user-menu";
 import {
   emptyCommunityDraft,
@@ -357,6 +358,7 @@ const STEP_COPY = [
         <div>
           <Link href="/marketplaces" className="onboarding-exit">
             {t("backToMarketplaces")}</Link>
+          <LanguageMenu />
           <UserMenu />
         </div>
       </header>

@@ -3,6 +3,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./brand-accents.css";
 import { CompakiCavosProvider } from "@/components/cavos-provider";
 import { AppFooter } from "@/components/shell";
 import { LocalizedValidation } from "@/components/localized-validation";

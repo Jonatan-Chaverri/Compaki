@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { AppNavigation } from "./app-navigation";
 import { Icon } from "./icon";
+import { LanguageMenu } from "./language-menu";
 import { UserMenu } from "./user-menu";
 
 export function Logo() {
@@ -24,7 +25,7 @@ export function AppHeader({ right }: { right?: React.ReactNode }) {
       <div className="header-inner">
         <Link href="/" aria-label={t("compakiHome")} className="shrink-0"><Logo /></Link>
         <AppNavigation />
-        <div className="header-actions">{right}<UserMenu /></div>
+        <div className="header-actions">{right}<LanguageMenu /><UserMenu /></div>
       </div>
     </header>
   </>;

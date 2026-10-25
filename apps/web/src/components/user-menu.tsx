@@ -13,7 +13,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { useCompakiWallet } from "@/components/cavos-provider";
 import { Icon } from "@/components/icon";
-import { LanguageOptions } from "./language-menu";
 import { ThemeOptions } from "./theme-menu";
 
 interface SessionUser {
@@ -119,14 +118,16 @@ export function UserMenu() {
   const next = encodeURIComponent(pathname);
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative" ref={menuRef} onBlur={event => {
+      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
       <button
         ref={toggleRef}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={loggedIn ? t("accountValue", { value1: user.name }) : t("signInOrCreateAnAccount")}
-        className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 transition hover:bg-slate-50"
+        className="account-toggle flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 transition hover:bg-slate-50"
       >
         <span
           className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${
@@ -244,7 +245,6 @@ export function UserMenu() {
                   </span>
                 </Link>
               ))}
-              <LanguageOptions />
               <ThemeOptions />
               <button
                 role="menuitem"
@@ -277,7 +277,6 @@ export function UserMenu() {
               >
                 <UserIcon className="h-4 w-4 text-slate-400" />
                 {t("signInOrCreateAccount")}</Link>
-              <LanguageOptions />
               <ThemeOptions />
             </>
           )}

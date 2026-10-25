@@ -2,7 +2,6 @@
 import { useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { LanguageOptions } from "./language-menu";
 import { Icon, type IconName } from "./icon";
 import {
   getServerThemePreference,
@@ -121,8 +120,8 @@ export function ThemeMenu() {
         ref={toggle}
         type="button"
         className="theme-toggle"
-        aria-label={t("languageAndAppearance")}
-        title={t("languageAndAppearance")}
+        aria-label={t("appearanceSettings")}
+        title={t("appearanceSettings")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -141,10 +140,9 @@ export function ThemeMenu() {
       {open && (
         <div
           role="menu"
-          aria-label={t("languageAndAppearance")}
+          aria-label={t("appearanceSettings")}
           className="theme-popover"
         >
-          <LanguageOptions />
           <ThemeOptions
             onSelect={() => {
               setOpen(false);

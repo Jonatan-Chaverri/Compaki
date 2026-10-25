@@ -15,7 +15,7 @@
 .art { padding: 20px 28px 20px 12px; }
 .art > svg { width: 100%; height: 170px; }
 .impact { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 22px 30px 23px 36px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-card) 45%, transparent); }
-.impactIcon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-soft); color: var(--accent); }
+.impactIcon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border: 1px solid var(--brand-yellow-line); border-radius: 13px; background: var(--brand-yellow-soft); color: var(--brand-yellow-ink); }
 .impactCopy { min-width: 0; flex: 1; }
 .impactLabel { color: var(--ink-soft); font-size: 9px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
 .impactCopy h2 { margin-top: 5px; color: var(--ink); font-size: 16px; font-weight: 550; line-height: 1.5; letter-spacing: -.025em; }

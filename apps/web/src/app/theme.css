@@ -179,17 +179,3 @@
     height: 38px;
   }
 }
-
-/* Language sits beside appearance in the same menu on every page. */
-.language-options { padding: 14px 16px; border-top: 1px solid var(--line); }
-.language-options > p { margin-bottom: 9px; color: var(--ink-soft); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.language-options > div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.language-options button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-card); color: var(--ink-muted); font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
-.language-options button:hover { background: var(--surface-soft); }
-.language-options button[aria-checked="true"] { color: var(--accent); background: var(--surface-soft); border-color: var(--accent); font-weight: 600; }
-.language-options button:disabled { cursor: wait; opacity: .65; }
-.language-code { font-size: 9px; letter-spacing: .04em; opacity: .65; }
-.language-options small { display: block; margin-top: 8px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
-
-.theme-popover .language-options { border-top: 0; }
-.theme-popover .theme-options { border-top: 1px solid var(--line); }
