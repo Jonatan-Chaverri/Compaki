@@ -1,0 +1,20 @@
+/* Purpose setup: essential choices first, explanatory copy on demand. */
+.purpose-section-title, .purpose-field-title { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin-bottom: 8px; font-size: 12px; font-weight: 550; color: var(--ink); }
+.purpose-field-title label { flex: 1; }
+.purpose-optional { margin-left: 7px; font-size: 10px; font-weight: 400; color: var(--ink-soft); }
+.info-hint { display: inline-flex; flex: 0 0 auto; vertical-align: middle; }
+.info-hint-trigger { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: var(--ink-soft); transition: background .15s, color .15s; cursor: pointer; }
+.info-hint-trigger:hover, .info-hint-trigger[aria-expanded="true"] { background: var(--surface-sage); color: var(--accent); }
+.info-hint-content { position: absolute; z-index: 65; top: calc(100% + 5px); right: 0; width: min(360px, 100%); padding: 15px 17px; border: 1px solid var(--line-strong); border-radius: 13px; background: var(--surface-raised); color: var(--ink-muted); box-shadow: 0 10px 28px var(--shadow); font-size: 12px; font-weight: 400; line-height: 1.7; text-align: left; text-transform: none; letter-spacing: normal; }
+.onboarding-purpose .community-mode-option.purpose-choice-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-card); }
+.purpose-choice-option > label { display: flex; flex: 1; align-items: center; gap: 11px; min-width: 0; min-height: 32px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--ink); }
+.onboarding-purpose .purpose-choice-option input { flex-shrink: 0; margin: 0; accent-color: var(--accent); }
+.onboarding-purpose .community-mode-option.purpose-choice-option:has(:checked) { background: var(--surface-soft); border-color: var(--line-strong); }
+.purpose-rules-panel { display: grid; gap: 17px; border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--surface-soft); }
+.purpose-split-values { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px; font-size: 11px; color: var(--ink-muted); }
+.purpose-split-values strong { margin-left: 4px; color: var(--ink); }
+.community-story-compact { display: grid; gap: 17px; min-width: 0; }
+.community-story-compact > legend { margin-bottom: 12px; }
+.onboarding-purpose .onboarding-story-fields { padding-top: 20px; }
+.onboarding-purpose .community-rules-fields legend.purpose-section-title { color: var(--ink); }
+@media (max-width: 760px) { .info-hint-trigger { width: 36px; height: 36px; } .purpose-choice-option > label { min-height: 36px; } .purpose-rules-panel { padding: 13px; } }

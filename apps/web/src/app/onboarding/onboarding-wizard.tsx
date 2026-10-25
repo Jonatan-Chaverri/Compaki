@@ -1,4 +1,5 @@
 "use client";
+import "./purpose-setup.css";
 import { localizedMessage } from "@/i18n/errors";
 
 import { categoryLabel } from "@/i18n/labels";
@@ -70,13 +71,13 @@ const LAUNCH_STEPS: { id: LaunchStepId; label: string }[] = [
 const STEP_TITLES = [
   t("giveYourMarketplaceALittlePersonality"),
   t("makeEverySaleWorkForYourPeople"),
-  t("showPeopleTheGoodTheyMakePossible"),
+  t("purposeStepTitle"),
   t("aLastLookThenLetSOpenYourDoors"),
 ];
 const STEP_COPY = [
   t("aNameAShortStoryAndAPlaceYourCommunityCan"),
   t("chooseYourMarketplaceFeeAndWhetherEachSaleSupportsAShared"),
-  t("explainWhoBenefitsHowContributionsAreUsedAndWhenTheyRe"),
+  t("purposeStepIntro"),
   t("checkTheDetailsBelowNothingIsPublishedUntilYouChooseTo"),
 ];
 
@@ -659,11 +660,12 @@ const STEP_COPY = [
                         value={community}
                         onChange={setCommunity}
                         mode={mode}
+                        compact
                       />
                     </div>
                     {!purposeValid && !communityError && (
                       <p className="onboarding-completion-hint">
-                        {t("addYourPurposeWhoBenefitsAndAnyRequiredDistributionDetailsTo")}</p>
+                        {t("purposeRequiredHint")}</p>
                     )}
                   </div>
                 )}
@@ -802,12 +804,11 @@ const STEP_COPY = [
                       <div>
                         <strong>{t("aFewDetailsAreHereToStay")}</strong>
                         <p>
-                          {t("salesPercentages")}{regenerative && mode === "rewards"
-                            ? t("andRewardRules")
-                            : regenerative && mode === "fundraise"
-                              ? t("fundraisingTargetPayoutRulesAndRecipientAccounts")
-                              : ""}{" "}
-                          {t("areFixedOnceYouLaunchToChangeThemYouLlNeed")}{" "}
+                          {mode === "rewards"
+                            ? t("launchFixedRewards")
+                            : mode === "fundraise"
+                              ? t("launchFixedFundraise")
+                              : t("launchFixedSplits")}{" "}
                           {regenerative
                             ? t("yourCommunityStoryCanBeEditedLater")
                             : t("checkYourDetailsCarefullyBeforeContinuing")}
@@ -999,7 +1000,7 @@ const STEP_COPY = [
                 )}
               </div>
             </div>
-            {step > 0 && step < 4 ? (
+            {step === 2 ? null : step > 0 && step < 4 ? (
               <div className="onboarding-sale-example">
                 <p className="eyebrow">{t("aLittleClarity")}</p>
                 <h2>
@@ -1021,13 +1022,7 @@ const STEP_COPY = [
                   {t("noProductsNeededToGetStarted")}</span>
               </div>
             )}
-            {step === 2 && (
-              <div className="onboarding-public-note">
-                <Icon name="people" />
-                <p>
-                  <strong>{t("letYourPurposeDoTheTalking")}</strong>{t("yourStoryContributionRulesAndPaymentRecipientsWillBeVisibleTo")}</p>
-              </div>
-            )}
+
           </aside>
         </div>
       </main>
