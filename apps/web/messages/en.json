@@ -1345,6 +1345,21 @@
     "sellerActivateFirst": "Activate your seller profile to publish products.",
     "sellerMarketplaceUnavailable": "This marketplace isn’t ready to receive products yet. Choose another or try again later.",
     "sellerPaymentSetup": "Finish setting up your payment account in My profile before publishing.",
-    "sellerPrepareFailed": "We couldn’t prepare your account to sell in this marketplace. Please try again."
+    "sellerPrepareFailed": "We couldn’t prepare your account to sell in this marketplace. Please try again.",
+    "sellerEarningsTitle": "Your estimated earnings per unit",
+    "sellerEarningsPercent": "{percent}% of the sale price",
+    "sellerEarningsChooseMarket": "Choose a marketplace to see how much you’ll receive.",
+    "sellerEarningsLoading": "Checking the marketplace rules…",
+    "sellerEarningsUnavailable": "We couldn’t check the current rules.",
+    "sellerEarningsRetry": "Try again",
+    "sellerEarningsEnterPrice": "Enter a valid price to calculate your earnings.",
+    "sellerEarningsNote": "All deductions already included. Excludes any additional rewards.",
+    "sellerEarningsBreakdown": "View this sale’s breakdown",
+    "sellerEarningsSalePrice": "Sale price",
+    "sellerEarningsMarketplace": "Marketplace fee",
+    "sellerEarningsCommunity": "Community contribution",
+    "sellerEarningsPlatform": "Compaki ({percent}%)",
+    "sellerEarningsYourShare": "You’ll receive",
+    "sellerEarningsRules": "View marketplace benefits and rules"
   }
 }

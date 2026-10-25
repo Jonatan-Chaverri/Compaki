@@ -6,16 +6,26 @@
 import { Hono } from "hono";
 
 import { prisma } from "@/lib/db";
-import { communityModeOf } from "@/lib/rewards";
+import { boundOnChainId, communityModeOf } from "@/lib/rewards";
+import { getFundraise } from "@/lib/stellar";
 import { getSessionUser } from "@/lib/session";
 import { ownWalletProvider } from "@/lib/wallets";
 import { publishedProducts } from "@/lib/products";
 import { createSellerDashboard } from "./seller-dashboard";
 import { createSellerEnrollment } from "./seller-enrollment";
+import { createSellerTerms } from "./seller-terms";
 
 export const me = new Hono();
 me.route("/seller-dashboard", createSellerDashboard({ db: prisma, sessionUser: getSessionUser }));
 me.route("/seller", createSellerEnrollment({ db: prisma, sessionUser: getSessionUser }));
+me.route("/seller-terms", createSellerTerms({
+  db: prisma, sessionUser: getSessionUser,
+  fundraisingStopped: async marketplace => {
+    const id = boundOnChainId(marketplace);
+    if (id === null) throw new Error("Marketplace rules unavailable");
+    return !(await getFundraise(id)).collecting;
+  },
+}));
 
 me.get("/", async (c) => {
   const user = await getSessionUser(c);

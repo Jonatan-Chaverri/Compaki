@@ -1345,6 +1345,21 @@
     "sellerActivateFirst": "Activa tu perfil de vendedor para publicar productos.",
     "sellerMarketplaceUnavailable": "Este marketplace aún no está listo para recibir productos. Elige otro o inténtalo más tarde.",
     "sellerPaymentSetup": "Completa la configuración de tu cuenta de pagos desde Mi perfil para poder publicar.",
-    "sellerPrepareFailed": "No pudimos preparar tu cuenta para vender en este marketplace. Inténtalo de nuevo."
+    "sellerPrepareFailed": "No pudimos preparar tu cuenta para vender en este marketplace. Inténtalo de nuevo.",
+    "sellerEarningsTitle": "Tu ingreso estimado por unidad",
+    "sellerEarningsPercent": "{percent}% del precio de venta",
+    "sellerEarningsChooseMarket": "Elige un marketplace para ver cuánto recibirás.",
+    "sellerEarningsLoading": "Consultando las reglas del marketplace…",
+    "sellerEarningsUnavailable": "No pudimos consultar las reglas actuales.",
+    "sellerEarningsRetry": "Reintentar",
+    "sellerEarningsEnterPrice": "Ingresa un precio válido para calcular tu ingreso.",
+    "sellerEarningsNote": "Con los descuentos ya aplicados. No incluye posibles recompensas adicionales.",
+    "sellerEarningsBreakdown": "Ver desglose de esta venta",
+    "sellerEarningsSalePrice": "Precio de venta",
+    "sellerEarningsMarketplace": "Comisión del marketplace",
+    "sellerEarningsCommunity": "Aporte a la comunidad",
+    "sellerEarningsPlatform": "Compaki ({percent}%)",
+    "sellerEarningsYourShare": "Recibirás",
+    "sellerEarningsRules": "Ver beneficios y reglas del marketplace"
   }
 }

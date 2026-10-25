@@ -1,0 +1,16 @@
+.preview { padding: 16px; border: 1px solid var(--brand-yellow-line); border-radius: 14px; background: var(--brand-yellow-soft); }
+.summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.label { display: block; color: var(--brand-yellow-ink); font-size: 12px; font-weight: 500; }
+.amount { display: block; margin-top: 4px; font-size: 28px; font-weight: 600; letter-spacing: -.04em; line-height: 1.2; color: var(--ink); font-variant-numeric: tabular-nums; }
+.percent { color: var(--brand-yellow-ink); font-size: 12px; }
+.hint { margin-top: 9px; color: var(--ink-muted); font-size: 11px; line-height: 1.7; }
+.retry { color: var(--brand-yellow-ink); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+.details { margin-top: 12px; border-top: 1px solid var(--brand-yellow-line); padding-top: 10px; }
+.details summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; list-style: none; cursor: pointer; color: var(--brand-yellow-ink); font-size: 11px; font-weight: 600; }
+.details summary::-webkit-details-marker { display: none; }
+.details[open] summary svg { transform: rotate(90deg); }
+.details dl { display: grid; gap: 8px; margin-top: 14px; font-size: 11px; color: var(--ink-muted); }
+.details dl > div { display: flex; justify-content: space-between; gap: 16px; }
+.details dd { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.details .total { border-top: 1px solid var(--brand-yellow-line); padding-top: 10px; color: var(--ink); font-weight: 600; }
+.rules { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--brand-yellow-ink); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }

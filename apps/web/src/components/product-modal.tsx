@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icon";
+import { SellerEarnings } from "./seller-earnings";
 
 export interface EditableProduct {
   id: string;
@@ -63,7 +64,7 @@ export function ProductModal({
   const t = useTranslations("ui");
 
   const router = useRouter();
-  const [selectedMarketplace, setSelectedMarketplace] = useState(marketplaceSlug ?? marketplaces[0]?.slug ?? "");
+  const [selectedMarketplace, setSelectedMarketplace] = useState(product?.marketplace?.slug ?? marketplaceSlug ?? marketplaces[0]?.slug ?? "");
   const [name, setName] = useState(product?.name ?? "");
   const [shortDescription, setShortDescription] = useState(product?.shortDescription ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
@@ -134,35 +135,6 @@ export function ProductModal({
             className={inputClass}
           />
         </div>
-        <div>
-          <label htmlFor="product-short" className="mb-1.5 block text-sm font-medium text-slate-700">
-            {t("shortDescription")}{" "}
-            <span className="font-normal text-slate-400">{t("shownOnTheStorefront")}</span>
-          </label>
-          <input
-            type="text"
-            id="product-short"
-            value={shortDescription}
-            onChange={(e) => setShortDescription(e.target.value)}
-            maxLength={140}
-            placeholder={t("oneLineThatSellsIt")}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label htmlFor="product-description" className="mb-1.5 block text-sm font-medium text-slate-700">
-            {t("fullDescription")}{" "}
-            <span className="font-normal text-slate-400">{t("shownOnTheProductPage")}</span>
-          </label>
-          <textarea
-            id="product-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder={t("whatMakesItSpecial")}
-            rows={3}
-            className={inputClass}
-          />
-        </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="product-price" className="mb-1.5 block text-sm font-medium text-slate-700">{t("price2")}</label>
@@ -192,6 +164,36 @@ export function ProductModal({
               className={inputClass}
             />
           </div>
+        </div>
+        <SellerEarnings marketplaceSlug={selectedMarketplace} price={price} />
+        <div>
+          <label htmlFor="product-short" className="mb-1.5 block text-sm font-medium text-slate-700">
+            {t("shortDescription")}{" "}
+            <span className="font-normal text-slate-400">{t("shownOnTheStorefront")}</span>
+          </label>
+          <input
+            type="text"
+            id="product-short"
+            value={shortDescription}
+            onChange={(e) => setShortDescription(e.target.value)}
+            maxLength={140}
+            placeholder={t("oneLineThatSellsIt")}
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label htmlFor="product-description" className="mb-1.5 block text-sm font-medium text-slate-700">
+            {t("fullDescription")}{" "}
+            <span className="font-normal text-slate-400">{t("shownOnTheProductPage")}</span>
+          </label>
+          <textarea
+            id="product-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t("whatMakesItSpecial")}
+            rows={3}
+            className={inputClass}
+          />
         </div>
         <div>
           <label htmlFor="product-image" className="mb-1.5 block text-sm font-medium text-slate-700">

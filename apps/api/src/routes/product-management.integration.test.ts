@@ -9,6 +9,7 @@ import { createProductLifecycle } from "./product-lifecycle";
 import { createSellerDashboard } from "./seller-dashboard";
 import { createSellerEnrollment } from "./seller-enrollment";
 import { SellerSetupError } from "../lib/seller-errors";
+import { createSellerTerms } from "./seller-terms";
 import { publishedProducts } from "../lib/products";
 
 interface Summary { marketplaces: { slug: string }[]; products: { id: string; visibility: string; marketplace: { slug: string } }[]; sales: { marketplace: { slug: string }; vendorShareUsd: number }[]; }
@@ -27,6 +28,12 @@ test("seller marketplace selection, product visibility, ownership and historical
       const deps = { db: tx, sessionUser: async () => owner };
       app.route("/enroll", createSellerEnrollment(deps));
       app.route("/seller", createSellerDashboard(deps));
+      let fundraisingStopped = false;
+      let rulesUnavailable = false;
+      app.route("/terms", createSellerTerms({ ...deps, fundraisingStopped: async () => {
+        if (rulesUnavailable) throw new Error("Simulated unavailable rules");
+        return fundraisingStopped;
+      } }));
       let prepareFailure = false;
       let registrations = 0;
       app.route("/products", createProductManagement({ ...deps, ensureVendor: async (userId, marketplaceId) => {
@@ -38,6 +45,7 @@ test("seller marketplace selection, product visibility, ownership and historical
       const body = { name: "Test honey", priceUsd: 15, stock: 20, shortDescription: "Test", description: "Test", imageUrl: "🍯" };
       const request = (path: string, method: string, value?: unknown) => app.request(path, { method, ...(value ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) } : {}) });
       assert.equal((await request("/seller", "GET")).status, 403);
+      assert.equal((await request(`/terms?marketplace=${markets[0].slug}`, "GET")).status, 403);
       assert.equal((await request("/products", "POST", { ...body, marketplaceSlug: markets[1].slug })).status, 403);
       assert.equal(registrations, 0);
       const guestEnrollment = new Hono().route("/enroll", createSellerEnrollment({ db: tx, sessionUser: async () => null }));
@@ -52,6 +60,17 @@ test("seller marketplace selection, product visibility, ownership and historical
       assert.equal(await tx.vendorMembership.count({ where: { userId: owner.id } }), 0);
       const choices = await (await request("/seller", "GET")).json() as Summary;
       for (const market of markets) assert.ok(choices.marketplaces.some(m => m.slug === market.slug));
+      await tx.marketplace.update({ where: { id: markets[0].id }, data: { splitVendorBps: 8800, splitOperatorBps: 600, splitCommunityBps: 400, communityMode: "fundraise" } });
+      const getTerms = () => request(`/terms?marketplace=${markets[0].slug}`, "GET");
+      const termsResponse = await getTerms();
+      assert.equal(termsResponse.headers.get("Cache-Control"), "no-store");
+      assert.deepEqual(await termsResponse.json(), { marketplace: { slug: markets[0].slug, name: markets[0].name }, vendorBps: 8800, operatorBps: 600, communityBps: 400, platformBps: 200, fundraisingStopped: false });
+      fundraisingStopped = true;
+      assert.equal((await (await getTerms()).json() as { fundraisingStopped: boolean }).fundraisingStopped, true);
+      rulesUnavailable = true;
+      assert.equal((await getTerms()).status, 503);
+      assert.equal((await request("/terms", "GET")).status, 400);
+      assert.equal((await request("/terms?marketplace=nonexistent-test-marketplace", "GET")).status, 404);
       prepareFailure = true;
       assert.equal((await request("/products", "POST", { ...body, marketplaceSlug: markets[1].slug })).status, 409);
       assert.equal(await tx.product.count({ where: { vendorId: owner.id } }), 0);
