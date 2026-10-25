@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import type { CommunityDetails } from "@/lib/community";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -39,6 +40,8 @@ interface DashboardPayload {
 }
 
 export default async function OperatorPage(props: { params: Promise<{ slug: string }>; searchParams: Promise<{ tab?: string }> }) {
+  const t = await getTranslations("ui");
+
   const [{ slug }, query] = await Promise.all([props.params, props.searchParams]);
   const res = await apiFetch(`/api/marketplaces/${encodeURIComponent(slug)}/dashboard`);
   if (res.status === 404) notFound();
@@ -50,20 +53,20 @@ export default async function OperatorPage(props: { params: Promise<{ slug: stri
           <p className="text-3xl">🔐</p>
           <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
             {res.status === 401
-              ? "Sign in as the operator to see this dashboard"
-              : "Only this marketplace's operator can see its dashboard"}
+              ? t("signInAsTheOperatorToSeeThisDashboard")
+              : t("onlyThisMarketplaceSOperatorCanSeeItsDashboard")}
           </h1>
           <Link
             href={`/login?next=/dashboard/${encodeURIComponent(slug)}`}
             className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
           >
-            {res.status === 401 ? "Sign in" : "Switch account"}
+            {res.status === 401 ? t("signIn") : t("switchAccount")}
           </Link>
         </main>
       </div>
     );
   }
-  if (!res.ok) throw new Error(`Dashboard request failed (${res.status})`);
+  if (!res.ok) throw new Error(t("dashboardRequestFailedValue", { value1: res.status }));
   const data = (await res.json()) as DashboardPayload;
 
   return (

@@ -1,12 +1,15 @@
+import { useTranslations } from "next-intl";
 /** Original vector illustrations keep the visual language consistent without external assets. */
 export function MarketArt({ variant = "market", className = "" }: { variant?: "market" | "coffee" | "craft" | "grow"; className?: string }) {
+  const t = useTranslations("ui");
+
   if (variant === "coffee") return (
     <svg viewBox="0 0 400 280" fill="none" aria-hidden="true" className={className}>
       <circle cx="205" cy="142" r="104" fill="#E5DCC9" />
       <path d="M87 225c27-42 52-64 95-72M293 84c-18 5-31 21-38 48" stroke="#466B4A" strokeWidth="4" />
       <ellipse cx="106" cy="199" rx="15" ry="30" transform="rotate(-42 106 199)" fill="#527B50" /><ellipse cx="145" cy="173" rx="14" ry="29" transform="rotate(32 145 173)" fill="#78956A" />
       <path d="m168 58 101 13-14 149-122-15 21-125 14-22Z" fill="#B36B45" /><path d="m168 58 101 13-12 21-103-12 14-22Z" fill="#D9986F" />
-      <path d="m159 118 87 11-7 58-89-11 9-58Z" fill="#FFF8EA" /><text x="173" y="145" fill="#355B43" fontSize="13" fontFamily="sans-serif" fontWeight="700" transform="rotate(7 173 145)">GOOD</text><text x="163" y="165" fill="#355B43" fontSize="16" fontFamily="sans-serif" fontWeight="700" transform="rotate(7 163 165)">COFFEE</text>
+      <path d="m159 118 87 11-7 58-89-11 9-58Z" fill="#FFF8EA" /><text x="173" y="145" fill="#355B43" fontSize="13" fontFamily="sans-serif" fontWeight="700" transform="rotate(7 173 145)">{t("good")}</text><text x="163" y="165" fill="#355B43" fontSize="16" fontFamily="sans-serif" fontWeight="700" transform="rotate(7 163 165)">{t("coffee")}</text>
       <ellipse cx="286" cy="214" rx="32" ry="12" fill="#355B43" /><path d="M259 192h52v21c0 24-52 24-52 0v-21Z" fill="#F9F5E9" /><ellipse cx="285" cy="192" rx="26" ry="9" fill="#6B4430" /><path d="M311 196c25-5 25 23 0 20" stroke="#F9F5E9" strokeWidth="8" />
       <path d="M282 169c-12-12 11-13 0-26" stroke="#AAA789" strokeWidth="3" strokeLinecap="round" />
     </svg>

@@ -1,4 +1,11 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { categoryLabel } from "@/i18n/labels";
+
+import { useLocale } from "next-intl";
+
+import { useTranslations } from "next-intl";
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,16 +26,11 @@ import {
   communityDraftValid,
   communitySubmission,
 } from "@/lib/community";
-import { frequencyLabel, POLICY_TEXT } from "@/lib/rewards";
+import { formatUsd } from "@/lib/format";
+import { frequencyLabel, getPolicyText } from "@/lib/rewards";
 import { isValidSlug, slugify } from "@/lib/slug";
 
-const CATEGORIES = [
-  { name: "Coffee & agriculture", icon: "leaf", detail: "Grown with care" },
-  { name: "Crafts", icon: "spark", detail: "Made by your people" },
-  { name: "Services", icon: "people", detail: "Skills worth sharing" },
-  { name: "Other", icon: "grid", detail: "A little of everything" },
-] as const;
-type Category = (typeof CATEGORIES)[number]["name"];
+type Category = "Coffee & agriculture" | "Crafts" | "Services" | "Other";
 const PLATFORM_PERCENT = 2;
 const SHARE_PERCENT = 100 - PLATFORM_PERCENT;
 interface Splits {
@@ -47,25 +49,37 @@ interface LaunchResult {
   dashboardPath: string;
   verifyUrl: string | null;
 }
-const LAUNCH_STEPS: { id: LaunchStepId; label: string }[] = [
-  { id: "accounts", label: "Preparing payment accounts" },
-  { id: "deploy", label: "Saving your marketplace rules" },
-  { id: "store", label: "Opening your marketplace" },
-];
-const STEP_TITLES = [
-  "Give your marketplace a little personality.",
-  "Make every sale work for your people.",
-  "Show people the good they make possible.",
-  "A last look. Then let’s open your doors.",
-];
-const STEP_COPY = [
-  "A name, a short story and a place your community can call its own.",
-  "Choose your marketplace fee and whether each sale supports a shared purpose.",
-  "Explain who benefits, how contributions are used and when they’re shared.",
-  "Check the details below. Nothing is published until you choose to launch.",
-];
 
 export function OnboardingWizard({ operatorName }: { operatorName: string }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+  const POLICY_TEXT = getPolicyText(t);
+
+const CATEGORIES = [
+  { name: "Coffee & agriculture", icon: "leaf", detail: t("grownWithCare") },
+  { name: "Crafts", icon: "spark", detail: t("madeByYourPeople") },
+  { name: "Services", icon: "people", detail: t("skillsWorthSharing") },
+  { name: "Other", icon: "grid", detail: t("aLittleOfEverything") },
+] as const;
+const LAUNCH_STEPS: { id: LaunchStepId; label: string }[] = [
+  { id: "accounts", label: t("preparingPaymentAccounts") },
+  { id: "deploy", label: t("savingYourMarketplaceRules") },
+  { id: "store", label: t("openingYourMarketplace") },
+];
+const STEP_TITLES = [
+  t("giveYourMarketplaceALittlePersonality"),
+  t("makeEverySaleWorkForYourPeople"),
+  t("showPeopleTheGoodTheyMakePossible"),
+  t("aLastLookThenLetSOpenYourDoors"),
+];
+const STEP_COPY = [
+  t("aNameAShortStoryAndAPlaceYourCommunityCan"),
+  t("chooseYourMarketplaceFeeAndWhetherEachSaleSupportsAShared"),
+  t("explainWhoBenefitsHowContributionsAreUsedAndWhenTheyRe"),
+  t("checkTheDetailsBelowNothingIsPublishedUntilYouChooseTo"),
+];
+
   // Internal stages are stable even when the optional community step is skipped.
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
@@ -124,7 +138,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           `/api/marketplaces/check-slug?slug=${encodeURIComponent(slug)}`,
           { signal: controller.signal },
         );
-        if (!res.ok) throw new Error("Address check failed");
+        if (!res.ok) throw new Error(t("addressCheckFailed"));
         const data = (await res.json()) as {
           available: boolean;
           reason: string | null;
@@ -146,7 +160,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [slug, slugRetry]);
+  }, [slug, slugRetry, t]);
 
   const setSplit = (key: "operator" | "community", raw: number) => {
     setAcknowledged(false);
@@ -211,7 +225,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
         const data = (await res.json().catch(() => null)) as {
           error?: string;
         } | null;
-        throw new Error(data?.error ?? `Launch failed (${res.status})`);
+        throw new Error(localizedMessage(data?.error, t, t("launchFailedValue", { value1: res.status })));
       }
 
       const reader = res.body.getReader();
@@ -249,14 +263,15 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
       reader.releaseLock();
       if (!completed)
         throw new Error(
-          "The connection was interrupted. Retry to finish setting up your marketplace.",
+          t("theConnectionWasInterruptedRetryToFinishSettingUpYourMarketplace"),
         );
     } catch (error) {
-      setLaunchError(error instanceof Error ? error.message : "Launch failed");
+      setLaunchError(localizedMessage(error, t, t("launchFailed")));
     } finally {
       launchInFlight.current = false;
     }
   }, [
+    t,
     name,
     slug,
     description,
@@ -269,10 +284,10 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
   ]);
 
   const steps = [
-    { id: 0, label: "The basics" },
-    { id: 1, label: "Sales & sharing" },
-    ...(regenerative ? [{ id: 2, label: "Your purpose" }] : []),
-    { id: 3, label: "Review & launch" },
+    { id: 0, label: t("theBasics") },
+    { id: 1, label: t("salesSharing") },
+    ...(regenerative ? [{ id: 2, label: t("yourPurpose") }] : []),
+    { id: 3, label: t("reviewLaunch") },
   ];
   const activeIndex = steps.findIndex((item) => item.id === Math.min(step, 3));
   const step1Valid =
@@ -280,7 +295,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
     name.trim().length <= 60 &&
     slugStatus === "available";
   const communityError = regenerative
-    ? communityRulesError({ ...rules, mode })
+    ? communityRulesError({ ...rules, mode }, t)
     : null;
   const purposeValid =
     !regenerative ||
@@ -289,10 +304,10 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
       communityError === null);
   const modelLabel =
     mode === "rewards"
-      ? "Rewards for sellers & buyers"
+      ? t("rewardsForSellersBuyers")
       : mode === "fundraise"
-        ? "A fundraising goal"
-        : "An organizer-managed fund";
+        ? t("aFundraisingGoal")
+        : t("anOrganizerManagedFund");
   const onContinue = () => {
     if (step === 0 && step1Valid) {
       setStep(editingReview ? (purposeValid ? 3 : 2) : 1);
@@ -322,55 +337,51 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
     } else setStep(step === 3 ? (regenerative ? 2 : 1) : Math.max(0, step - 1));
   };
   const slugMessage = {
-    idle: "We’ll create a shareable address from your name.",
-    checking: "Checking your address…",
-    available: "This address is available. Make it yours.",
-    taken: "This address is taken. Try adding your town or another word.",
+    idle: t("weLlCreateAShareableAddressFromYourName"),
+    checking: t("checkingYourAddress"),
+    available: t("thisAddressIsAvailableMakeItYours"),
+    taken: t("thisAddressIsTakenTryAddingYourTownOrAnotherWord"),
     invalid:
-      "Use 1–40 letters, numbers or hyphens, ending with a letter or number.",
-    error: "We couldn’t check this address. Try again.",
+      t("use140LettersNumbersOrHyphensEndingWithALetter"),
+    error: t("weCouldnTCheckThisAddressTryAgain"),
   }[slugStatus];
 
   return (
     <div className="onboarding-page">
       <DemoNotice />
       <header className="onboarding-header">
-        <Link href="/" aria-label="Compaki home">
+        <Link href="/" aria-label={t("compakiHome")}>
           <Logo />
         </Link>
         <div>
           <Link href="/marketplaces" className="onboarding-exit">
-            Back to marketplaces
-          </Link>
+            {t("backToMarketplaces")}</Link>
           <UserMenu />
         </div>
       </header>
       <main id="main-content" tabIndex={-1} className="onboarding-main">
         <div className="onboarding-intro">
           <div>
-            <p className="eyebrow">Your people. Your marketplace.</p>
+            <p className="eyebrow">{t("yourPeopleYourMarketplace")}</p>
             <p className="onboarding-greeting">
-              Let’s build something good
               {operatorName.split(/\s+/)[0]
-                ? `, ${operatorName.split(/\s+/)[0]}`
-                : ""}
-              .
+                ? t("onboardingGreeting", { name: operatorName.split(/\s+/)[0] })
+                : t("onboardingGreetingAnonymous")}
             </p>
           </div>
           <span>
             <Icon name="shield" className="h-4 w-4" />
-            Review everything before you launch
-          </span>
+            {t("reviewEverythingBeforeYouLaunch")}</span>
         </div>
         <nav
-          aria-label="Marketplace setup progress"
+          aria-label={t("marketplaceSetupProgress")}
           className="onboarding-progress"
         >
           <ol>
             {steps.map((item, i) => (
               <li
                 key={item.id}
-                aria-label={`Step ${i + 1}: ${item.label}`}
+                aria-label={t("stepValueValue", { value1: i + 1, value2: item.label })}
                 aria-current={i === activeIndex && !result ? "step" : undefined}
                 data-complete={i < activeIndex || !!result}
               >
@@ -389,7 +400,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
             ))}
           </ol>
           <p>
-            Step {activeIndex + 1} of {steps.length}
+            {t("step")}{" "}{activeIndex + 1} {" "}{t("of")}{" "}{steps.length}
           </p>
         </nav>
         <div className="onboarding-layout">
@@ -415,22 +426,22 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
               <p className="eyebrow">
                 {step === 4
                   ? result
-                    ? "Ready for your people"
-                    : "Bringing it to life"
-                  : `Step ${activeIndex + 1} · ${steps[activeIndex].label}`}
+                    ? t("readyForYourPeople")
+                    : t("bringingItToLife")
+                  : t("stepValueValue2", { value1: activeIndex + 1, value2: steps[activeIndex].label })}
               </p>
               <h1 ref={headingRef} tabIndex={-1}>
                 {step === 4
                   ? result
-                    ? `${result.name} is open.`
-                    : "Good things are on their way."
+                    ? t("valueIsOpen", { value1: result.name })
+                    : t("goodThingsAreOnTheirWay")
                   : STEP_TITLES[step]}
               </h1>
               <p>
                 {step === 4
                   ? result
-                    ? "Your marketplace is ready. Add your first sellers and give your community a reason to stop by."
-                    : "We’re getting your demo marketplace ready. This may take a little while; keep this page open."
+                    ? t("yourMarketplaceIsReadyAddYourFirstSellersAndGiveYour")
+                    : t("weReGettingYourDemoMarketplaceReadyThisMayTakeA")
                   : STEP_COPY[step]}
               </p>
             </div>
@@ -444,9 +455,9 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 {step === 0 && (
                   <div className="onboarding-fields">
                     <Field
-                      label="Marketplace name"
+                      label={t("marketplaceName")}
                       id="marketplace-name"
-                      hint="A name your community will recognize."
+                      hint={t("aNameYourCommunityWillRecognize")}
                     >
                       <input
                         id="marketplace-name"
@@ -456,16 +467,16 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                         minLength={2}
                         maxLength={60}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. Mercado Verde"
+                        placeholder={t("eGMercadoVerde")}
                         aria-describedby="marketplace-name-hint"
                       />
                     </Field>
                     <Field
-                      label="Your marketplace address"
+                      label={t("yourMarketplaceAddress")}
                       id="marketplace-slug"
                     >
                       <div className="onboarding-url">
-                        <span>compaki.app/m/</span>
+                        <span>{t("compakiAppM")}</span>
                         <input
                           id="marketplace-slug"
                           value={slug}
@@ -504,13 +515,12 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                               setSlugRetry((v) => v + 1);
                             }}
                           >
-                            Check again
-                          </button>
+                            {t("checkAgain")}</button>
                         )}
                       </div>
                     </Field>
                     <Field
-                      label="What will people find here?"
+                      label={t("whatWillPeopleFindHere")}
                       id="marketplace-description"
                       optional
                     >
@@ -520,19 +530,19 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                         onChange={(e) => setDescription(e.target.value)}
                         maxLength={200}
                         rows={3}
-                        placeholder="Fresh produce, thoughtful makers and good things from our neighborhood."
+                        placeholder={t("freshProduceThoughtfulMakersAndGoodThingsFromOurNeighborhood")}
                         aria-describedby="marketplace-description-hint"
                       />
                       <div
                         id="marketplace-description-hint"
                         className="onboarding-textarea-hint"
                       >
-                        <span>A short introduction for your storefront.</span>
+                        <span>{t("aShortIntroductionForYourStorefront")}</span>
                         <span>{description.length}/200</span>
                       </div>
                     </Field>
                     <fieldset className="onboarding-categories">
-                      <legend>Choose a category</legend>
+                      <legend>{t("chooseACategory")}</legend>
                       <div>
                         {CATEGORIES.map((c) => (
                           <label
@@ -548,7 +558,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                             />
                             <Icon name={c.icon} />
                             <span>
-                              <strong>{c.name}</strong>
+                              <strong>{categoryLabel(c.name, t)}</strong>
                               <small>{c.detail}</small>
                             </span>
                             <span
@@ -570,17 +580,14 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                     <div className="onboarding-share-heading">
                       <span>
                         <Icon name="bag" />
-                        Sellers keep
-                      </span>
+                        {t("sellersKeep")}</span>
                       <strong>{splits.vendor}%</strong>
                       <p>
-                        Calculated automatically after the fees and
-                        contributions below.
-                      </p>
+                        {t("calculatedAutomaticallyAfterTheFeesAndContributionsBelow")}</p>
                     </div>
                     <SplitSlider
-                      label="Your marketplace fee"
-                      hint="Your share for running the marketplace."
+                      label={t("yourMarketplaceFee")}
+                      hint={t("yourShareForRunningTheMarketplace")}
                       value={splits.operator}
                       max={SHARE_PERCENT - splits.community}
                       onChange={(v) => setSplit("operator", v)}
@@ -591,10 +598,9 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                           <Icon name="heart" />
                         </span>
                         <span>
-                          <strong>Give something back</strong>
+                          <strong>{t("giveSomethingBack")}</strong>
                           <small>
-                            Set aside a share of every sale for your community.
-                          </small>
+                            {t("setAsideAShareOfEverySaleForYourCommunity")}</small>
                         </span>
                         <input
                           type="checkbox"
@@ -609,8 +615,8 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                       {regenerative && (
                         <div className="onboarding-community-slider">
                           <SplitSlider
-                            label="Community contribution"
-                            hint="You’ll choose who benefits in the next step."
+                            label={t("communityContribution")}
+                            hint={t("youLlChooseWhoBenefitsInTheNextStep")}
                             value={splits.community}
                             min={1}
                             max={SHARE_PERCENT - splits.operator}
@@ -622,21 +628,19 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                     <div className="onboarding-fixed-fee">
                       <span>
                         <Icon name="leaf" className="h-4 w-4" />
-                        <strong>Compaki platform fee</strong>
-                        <small>Included in every sale</small>
+                        <strong>{t("compakiPlatformFee")}</strong>
+                        <small>{t("includedInEverySale")}</small>
                       </span>
                       <strong>{PLATFORM_PERCENT}%</strong>
                     </div>
                     <div className="onboarding-mobile-example">
-                      <h2>How a $100 sale is shared</h2>
+                      <h2>{t("howA100SaleIsShared")}</h2>
                       <SaleBreakdown splits={splits} />
                     </div>
                     <div className="onboarding-info">
                       <Icon name="check" className="h-4 w-4" />
                       <p>
-                        All shares come out of the product price. Buyers pay the
-                        price they see.
-                      </p>
+                        {t("allSharesComeOutOfTheProductPriceBuyersPayThe")}</p>
                     </div>
                   </div>
                 )}
@@ -659,105 +663,101 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                     </div>
                     {!purposeValid && !communityError && (
                       <p className="onboarding-completion-hint">
-                        Add your purpose, who benefits and any required
-                        distribution details to continue.
-                      </p>
+                        {t("addYourPurposeWhoBenefitsAndAnyRequiredDistributionDetailsTo")}</p>
                     )}
                   </div>
                 )}
                 {step === 3 && (
                   <div className="onboarding-review">
                     <ReviewSection
-                      title="Your marketplace"
+                      title={t("yourMarketplace")}
                       onEdit={() => edit(0)}
                     >
                       <dl>
                         <div>
-                          <dt>Name</dt>
+                          <dt>{t("name")}</dt>
                           <dd>{name.trim()}</dd>
                         </div>
                         <div>
-                          <dt>Category</dt>
-                          <dd>{category}</dd>
+                          <dt>{t("category")}</dt>
+                          <dd>{categoryLabel(category, t)}</dd>
                         </div>
                         <div className="onboarding-review-wide">
-                          <dt>Address</dt>
-                          <dd>compaki.app/m/{slug}</dd>
+                          <dt>{t("address")}</dt>
+                          <dd>{t("compakiAppM")}{slug}</dd>
                         </div>
                         {description.trim() && (
                           <div className="onboarding-review-wide">
-                            <dt>Introduction</dt>
+                            <dt>{t("introduction")}</dt>
                             <dd>{description}</dd>
                           </div>
                         )}
                       </dl>
                     </ReviewSection>
                     <ReviewSection
-                      title="How every sale is shared"
+                      title={t("howEverySaleIsShared")}
                       onEdit={() => edit(1)}
                     >
                       <SaleBreakdown splits={splits} />
                       <p className="onboarding-field-hint">
-                        No extra fee is added for buyers.
-                      </p>
+                        {t("noExtraFeeIsAddedForBuyers")}</p>
                     </ReviewSection>
                     {regenerative ? (
                       <ReviewSection
-                        title="Your community purpose"
+                        title={t("yourCommunityPurpose")}
                         onEdit={() => edit(2)}
                       >
                         <dl>
                           <div className="onboarding-review-wide">
-                            <dt>How it works</dt>
+                            <dt>{t("howItWorks")}</dt>
                             <dd>{modelLabel}</dd>
                           </div>
                           <div className="onboarding-review-wide">
-                            <dt>What purchases make possible</dt>
+                            <dt>{t("whatPurchasesMakePossible")}</dt>
                             <dd>{community.communityPurpose}</dd>
                           </div>
                           <div className="onboarding-review-wide">
-                            <dt>Who benefits</dt>
+                            <dt>{t("whoBenefits")}</dt>
                             <dd>{community.communityBeneficiaries}</dd>
                           </div>
                           {community.communityDistribution && (
                             <div className="onboarding-review-wide">
-                              <dt>How funds are used & shared</dt>
+                              <dt>{t("howFundsAreUsedShared")}</dt>
                               <dd>{community.communityDistribution}</dd>
                             </div>
                           )}
                           {mode === "rewards" && (
                             <>
                               <div>
-                                <dt>Rewards available</dt>
-                                <dd>{frequencyLabel(rules.periodSeconds)}</dd>
+                                <dt>{t("rewardsAvailable")}</dt>
+                                <dd>{frequencyLabel(rules.periodSeconds, t)}</dd>
                               </div>
                               <div>
-                                <dt>Rewards split</dt>
+                                <dt>{t("rewardsSplit")}</dt>
                                 <dd>
-                                  {rules.sellersPercent}% sellers ·{" "}
-                                  {100 - rules.sellersPercent}% buyers
-                                </dd>
+                                  {rules.sellersPercent}{t("sellers3")}{" "}
+                                  {100 - rules.sellersPercent}{t("buyers")}</dd>
                               </div>
                             </>
                           )}
                           {mode === "fundraise" && (
                             <>
                               <div>
-                                <dt>Fundraising target</dt>
+                                <dt>{t("fundraisingTarget")}</dt>
                                 <dd>
                                   $
                                   {Number(rules.goalUsd).toLocaleString(
-                                    "en-US",
+                                    locale,
                                     { minimumFractionDigits: 2 },
                                   )}
                                 </dd>
                               </div>
                               <div>
-                                <dt>After each payout</dt>
+                                <dt>{t("afterEachPayout")}</dt>
                                 <dd>{POLICY_TEXT[rules.policy].label}</dd>
                               </div>
                               <div className="onboarding-review-wide">
-                                <dt>Payment recipients</dt>
+                                <dt>{t("paymentRecipients")}</dt>
                                 <dd>
                                   <ul className="onboarding-recipients-review">
                                     {rules.recipients.map((r, i) => (
@@ -775,12 +775,12 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                           )}
                           {mode === "classic" && community.communityGoalUsd && (
                             <div>
-                              <dt>Community goal</dt>
+                              <dt>{t("communityGoal")}</dt>
                               <dd>
                                 $
                                 {Number(
                                   community.communityGoalUsd,
-                                ).toLocaleString("en-US")}
+                                ).toLocaleString(locale)}
                               </dd>
                             </div>
                           )}
@@ -790,31 +790,27 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                       <div className="onboarding-no-community">
                         <Icon name="people" />
                         <p>
-                          No community contribution. Sellers receive{" "}
-                          {splits.vendor}% and your marketplace receives{" "}
-                          {splits.operator}% of each sale.
-                        </p>
+                          {t("noCommunityContributionSellersReceive")}{" "}
+                          {splits.vendor}{t("andYourMarketplaceReceives")}{" "}
+                          {splits.operator}{t("ofEachSale")}</p>
                         <button type="button" onClick={() => edit(1)}>
-                          Edit
-                        </button>
+                          {t("edit")}</button>
                       </div>
                     )}
                     <div className="onboarding-launch-note">
                       <Icon name="shield" />
                       <div>
-                        <strong>A few details are here to stay.</strong>
+                        <strong>{t("aFewDetailsAreHereToStay")}</strong>
                         <p>
-                          Sales percentages
-                          {regenerative && mode === "rewards"
-                            ? " and reward rules"
+                          {t("salesPercentages")}{regenerative && mode === "rewards"
+                            ? t("andRewardRules")
                             : regenerative && mode === "fundraise"
-                              ? ", fundraising target, payout rules and recipient accounts"
+                              ? t("fundraisingTargetPayoutRulesAndRecipientAccounts")
                               : ""}{" "}
-                          are fixed once you launch. To change them, you’ll need
-                          a new marketplace.{" "}
+                          {t("areFixedOnceYouLaunchToChangeThemYouLlNeed")}{" "}
                           {regenerative
-                            ? "Your community story can be edited later."
-                            : "Check your details carefully before continuing."}
+                            ? t("yourCommunityStoryCanBeEditedLater")
+                            : t("checkYourDetailsCarefullyBeforeContinuing")}
                         </p>
                       </div>
                     </div>
@@ -826,16 +822,11 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                         required
                       />
                       <span>
-                        I’ve reviewed the sales shares
-                        {regenerative ? " and community details" : ""} and I’m
-                        ready to launch.
-                      </span>
+                        {t("iVeReviewedTheSalesShares")}{regenerative ? t("andCommunityDetails") : ""} {" "}{t("andIMReadyToLaunch")}</span>
                     </label>
                     {(!step1Valid || !purposeValid) && (
                       <p role="alert" className="onboarding-completion-hint">
-                        Review your marketplace address and required details
-                        before launching.
-                      </p>
+                        {t("reviewYourMarketplaceAddressAndRequiredDetailsBeforeLaunching")}</p>
                     )}
                   </div>
                 )}
@@ -847,12 +838,11 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                         className="onboarding-back"
                         onClick={back}
                       >
-                        {editingReview ? "← Back to review" : "← Back"}
+                        {editingReview ? t("backToReview") : t("back")}
                       </button>
                     ) : (
                       <span className="onboarding-first-step-note">
-                        Make it yours. You can review it all next.
-                      </span>
+                        {t("makeItYoursYouCanReviewItAllNext")}</span>
                     )}
                   </div>
                   <button
@@ -869,10 +859,10 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                     }
                   >
                     {step === 3
-                      ? "Launch my marketplace"
+                      ? t("launchMyMarketplace")
                       : editingReview
-                        ? "Review changes"
-                        : "Continue"}
+                        ? t("reviewChanges")
+                        : t("continue")}
                     <Icon name="arrow" className="h-4 w-4" />
                   </button>
                 </div>
@@ -896,25 +886,24 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                           {label}
                           <small>
                             {launchStates[id] === "done"
-                              ? "Done"
+                              ? t("done")
                               : launchStates[id] === "active"
-                                ? "In progress"
-                                : "Up next"}
+                                ? t("inProgress")
+                                : t("upNext")}
                           </small>
                         </li>
                       ))}
                     </ol>
                     {launchError && (
                       <div className="onboarding-launch-error" role="alert">
-                        <p>{launchError}</p>
+                        <p>{localizedMessage(launchError, t, launchError)}</p>
                         <button
                           type="button"
                           className="button-primary button-small"
                           onClick={() => void launch()}
                         >
-                          Retry setup
-                        </button>
-                        <p>We’ll resume with these same settings.</p>
+                          {t("retrySetup")}</button>
+                        <p>{t("weLlResumeWithTheseSameSettings")}</p>
                       </div>
                     )}
                   </>
@@ -923,7 +912,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                     <div className="onboarding-success-address">
                       <Icon name="store" />
                       <div>
-                        <span>Your marketplace address</span>
+                        <span>{t("yourMarketplaceAddress")}</span>
                         <Link href={result.path}>
                           {result.url}
                           <Icon name="arrow" className="h-4 w-4" />
@@ -931,24 +920,19 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                       </div>
                     </div>
                     <div className="onboarding-next-steps">
-                      <p className="eyebrow">Make your first day count</p>
+                      <p className="eyebrow">{t("makeYourFirstDayCount")}</p>
                       <p>
-                        <span>01</span>Invite your first sellers.
-                      </p>
+                        <span>01</span>{t("inviteYourFirstSellers")}</p>
                       <p>
-                        <span>02</span>Add products people will love.
-                      </p>
+                        <span>02</span>{t("addProductsPeopleWillLove")}</p>
                       <p>
-                        <span>03</span>Share your marketplace with your
-                        community.
-                      </p>
+                        <span>03</span>{t("shareYourMarketplaceWithYourCommunity")}</p>
                     </div>
                     <Link
                       className="button-primary"
                       href={result.dashboardPath}
                     >
-                      Go to my dashboard
-                      <Icon name="arrow" className="h-4 w-4" />
+                      {t("goToMyDashboard")}<Icon name="arrow" className="h-4 w-4" />
                     </Link>
                     {result.verifyUrl && (
                       <a
@@ -957,8 +941,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        View setup record ↗
-                      </a>
+                        {t("viewSetupRecord")}</a>
                     )}
                   </>
                 )}
@@ -967,17 +950,17 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           </section>
           <aside
             className="onboarding-sidebar"
-            aria-label="Marketplace preview and guidance"
+            aria-label={t("marketplacePreviewAndGuidance")}
           >
             <div className="onboarding-preview-label">
               <span className="onboarding-preview-dot" />
               {step === 4 && result
-                ? "Your new marketplace"
-                : "Your storefront preview"}
+                ? t("yourNewMarketplace")
+                : t("yourStorefrontPreview")}
             </div>
             <div className="onboarding-preview">
               <div className="onboarding-preview-art">
-                <span>{category}</span>
+                <span>{categoryLabel(category, t)}</span>
                 <MarketArt
                   variant={
                     category === "Crafts"
@@ -992,24 +975,24 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 <span className="onboarding-preview-store">
                   <Icon name="store" className="h-4 w-4" />
                 </span>
-                <h2>{name.trim() || "Your marketplace, here."}</h2>
+                <h2>{name.trim() || t("yourMarketplaceHere")}</h2>
                 <p>
                   {description.trim() ||
-                    "A place for good things, great people and your community’s story."}
+                    t("aPlaceForGoodThingsGreatPeopleAndYourCommunityS")}
                 </p>
                 <span className="onboarding-preview-url">
-                  compaki.app/m/{slug || "your-community"}
+                  {t("compakiAppM")}{slug || t("previewSlug")}
                 </span>
                 {regenerative && (
                   <div className="onboarding-preview-impact">
                     <Icon name="heart" className="h-4 w-4" />
                     <span>
-                      {splits.community}% of each sale supports{" "}
+                      {splits.community}{t("ofEachSaleSupports")}{" "}
                       {mode === "rewards"
-                        ? "community rewards"
+                        ? t("communityRewards2")
                         : mode === "fundraise"
-                          ? "a shared goal"
-                          : "your community"}
+                          ? t("aSharedGoal")
+                          : t("yourCommunity")}
                       .
                     </span>
                   </div>
@@ -1018,41 +1001,31 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
             </div>
             {step > 0 && step < 4 ? (
               <div className="onboarding-sale-example">
-                <p className="eyebrow">A little clarity</p>
+                <p className="eyebrow">{t("aLittleClarity")}</p>
                 <h2>
-                  One $100 sale.
-                  <br />
-                  Good for everyone.
-                </h2>
+                  {t("one100Sale")}<br />
+                  {t("goodForEveryone")}</h2>
                 <SaleBreakdown splits={splits} />
-                <p>The buyer pays $100. Here’s where it goes.</p>
+                <p>{t("theBuyerPays100HereSWhereItGoes")}</p>
               </div>
             ) : (
               <div className="onboarding-sidebar-note">
                 <Icon name="leaf" />
                 <h2>
-                  A home for what
-                  <br />
-                  makes your people special.
-                </h2>
+                  {t("aHomeForWhat")}<br />
+                  {t("makesYourPeopleSpecial")}</h2>
                 <p>
-                  Start with the basics. Invite your sellers and add your first
-                  products after launch.
-                </p>
+                  {t("startWithTheBasicsInviteYourSellersAndAddYourFirst")}</p>
                 <span>
                   <Icon name="check" className="h-3.5 w-3.5" />
-                  No products needed to get started
-                </span>
+                  {t("noProductsNeededToGetStarted")}</span>
               </div>
             )}
             {step === 2 && (
               <div className="onboarding-public-note">
                 <Icon name="people" />
                 <p>
-                  <strong>Let your purpose do the talking.</strong>Your story,
-                  contribution rules and payment recipients will be visible to
-                  visitors on your community page.
-                </p>
+                  <strong>{t("letYourPurposeDoTheTalking")}</strong>{t("yourStoryContributionRulesAndPaymentRecipientsWillBeVisibleTo")}</p>
               </div>
             )}
           </aside>
@@ -1075,11 +1048,13 @@ function Field({
   optional?: boolean;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("ui");
+
   return (
     <div className="onboarding-field">
       <label htmlFor={id}>
         {label}
-        {optional && <span>Optional</span>}
+        {optional && <span>{t("optional2")}</span>}
       </label>
       {children}
       {hint && (
@@ -1105,6 +1080,7 @@ function SplitSlider({
   max: number;
   onChange: (value: number) => void;
 }) {
+  const t = useTranslations("ui");
   return (
     <div className="onboarding-split">
       <label>
@@ -1119,7 +1095,7 @@ function SplitSlider({
           max={max}
           value={value}
           aria-label={label}
-          aria-valuetext={`${value} percent of each sale`}
+          aria-valuetext={t("percentOfEachSale", { value })}
           onChange={(e) => onChange(Number(e.target.value))}
         />
       </label>
@@ -1131,11 +1107,14 @@ function SplitSlider({
   );
 }
 function SaleBreakdown({ splits }: { splits: Splits }) {
+  const locale = useLocale();
+  const t = useTranslations("ui");
+
   const parts: { label: string; value: number; color: string }[] = [
-    { label: "Sellers", value: splits.vendor, color: "#456c4e" },
-    { label: "Your marketplace", value: splits.operator, color: "#b59a75" },
+    { label: t("sellers"), value: splits.vendor, color: "#456c4e" },
+    { label: t("yourMarketplace"), value: splits.operator, color: "#b59a75" },
     ...(splits.community > 0
-      ? [{ label: "Community", value: splits.community, color: "#9cb375" }]
+      ? [{ label: t("community2"), value: splits.community, color: "#9cb375" }]
       : []),
     { label: "Compaki", value: PLATFORM_PERCENT, color: "#cdd5bc" },
   ];
@@ -1157,7 +1136,7 @@ function SaleBreakdown({ splits }: { splits: Splits }) {
               {part.label}
             </span>
             <strong>
-              ${part.value.toFixed(2)}
+              {formatUsd(part.value, locale)}
               <small>{part.value}%</small>
             </strong>
           </li>
@@ -1175,17 +1154,18 @@ function ReviewSection({
   onEdit: () => void;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("ui");
+
   return (
     <section className="onboarding-review-section">
       <div>
         <h2>{title}</h2>
         <button
           type="button"
-          aria-label={`Edit ${title.toLowerCase()}`}
+          aria-label={t("editValue", { value1: title.toLowerCase() })}
           onClick={onEdit}
         >
-          Edit
-        </button>
+          {t("edit")}</button>
       </div>
       {children}
     </section>

@@ -10,33 +10,43 @@
 //! The community share of a marketplace follows one of three modes, fixed when
 //! the marketplace is created:
 //! - Classic: paid straight to a community fund account with every sale.
-//! - Community Rewards: held by THIS contract and shared, per fixed-length
-//!   period, between the period's vendors and buyers in proportion to what
-//!   each one sold and bought. Periods follow automatically from the creation
-//!   time; nobody opens or closes them.
-//! - Fundraising: held by THIS contract until a target is reached, then
-//!   released to recipient wallets at fixed shares. What happens after the
-//!   target (stop, start a new round, or pay recipients directly) is chosen at
-//!   creation.
+//! - Community Rewards: held by THIS contract and shared, per period, between
+//!   the period's vendors and buyers in proportion to what each one sold and
+//!   bought. A period ends with `distribute`, callable by anyone once its
+//!   length has passed; the operator may pass new pool shares and a new
+//!   length for the next period in that same call.
+//! - Fundraising: held by THIS contract until a round reaches its target,
+//!   then released to recipient wallets at fixed shares. After a release a
+//!   new round starts (same target, or one the operator passes) or, with a
+//!   target of 0, fundraising stops and later sales give that share to the
+//!   vendor.
 //!
 //! Every payment leg is a direct token transfer from the buyer to its
 //! recipient inside the `purchase` call; the contract only holds tokens for
 //! rewards and fundraising marketplaces.
 //!
 //! Treasury invariants (see README "Guarantees"):
-//! - There is no admin, withdraw or upgrade function. Tokens leave the
-//!   treasury only through `claim` (a participant's own reward, once per
-//!   period, to that participant) and `release_fundraise` (the raised amount,
-//!   to the recipients fixed at creation).
-//! - Every rule (period length, vendor/buyer pools, target, recipients,
-//!   shares, policy) is fixed at creation and can never be edited.
+//! - There is no withdraw function. Tokens leave the treasury only through
+//!   `claim` (a participant's own reward, once per period, to that
+//!   participant) and `release_fundraise` (the raised amount, to the
+//!   recipients fixed at creation).
+//! - A running period's or round's rules can't change; the operator can only
+//!   set the next period's rules (at `distribute`) or the next round's target
+//!   (at `release_fundraise`). Recipients and splits never change.
+//! - The code is upgradeable by the admin set at `initialize` (`upgrade`), so
+//!   the contract keeps its address. Stored data survives upgrades; whoever
+//!   holds the admin key can change these rules with new code, which is the
+//!   trust this deployment asks for (testnet only).
 
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
+    Vec,
 };
 
+/// Bumped on every code change; `version` lets anyone check an upgrade landed.
+pub const CONTRACT_VERSION: u32 = 3;
 pub const BPS_DENOM: u32 = 10_000;
 /// Compaki's platform fee on every sale (2%), paid to the platform recipient
 /// fixed at `initialize`. A constant: no one can change it on this deployment.
@@ -44,7 +54,7 @@ pub const PLATFORM_FEE_BPS: u32 = 200;
 /// What a marketplace's vendor / operator / community shares must add up to.
 pub const MARKETPLACE_SHARE_BPS: u32 = BPS_DENOM - PLATFORM_FEE_BPS;
 /// Hard cap on fundraising recipients. Keeps `release_fundraise` (one transfer
-/// per recipient) and direct payouts well inside Soroban's per-tx limits.
+/// per recipient) well inside Soroban's per-tx limits.
 pub const MAX_RECIPIENTS: u32 = 20;
 /// Rewards period length bounds. The app offers 30 / 90 / 180 / 365 days;
 /// one minute is the floor so demos can show a whole period quickly.
@@ -77,7 +87,8 @@ pub enum Error {
     InvalidRewardsConfig = 9,
     /// A period that has not started yet.
     PeriodNotFound = 10,
-    /// `claim` before the period's end.
+    /// `distribute` before the period's length has passed, or `claim` before
+    /// the period was distributed.
     PeriodNotEnded = 11,
     /// The address did not sell or buy in that period (or its reward rounds
     /// down to zero).
@@ -87,7 +98,7 @@ pub enum Error {
     FundraiseNotEnabled = 14,
     /// `release_fundraise` while the current round is below the target.
     GoalNotReached = 15,
-    /// A fundraising target of zero or less.
+    /// A fundraising target of zero or less at creation, or a negative next target.
     InvalidGoal = 16,
     Overflow = 17,
     /// The contract itself as a community fund or platform recipient.
@@ -129,47 +140,66 @@ pub struct MarketplaceConfig {
     pub community_bps: u32,
 }
 
-/// Community Rewards rules (fixed at creation) and lifetime totals.
+/// Community Rewards state: the running period, its rules, lifetime totals.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardsState {
-    /// Period k runs from start_ts + k * period_seconds (inclusive) to
-    /// start_ts + (k + 1) * period_seconds (exclusive).
-    pub start_ts: u64,
+    /// The period purchases are booked to (0-based).
+    pub current_period: u32,
+    /// When the current period started; it can be distributed from
+    /// period_start + period_seconds on.
+    pub period_start: u64,
     pub period_seconds: u64,
-    /// Part of each period's community pool shared among its vendors; the
-    /// rest (10_000 - vendor_pool_bps) is shared among its buyers.
+    /// Part of the current period's community pool shared among its vendors;
+    /// the rest (10_000 - vendor_pool_bps) is shared among its buyers.
     pub vendor_pool_bps: u32,
     pub total_contributed: i128,
     pub total_claimed: i128,
+}
+
+/// Rules for the next period, passed by the operator to `distribute`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardsRules {
+    pub vendor_pool_bps: u32,
+    pub buyer_pool_bps: u32,
+    pub period_seconds: u64,
 }
 
 /// Read-only summary returned by `rewards_status`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardsStatus {
-    pub start_ts: u64,
+    pub current_period: u32,
+    pub period_start: u64,
+    /// The current period can be distributed from this time on.
+    pub period_end: u64,
     pub period_seconds: u64,
     pub vendor_pool_bps: u32,
     pub buyer_pool_bps: u32,
-    /// The period purchases are currently booked to.
-    pub current_period: u32,
     pub total_contributed: i128,
     pub total_claimed: i128,
     /// Ledger timestamp at which this view was evaluated.
     pub now: u64,
 }
 
-/// One period's pools and the sales volume they are shared over. Every
-/// purchase adds its amount to both volumes (it has one vendor and one buyer).
+/// One period's rules, pools and the sales volume they are shared over.
+/// Every purchase adds its amount to both volumes (it has one vendor and one
+/// buyer).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PeriodTotals {
+    pub start_ts: u64,
+    /// 0 until the period is distributed.
+    pub end_ts: u64,
+    pub vendor_pool_bps: u32,
     pub vendor_pool: i128,
     pub buyer_pool: i128,
     pub vendor_volume: i128,
     pub buyer_volume: i128,
     pub total_claimed: i128,
+    /// Rewards of a period can be claimed once it is distributed.
+    pub distributed: bool,
 }
 
 #[contracttype]
@@ -188,14 +218,14 @@ pub struct Participation {
 pub struct RewardView {
     pub vendor_volume: i128,
     pub buyer_volume: i128,
-    /// Final once the period has ended; a running estimate before that.
+    /// Final once the period is distributed; a running estimate before that.
     pub amount: i128,
     pub period_ended: bool,
     pub claimed: bool,
 }
 
-/// What a fundraising marketplace does once a round reaches its target and
-/// the raised amount is released to the recipients.
+/// The default for what follows a released round (the operator can pass a
+/// different next target to `release_fundraise`).
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GoalPolicy {
@@ -203,14 +233,13 @@ pub enum GoalPolicy {
     Stop,
     /// A new round starts from zero toward the same target and recipients.
     NewRound,
-    /// Later sales pay their community share straight to the recipients.
-    Direct,
 }
 
-/// Fundraising rules (fixed at creation) and progress.
+/// Fundraising rules (recipients and shares fixed at creation) and progress.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FundraiseState {
+    /// The current round's target.
     pub target: i128,
     /// Fixed at creation; parallel to `shares_bps`, which sum to 10_000.
     pub recipients: Vec<Address>,
@@ -224,6 +253,8 @@ pub struct FundraiseState {
     pub total_released: i128,
     /// True once the first round has been released.
     pub goal_reached: bool,
+    /// False once fundraising stopped (a release with a next target of 0).
+    pub collecting: bool,
 }
 
 /// What a purchase actually paid; returned by `purchase` and the amounts of
@@ -239,7 +270,7 @@ pub struct PurchaseReceipt {
     /// Rewards marketplaces: the period the purchase was booked to.
     pub period: Option<u32>,
     /// Fundraising marketplaces: the round the community share was added to
-    /// (None once a Stop / Direct fundraiser has reached its target).
+    /// (None once fundraising has stopped).
     pub round: Option<u32>,
 }
 
@@ -303,13 +334,19 @@ fn load_fundraise(env: &Env, marketplace_id: u64) -> Result<FundraiseState, Erro
     load(env, &DataKey::Fundraise(marketplace_id)).ok_or(Error::FundraiseNotEnabled)
 }
 
-fn load_period(env: &Env, marketplace_id: u64, period: u32) -> PeriodTotals {
+/// A period's totals; a period without any sale yet starts empty with the
+/// current rules.
+fn load_period(env: &Env, marketplace_id: u64, period: u32, state: &RewardsState) -> PeriodTotals {
     load(env, &DataKey::Period(marketplace_id, period)).unwrap_or(PeriodTotals {
+        start_ts: state.period_start,
+        end_ts: 0,
+        vendor_pool_bps: state.vendor_pool_bps,
         vendor_pool: 0,
         buyer_pool: 0,
         vendor_volume: 0,
         buyer_volume: 0,
         total_claimed: 0,
+        distributed: false,
     })
 }
 
@@ -321,12 +358,12 @@ fn load_participation(env: &Env, marketplace_id: u64, period: u32, who: &Address
     })
 }
 
-fn current_period(state: &RewardsState, now: u64) -> u32 {
-    ((now - state.start_ts) / state.period_seconds) as u32
-}
-
-fn period_end(state: &RewardsState, period: u32) -> u64 {
-    state.start_ts + (period as u64 + 1) * state.period_seconds
+fn validate_period_seconds(period_seconds: u64) -> Result<(), Error> {
+    if (MIN_PERIOD_SECONDS..=MAX_PERIOD_SECONDS).contains(&period_seconds) {
+        Ok(())
+    } else {
+        Err(Error::InvalidRewardsConfig)
+    }
 }
 
 fn bps_of(amount: i128, bps: u32) -> Result<i128, Error> {

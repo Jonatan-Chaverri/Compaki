@@ -1,4 +1,6 @@
 "use client";
+import type { UiTranslator } from "@/i18n/types";
+import { useTranslations } from "next-intl";
 
 // The on-chain rules of a marketplace's community share, chosen once in the
 // wizard: where it goes (mode), and for rewards / fundraising the rules the
@@ -8,8 +10,8 @@ import { useId } from "react";
 
 import { goalValid } from "@/lib/community";
 import {
-  POLICY_TEXT,
-  REWARDS_FREQUENCIES,
+  getPolicyText,
+  getRewardsFrequencies,
   type CommunityMode,
   type GoalPolicy,
 } from "@/lib/rewards";
@@ -37,7 +39,7 @@ export interface CommunityRules {
 
 export const defaultCommunityRules: CommunityRules = {
   mode: "classic",
-  periodSeconds: REWARDS_FREQUENCIES[0].seconds,
+  periodSeconds: 30 * 86400,
   sellersPercent: 50,
   goalUsd: "",
   policy: "new-round",
@@ -50,30 +52,30 @@ function bpsOf(percent: string): number {
 }
 
 /** First problem with the rules, or null when they can be launched. */
-export function communityRulesError(rules: CommunityRules): string | null {
+export function communityRulesError(rules: CommunityRules, t: UiTranslator): string | null {
   if (rules.mode !== "fundraise") return null;
   if (!goalValid(rules.goalUsd))
-    return "Set a fundraising target (a positive amount).";
+    return t("rulesTargetError");
   if (rules.recipients.length === 0)
-    return "Add at least one payment recipient.";
+    return t("rulesRecipientError");
   for (const r of rules.recipients) {
     if (r.label.trim().length < 2 || r.label.trim().length > 80)
-      return "Give every recipient a public name (2–80 characters).";
+      return t("rulesNameError");
     if (!STELLAR_ADDRESS.test(r.address.trim()))
-      return "Add a valid payment account address for every recipient (starts with G).";
+      return t("rulesAddressError");
     const bps = bpsOf(r.percent);
     if (!Number.isFinite(bps) || bps < 1 || bps > 10_000)
-      return "Every recipient needs a share above 0%.";
+      return t("rulesShareError");
   }
   if (
     new Set(rules.recipients.map((r) => r.address.trim())).size !==
     rules.recipients.length
   ) {
-    return "Each payment account can only appear once.";
+    return t("rulesDuplicateError");
   }
   const total = rules.recipients.reduce((sum, r) => sum + bpsOf(r.percent), 0);
   if (total !== 10_000)
-    return `Recipient shares must add up to 100% (now ${total / 100}%).`;
+    return t("rulesTotalError", { total: total / 100 });
   return null;
 }
 
@@ -101,27 +103,6 @@ export function communityRulesSubmission(rules: CommunityRules) {
   };
 }
 
-const MODES: { mode: CommunityMode; title: string; detail: string }[] = [
-  {
-    mode: "classic",
-    title: "Support a community initiative",
-    detail:
-      "Contributions go to a shared fund with each sale. You manage its use and explain how it supports your community.",
-  },
-  {
-    mode: "rewards",
-    title: "Rewards for sellers and buyers",
-    detail:
-      "Contributions build a rewards fund. At the end of each period, sellers and buyers can collect a share based on their activity.",
-  },
-  {
-    mode: "fundraise",
-    title: "A fundraising goal",
-    detail:
-      "Save contributions toward a specific goal. Once it is reached, release the funds to the recipients you choose.",
-  },
-];
-
 export function CommunityRulesFields({
   value,
   onChange,
@@ -131,6 +112,31 @@ export function CommunityRulesFields({
   onChange: (value: CommunityRules) => void;
   communityPercent: number;
 }) {
+  const t = useTranslations("ui");
+  const POLICY_TEXT = getPolicyText(t);
+  const REWARDS_FREQUENCIES = getRewardsFrequencies(t);
+
+const MODES: { mode: CommunityMode; title: string; detail: string }[] = [
+  {
+    mode: "classic",
+    title: t("supportACommunityInitiative"),
+    detail:
+      t("contributionsGoToASharedFundWithEachSaleYouManage"),
+  },
+  {
+    mode: "rewards",
+    title: t("rewardsForSellersAndBuyers"),
+    detail:
+      t("contributionsBuildARewardsFundAtTheEndOfEachPeriod"),
+  },
+  {
+    mode: "fundraise",
+    title: t("aFundraisingGoal"),
+    detail:
+      t("saveContributionsTowardASpecificGoalOnceItIsReachedRelease"),
+  },
+];
+
   const id = useId();
   const set = (patch: Partial<CommunityRules>) =>
     onChange({ ...value, ...patch });
@@ -140,15 +146,14 @@ export function CommunityRulesFields({
         j === i ? { ...r, ...patch } : r,
       ),
     });
-  const error = communityRulesError(value);
+  const error = communityRulesError(value, t);
   const example = communityPercent; // community dollars per $100 sale
 
   return (
     <div className="community-rules-fields space-y-5">
       <fieldset>
         <legend className="mb-2 text-sm font-medium text-slate-900">
-          Where does the community share go?
-        </legend>
+          {t("whereDoesTheCommunityShareGo")}</legend>
         <div className="grid gap-2">
           {MODES.map((m) => (
             <label
@@ -186,8 +191,7 @@ export function CommunityRulesFields({
               htmlFor={`${id}-period`}
               className="mb-1.5 block text-sm font-medium text-slate-700"
             >
-              How often are rewards shared?
-            </label>
+              {t("howOftenAreRewardsShared")}</label>
             <select
               id={`${id}-period`}
               value={value.periodSeconds}
@@ -201,9 +205,7 @@ export function CommunityRulesFields({
               ))}
             </select>
             <p className="mt-1 text-xs text-slate-500">
-              Periods start at launch and follow one another automatically. When
-              one ends, everyone who sold or bought in it can claim their part.
-            </p>
+              {t("periodsStartAtLaunchAndFollowOneAnotherAutomaticallyWhenOne")}</p>
           </div>
           <div>
             <div className="mb-1.5 flex items-baseline justify-between text-sm">
@@ -211,10 +213,9 @@ export function CommunityRulesFields({
                 htmlFor={`${id}-pools`}
                 className="font-medium text-slate-700"
               >
-                Split between sellers and buyers
-              </label>
+                {t("splitBetweenSellersAndBuyers")}</label>
               <span className="tabular-nums text-slate-900">
-                Sellers <strong>{value.sellersPercent}%</strong> · Buyers{" "}
+                {t("sellers")}{" "}<strong>{value.sellersPercent}%</strong> {" "}{t("buyers3")}{" "}
                 <strong>{100 - value.sellersPercent}%</strong>
               </span>
             </div>
@@ -229,17 +230,11 @@ export function CommunityRulesFields({
               className="w-full accent-emerald-600"
             />
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              Each seller gets their part of the sellers&apos; share by how much
-              they sold in the period; each buyer by how much they bought.
-              {example > 0 && (
+              {t("eachSellerGetsTheirPartOfTheSellersShareByHow")}{example > 0 && (
                 <>
                   {" "}
-                  For every $100 sold, $
-                  {((example * value.sellersPercent) / 100).toFixed(2)} goes to
-                  sellers and $
-                  {((example * (100 - value.sellersPercent)) / 100).toFixed(2)}{" "}
-                  to buyers.
-                </>
+                  {t("forEvery100Sold")}{((example * value.sellersPercent) / 100).toFixed(2)} {" "}{t("goesToSellersAnd")}{((example * (100 - value.sellersPercent)) / 100).toFixed(2)}{" "}
+                  {t("toBuyers")}</>
               )}
             </p>
           </div>
@@ -253,8 +248,7 @@ export function CommunityRulesFields({
               htmlFor={`${id}-goal`}
               className="mb-1.5 block text-sm font-medium text-slate-700"
             >
-              Fundraising target (USD)
-            </label>
+              {t("fundraisingTargetUsd")}</label>
             <input
               id={`${id}-goal`}
               type="number"
@@ -263,20 +257,16 @@ export function CommunityRulesFields({
               step="0.01"
               value={value.goalUsd}
               onChange={(e) => set({ goalUsd: e.target.value })}
-              placeholder="e.g. 2500"
+              placeholder={t("eG2500")}
               className={inputClass}
             />
           </div>
 
           <fieldset>
             <legend className="mb-1.5 text-sm font-medium text-slate-700">
-              Who receives the funds?
-            </legend>
+              {t("whoReceivesTheFunds2")}</legend>
             <p className="mb-2 text-xs text-slate-500">
-              Recipients’ public names, payment addresses and shares appear on
-              your community page. Ask each recipient for the account address in
-              their Compaki profile and have them set up payments first.
-            </p>
+              {t("recipientsPublicNamesPaymentAddressesAndSharesAppearOnYourCommunity")}</p>
             <div className="space-y-2">
               {value.recipients.map((r, i) => (
                 <div
@@ -284,35 +274,35 @@ export function CommunityRulesFields({
                   className="community-recipient-row grid gap-2 rounded-lg bg-slate-50 p-2 sm:grid-cols-[1fr_2fr_5rem_auto]"
                 >
                   <label className="community-recipient-name">
-                    <span>Public name</span>
+                    <span>{t("publicName")}</span>
                     <input
-                      aria-label={`Recipient ${i + 1} name`}
+                      aria-label={t("recipientValueName", { value1: i + 1 })}
                       value={r.label}
                       maxLength={80}
                       onChange={(e) =>
                         setRecipient(i, { label: e.target.value })
                       }
-                      placeholder="Escuela Verde"
+                      placeholder={t("escuelaVerde")}
                       className={inputClass}
                     />
                   </label>
                   <label className="community-recipient-address">
-                    <span>Payment account address</span>
+                    <span>{t("paymentAccountAddress")}</span>
                     <input
-                      aria-label={`Recipient ${i + 1} payment address`}
+                      aria-label={t("recipientValuePaymentAddress", { value1: i + 1 })}
                       value={r.address}
                       onChange={(e) =>
                         setRecipient(i, { address: e.target.value })
                       }
-                      placeholder="Payment account address (G…)"
+                      placeholder={t("paymentAccountAddressG")}
                       className={`${inputClass} font-mono text-xs`}
                     />
                   </label>
                   <label className="community-recipient-share">
-                    <span>Share</span>
+                    <span>{t("share")}</span>
                     <div className="relative">
                       <input
-                        aria-label={`Recipient ${i + 1} share (%)`}
+                        aria-label={t("recipientValueShare", { value1: i + 1 })}
                         type="number"
                         min="0.01"
                         max="100"
@@ -338,8 +328,7 @@ export function CommunityRulesFields({
                     disabled={value.recipients.length === 1}
                     className="rounded-lg px-2 text-xs text-slate-500 hover:text-red-600 disabled:opacity-30"
                   >
-                    Remove
-                  </button>
+                    {t("remove")}</button>
                 </div>
               ))}
             </div>
@@ -356,15 +345,13 @@ export function CommunityRulesFields({
                 }
                 className="text-link mt-2 text-sm"
               >
-                + Add a recipient
-              </button>
+                {t("addARecipient")}</button>
             )}
           </fieldset>
 
           <fieldset>
             <legend className="mb-1.5 text-sm font-medium text-slate-700">
-              When the target is reached and paid out…
-            </legend>
+              {t("whenTheTargetIsReachedAndPaidOut")}</legend>
             <div className="grid gap-2">
               {(Object.keys(POLICY_TEXT) as GoalPolicy[]).map((policy) => (
                 <label
@@ -400,9 +387,7 @@ export function CommunityRulesFields({
 
       {value.mode !== "classic" && (
         <p className="text-xs leading-relaxed text-slate-500">
-          These rules are fixed at launch. Funds can only be collected or
-          released according to the rules you choose.
-        </p>
+          {t("theseRulesAreFixedAtLaunchFundsCanOnlyBeCollected")}</p>
       )}
     </div>
   );

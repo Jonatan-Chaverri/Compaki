@@ -1,4 +1,7 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useTranslations } from "next-intl";
 
 // Sign-in with Cavos — "Continue with Google" or an emailed code. Either way
 // Cavos opens the user's own Stellar wallet (derived from the login; its key
@@ -40,6 +43,8 @@ function readAndClear(key: string): string | null {
 }
 
 export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: boolean) => void }) {
+  const t = useTranslations("ui");
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -73,7 +78,7 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
   }, [busy, step, onProgressChange]);
 
   const fail = (err: unknown, back: Step) => {
-    setError(err instanceof Error ? err.message : "Something went wrong");
+    setError(localizedMessage(err, t, t("somethingWentWrong")));
     setStep(back);
     setBusy(false);
   };
@@ -85,30 +90,30 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
       if (current.authError) throw new Error(current.authError);
       await sleep(500);
     }
-    throw new Error("Your wallet didn't open — please try again.");
+    throw new Error(t("yourWalletDidnTOpenPleaseTryAgain"));
   };
 
   const activateWallet = async () => {
     setStep("working");
-    setProgress("Activating your wallet on Stellar testnet…");
+    setProgress(t("activatingYourWalletOnStellarTestnet"));
     const signer = async (xdr: string) => {
       const w = latest.current.wallet;
-      if (w?.chain !== "stellar") throw new Error("Your wallet isn't open");
+      if (w?.chain !== "stellar") throw new Error(t("yourWalletIsnTOpen"));
       return w.signXdr(xdr);
     };
     const result = await followSignatures(
       await readResult(await fetch("/api/wallet/setup", { method: "POST" })),
       signer,
-      () => setProgress("Approving your wallet's activation…"),
+      () => setProgress(t("approvingYourWalletSActivation")),
     );
-    if (result.status !== 200) throw new Error(result.body.error ?? "Wallet activation failed");
+    if (result.status !== 200) throw new Error(localizedMessage(result.body.error, t, t("walletActivationFailed")));
     router.push(destination());
     router.refresh();
   };
 
   const finishSignIn = async () => {
     setStep("working");
-    setProgress("Opening your wallet…");
+    setProgress(t("openingYourWallet"));
     const current = await waitForWallet();
     if (current.walletStatus.needsDeviceApproval) {
       setStep("device");
@@ -116,9 +121,9 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
       return;
     }
     const stellar = current.wallet;
-    if (stellar?.chain !== "stellar" || !current.address) throw new Error("Your wallet isn't open");
+    if (stellar?.chain !== "stellar" || !current.address) throw new Error(t("yourWalletIsnTOpen"));
 
-    setProgress("Verifying your wallet…");
+    setProgress(t("verifyingYourWallet"));
     const challenge = await readResult<{ message: string }>(
       await fetch("/api/auth/cavos/challenge", {
         method: "POST",
@@ -126,7 +131,7 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
         body: JSON.stringify({ address: current.address }),
       }),
     );
-    if (challenge.status !== 200) throw new Error(challenge.body.error ?? "Sign-in failed");
+    if (challenge.status !== 200) throw new Error(localizedMessage(challenge.body.error, t, t("signInFailed")));
     const signed = await stellar.signMessage(challenge.body.message);
     const login = await readResult<{ needsProfile: boolean; walletReady: boolean }>(
       await fetch("/api/auth/cavos", {
@@ -144,7 +149,7 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
         }),
       }),
     );
-    if (login.status !== 200) throw new Error(login.body.error ?? "Sign-in failed");
+    if (login.status !== 200) throw new Error(localizedMessage(login.body.error, t, t("signInFailed")));
     if (login.body.needsProfile) {
       setStep("profile");
       setBusy(false);
@@ -201,7 +206,7 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
       await sendOtp(email.trim());
       setStep("code");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "We couldn't send the code");
+      setError(localizedMessage(err, t, t("weCouldnTSendTheCode")));
     } finally {
       setBusy(false);
     }
@@ -240,7 +245,7 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
           body: JSON.stringify({ name, country }),
         }),
       );
-      if (res.status !== 200) throw new Error(res.body.error ?? "Could not save your profile");
+      if (res.status !== 200) throw new Error(localizedMessage(res.body.error, t, t("couldNotSaveYourProfile")));
       await activateWallet();
     } catch (err) {
       fail(err, "profile");
@@ -258,10 +263,10 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
 
   return (
     <section className="login-primary">
-      <p className="login-eyebrow">{step === "code" ? "You’re one step away" : step === "profile" ? "A quick introduction" : "Your community is waiting"}</p>
-      <h1 tabIndex={-1}>{step === "code" ? "Check your inbox." : step === "profile" ? "Let’s make it yours." : step === "working" ? "Making you at home…" : step === "device" ? "One quick check." : "Make yourself at home."}</h1>
+      <p className="login-eyebrow">{step === "code" ? t("youReOneStepAway") : step === "profile" ? t("aQuickIntroduction") : t("yourCommunityIsWaiting")}</p>
+      <h1 tabIndex={-1}>{step === "code" ? t("checkYourInbox") : step === "profile" ? t("letSMakeItYours") : step === "working" ? t("makingYouAtHome") : step === "device" ? t("oneQuickCheck") : t("makeYourselfAtHome")}</h1>
       <p className="login-intro">
-        {step === "profile" ? "Tell us your name and where you’re based. You only need to do this once." : step === "code" ? <>Enter the sign-in code sent to <strong>{email}</strong>.</> : step === "working" ? "We’re getting your account ready. Keep this page open for a moment." : step === "device" ? "Approve this browser to securely access your account." : "Sign in or get started. Your next good find is waiting."}
+        {step === "profile" ? t("tellUsYourNameAndWhereYouReBasedYouOnly") : step === "code" ? <>{t("enterTheSignInCodeSentTo")}{" "}<strong>{email}</strong>.</> : step === "working" ? t("weReGettingYourAccountReadyKeepThisPageOpenFor") : step === "device" ? t("approveThisBrowserToSecurelyAccessYourAccount") : t("signInOrGetStartedYourNextGoodFindIsWaiting")}
       </p>
       <form className="login-primary-fields" onSubmit={(event) => {
         event.preventDefault();
@@ -278,27 +283,26 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
               <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
               <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
             </svg>
-            Continue with Google
-          </button>
-          <div className="login-divider"><span />or continue with email<span /></div>
-          <div className="login-field"><label htmlFor="cavos-email">Your email</label><input id="cavos-email" autoComplete="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass} disabled={busy} aria-describedby="login-email-hint" /></div>
+            {t("continueWithGoogle")}</button>
+          <div className="login-divider"><span />{t("orContinueWithEmail")}<span /></div>
+          <div className="login-field"><label htmlFor="cavos-email">{t("yourEmail")}</label><input id="cavos-email" autoComplete="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass} disabled={busy} aria-describedby="login-email-hint" /></div>
         </>}
         {step === "code" && <>
-          <div className="login-field"><label htmlFor="cavos-code">Sign-in code</label><input id="cavos-code" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter your code" className={`${inputClass} login-code-input`} disabled={busy} aria-describedby="login-code-hint" /></div>
-          <p id="login-code-hint" className="login-field-hint">Look for an email from no-reply@cavos.xyz. The code expires in 5 minutes.</p>
+          <div className="login-field"><label htmlFor="cavos-code">{t("signInCode")}</label><input id="cavos-code" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("enterYourCode")} className={`${inputClass} login-code-input`} disabled={busy} aria-describedby="login-code-hint" /></div>
+          <p id="login-code-hint" className="login-field-hint">{t("lookForAnEmailFromNoReplyCavosXyzTheCode")}</p>
         </>}
         {step === "profile" && <>
-          <div className="login-field"><label htmlFor="cavos-name">Your name</label><input id="cavos-name" autoComplete="name" required minLength={2} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ana Retana" className={inputClass} disabled={busy} /></div>
-          <div className="login-field"><label htmlFor="cavos-country">Country of residence</label><input id="cavos-country" autoComplete="country-name" required minLength={2} value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Costa Rica" className={inputClass} disabled={busy} /></div>
+          <div className="login-field"><label htmlFor="cavos-name">{t("yourName")}</label><input id="cavos-name" autoComplete="name" required minLength={2} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("anaRetana")} className={inputClass} disabled={busy} /></div>
+          <div className="login-field"><label htmlFor="cavos-country">{t("countryOfResidence")}</label><input id="cavos-country" autoComplete="country-name" required minLength={2} value={country} onChange={(e) => setCountry(e.target.value)} placeholder={t("costaRica")} className={inputClass} disabled={busy} /></div>
         </>}
-        {step === "device" && <div className="login-service-notice"><p>This account is already connected to a wallet. Approve this device to continue.</p><button type="button" onClick={() => void submitDevice()} disabled={busy} className="login-submit mt-4">{busy ? "Approving device…" : "Approve this device"}</button></div>}
+        {step === "device" && <div className="login-service-notice"><p>{t("thisAccountIsAlreadyConnectedToAWalletApproveThisDevice")}</p><button type="button" onClick={() => void submitDevice()} disabled={busy} className="login-submit mt-4">{busy ? t("approvingDevice") : t("approveThisDevice")}</button></div>}
         {step === "working" && <p role="status" className="login-progress"><span className="login-spinner" />{progress}</p>}
-        {error && <p role="alert" className="login-error">{error}</p>}
-        {(step === "email" || step === "code" || step === "profile") && <button type="submit" disabled={busy || (step === "code" && code.trim().length < 6) || (step === "profile" && (name.trim().length < 2 || country.trim().length < 2))} className="login-submit">{busy ? <><span className="login-spinner" />One moment…</> : <>{step === "email" ? "Continue with email" : step === "code" ? "Verify & continue" : "Let’s get started"}<span aria-hidden="true">→</span></>}</button>}
-        {step === "email" && <p id="login-email-hint" className="login-field-hint login-hint-centered">We’ll email you a sign-in code. No password needed.</p>}
-        {step === "code" && <button type="button" onClick={startOver} disabled={busy} className="login-change-email">← Use a different email</button>}
+        {error && <p role="alert" className="login-error">{localizedMessage(error, t, error)}</p>}
+        {(step === "email" || step === "code" || step === "profile") && <button type="submit" disabled={busy || (step === "code" && code.trim().length < 6) || (step === "profile" && (name.trim().length < 2 || country.trim().length < 2))} className="login-submit">{busy ? <><span className="login-spinner" />{t("oneMoment")}</> : <>{step === "email" ? t("continueWithEmail") : step === "code" ? t("verifyContinue") : t("letSGetStarted")}<span aria-hidden="true">→</span></>}</button>}
+        {step === "email" && <p id="login-email-hint" className="login-field-hint login-hint-centered">{t("weLlEmailYouASignInCodeNoPasswordNeeded")}</p>}
+        {step === "code" && <button type="button" onClick={startOver} disabled={busy} className="login-change-email">{t("useADifferentEmail")}</button>}
       </form>
-      <details className="login-account-details"><summary>How your account works</summary><p>Your payment wallet is created by Cavos. Compaki never holds its key. You approve payments and reward collections from your browser. This demo uses test funds only.</p></details>
+      <details className="login-account-details"><summary>{t("howYourAccountWorks")}</summary><p>{t("yourPaymentWalletIsCreatedByCavosCompakiNeverHoldsIts")}</p></details>
     </section>
   );
 }

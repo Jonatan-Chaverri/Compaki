@@ -1,4 +1,9 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useLocale } from "next-intl";
+
+import { useTranslations } from "next-intl";
 
 // The cart page: joins the cart cookie (via CartProvider) with the storefront
 // catalog, lets the buyer adjust quantities or remove lines, and turns the
@@ -30,6 +35,10 @@ export function CartView({
   products: CartProduct[];
   signedIn: boolean;
 }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
   const { slug, items, count, ready, drop, clear } = useCart();
   const router = useRouter();
   const pathname = usePathname();
@@ -59,21 +68,21 @@ export function CartView({
       });
       const data = (await res.json()) as { checkoutPath?: string; error?: string };
       if (!res.ok || !data.checkoutPath) {
-        throw new Error(data.error ?? "Could not create your order");
+        throw new Error(localizedMessage(data.error, t, t("couldNotCreateYourOrder")));
       }
       clear();
       router.push(data.checkoutPath);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create your order");
+      setError(localizedMessage(err, t, t("couldNotCreateYourOrder")));
       setBusy(false);
     }
   };
 
-  if (!ready) return <div role="status" className="empty-state">Getting your cart ready…</div>;
+  if (!ready) return <div role="status" className="empty-state">{t("gettingYourCartReady")}</div>;
 
   if (lines.length === 0) {
     return (
-      <EmptyState title="A little room for something good." description={`Your cart is empty. Discover what the people at ${marketplaceName} have made for you.`} href={`/m/${slug}`} action="Find your next favorite" />
+      <EmptyState title={t("aLittleRoomForSomethingGood")} description={t("yourCartIsEmptyDiscoverWhatThePeopleAtValueHave", { value1: marketplaceName })} href={`/m/${slug}`} action={t("findYourNextFavorite")} />
     );
   }
 
@@ -84,11 +93,11 @@ export function CartView({
         href={`/m/${slug}`}
         className="text-sm text-slate-500 transition hover:text-slate-700"
       >
-        ← Continue shopping at {marketplaceName}
+        {t("continueShoppingAt")}{" "}{marketplaceName}
       </Link>
-      <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">Your cart</h1>
+      <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">{t("yourCart")}</h1>
       <p className="mt-1 text-sm text-slate-500">
-        {count} item{count === 1 ? "" : "s"} from {marketplaceName}
+        {t("itemCount", { count })} {" "}{t("from")}{" "}{marketplaceName}
       </p>
 
       <ul className="mt-6 space-y-3">
@@ -108,35 +117,34 @@ export function CartView({
                 {product.name}
               </Link>
               <p className="text-xs text-slate-500">
-                {formatUsd(product.priceUsd)} each · by {product.vendorName}
+                {formatUsd(product.priceUsd, locale)} {" "}{t("eachBy")}{" "}{product.vendorName}
               </p>
               <button
                 onClick={() => drop(product.id)}
                 className="mt-1 text-xs text-slate-400 underline decoration-slate-300 underline-offset-2 transition hover:text-red-600"
               >
-                Remove
-              </button>
+                {t("remove")}</button>
             </div>
             <div className="cart-quantity w-36 shrink-0">
               <AddToCartControls productId={product.id} stock={product.stock} />
             </div>
             <p className="cart-total w-20 shrink-0 text-right font-semibold tabular-nums text-slate-900">
-              {formatUsd(product.priceUsd * quantity)}
+              {formatUsd(product.priceUsd * quantity, locale)}
             </p>
           </li>
         ))}
       </ul>
 
       <div className="mt-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-6 py-4 shadow-sm">
-        <span className="text-sm font-medium text-slate-600">Total</span>
+        <span className="text-sm font-medium text-slate-600">{t("total")}</span>
         <span className="text-xl font-semibold tabular-nums text-slate-900">
-          {formatUsd(totalUsd)}
+          {formatUsd(totalUsd, locale)}
         </span>
       </div>
 
       {error && (
         <p role="alert" className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-          {error}
+          {localizedMessage(error, t, error)}
         </p>
       )}
 
@@ -149,10 +157,9 @@ export function CartView({
           {busy ? (
             <span className="inline-flex items-center gap-2">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              Creating your order…
-            </span>
+              {t("creatingYourOrder")}</span>
           ) : (
-            "Proceed to payment"
+            t("proceedToPayment")
           )}
         </button>
       ) : (
@@ -160,12 +167,10 @@ export function CartView({
           href={`/login?next=${encodeURIComponent(pathname)}`}
           className="mt-6 block w-full rounded-full bg-navy-900 px-6 py-3.5 text-center text-base font-medium text-white transition hover:bg-navy-700"
         >
-          Sign in to check out
-        </Link>
+          {t("signInToCheckOut")}</Link>
       )}
       <p className="mt-3 text-center text-xs text-slate-400">
-        Your order stays reserved for 10 minutes once you proceed to payment.
-      </p>
+        {t("yourOrderStaysReservedFor10MinutesOnceYouProceedTo")}</p>
     </div>
   );
 }

@@ -1,4 +1,7 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useTranslations } from "next-intl";
 
 import Link from "next/link";
 import { useState } from "react";
@@ -15,6 +18,8 @@ export function JoinForm({
   marketplaceName: string;
   user: { name: string; email: string | null } | null;
 }) {
+  const t = useTranslations("ui");
+
   const [sells, setSells] = useState("");
   const [state, setState] = useState<"idle" | "submitting" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -29,10 +34,10 @@ export function JoinForm({
         body: JSON.stringify({ sells }),
       });
       const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Registration failed");
+      if (!res.ok) throw new Error(localizedMessage(data.error, t, t("registrationFailed")));
       setState("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      setError(localizedMessage(err, t, t("registrationFailed")));
       setState("idle");
     }
   };
@@ -42,17 +47,14 @@ export function JoinForm({
       <div className="py-4 text-center">
         <p className="text-4xl">🎉</p>
         <h2 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
-          You&apos;re in — add your first product
-        </h2>
+          {t("youReInAddYourFirstProduct")}</h2>
         <p className="mt-2 text-sm text-slate-600">
-          Your payment account is ready. Your share of each demo sale will appear in your balance.
-        </p>
+          {t("yourPaymentAccountIsReadyYourShareOfEachDemoSale")}</p>
         <Link
           href={`/vendor/${slug}`}
           className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
         >
-          Go to my products
-        </Link>
+          {t("goToMyProducts")}</Link>
       </div>
     );
   }
@@ -62,16 +64,13 @@ export function JoinForm({
     return (
       <div className="py-2 text-center">
         <p className="text-sm text-slate-600">
-          Sign in or create a Compaki account first — you&apos;ll join {marketplaceName} as that
-          account.
-        </p>
+          {t("signInOrCreateACompakiAccountFirstYouLlJoin")}{" "}{marketplaceName} {" "}{t("asThatAccount")}</p>
         <div className="mt-5 flex justify-center">
           <Link
             href={`/login?next=${next}`}
             className="rounded-full bg-navy-900 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-navy-700"
           >
-            Sign in or create account
-          </Link>
+            {t("signInOrCreateAccount")}</Link>
         </div>
       </div>
     );
@@ -80,19 +79,18 @@ export function JoinForm({
   return (
     <div>
       <p className="mb-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-        Joining as <span className="font-medium text-slate-900">{user.name}</span>
+        {t("joiningAs")}{" "}<span className="font-medium text-slate-900">{user.name}</span>
         {user.email && <span className="text-slate-400"> · {user.email}</span>}
       </p>
       <div className="mb-6">
         <label htmlFor="seller-story" className="mb-1.5 block text-sm font-medium text-slate-700">
-          What do you sell?
-        </label>
+          {t("whatDoYouSell")}</label>
         <input
           id="seller-story"
           type="text"
           value={sells}
           onChange={(e) => setSells(e.target.value)}
-          placeholder="Hand-roasted coffee from my family farm"
+          placeholder={t("handRoastedCoffeeFromMyFamilyFarm")}
           maxLength={200}
           className={inputClass}
           disabled={state === "submitting"}
@@ -101,7 +99,7 @@ export function JoinForm({
 
       {error && (
         <p className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
-          {error}
+          {localizedMessage(error, t, error)}
         </p>
       )}
 
@@ -113,15 +111,13 @@ export function JoinForm({
         {state === "submitting" ? (
           <span className="inline-flex items-center gap-2">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-            Setting up your payment account… (~15s)
-          </span>
+            {t("settingUpYourPaymentAccount15s")}</span>
         ) : (
-          `Join ${marketplaceName}`
+          t("joinValue", { value1: marketplaceName })
         )}
       </button>
       <p className="mt-3 text-center text-xs text-slate-400">
-        We set up your demo payment account for you. No bank details or crypto setup needed.
-      </p>
+        {t("weSetUpYourDemoPaymentAccountForYouNoBank")}</p>
     </div>
   );
 }

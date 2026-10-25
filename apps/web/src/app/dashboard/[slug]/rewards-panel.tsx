@@ -1,4 +1,9 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useLocale } from "next-intl";
+
+import { useTranslations } from "next-intl";
 
 // Operator view of a protected community fund: Community Rewards periods or
 // fundraising progress. Every rule, pool, total and recipient here comes
@@ -28,6 +33,10 @@ interface Payload {
 }
 
 export function RewardsPanel({ slug }: { slug: string }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
   const [data, setData] = useState<Payload | null>(null);
   const [fetchedAt, setFetchedAt] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -45,13 +54,13 @@ export function RewardsPanel({ slug }: { slug: string }) {
           cache: "no-store",
         });
         const body = (await res.json()) as Payload & { error?: string };
-        if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+        if (!res.ok) throw new Error(localizedMessage(body.error, t, t("requestFailedValue", { value1: res.status })));
         if (cancelled) return;
         setData(body);
         setFetchedAt(Date.now());
         setLoadError(null);
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Could not load the community fund");
+        if (!cancelled) setLoadError(localizedMessage(err, t, t("couldNotLoadTheCommunityFund")));
       }
     };
     void load();
@@ -62,20 +71,20 @@ export function RewardsPanel({ slug }: { slug: string }) {
       clearInterval(poll);
       clearInterval(tick);
     };
-  }, [slug, version]);
+  }, [slug, version, t]);
 
   const release = async () => {
-    setTx({ state: "pending", label: "Paying out the fundraising target" });
+    setTx({ state: "pending", label: t("payingOutTheFundraisingTarget") });
     try {
       const res = await fetch(`/api/rewards/marketplace/${encodeURIComponent(slug)}/fundraise/release`, {
         method: "POST",
       });
       const result = (await res.json()) as { txHash?: string; error?: string };
-      if (!res.ok || !result.txHash) throw new Error(result.error ?? "Payout failed");
-      setTx({ state: "done", label: "Fundraising payout", txHash: result.txHash });
+      if (!res.ok || !result.txHash) throw new Error(localizedMessage(result.error, t, t("payoutFailed")));
+      setTx({ state: "done", label: t("fundraisingPayout"), txHash: result.txHash });
       setVersion((v) => v + 1);
     } catch (err) {
-      setTx({ state: "error", message: err instanceof Error ? err.message : "Payout failed" });
+      setTx({ state: "error", message: localizedMessage(err, t, t("payoutFailed")) });
     }
   };
 
@@ -87,8 +96,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
         ) : (
           <span className="inline-flex items-center gap-2">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-slate-500" />
-            Reading the community fund from the contract…
-          </span>
+            {t("readingTheCommunityFundFromTheContract")}</span>
         )}
       </section>
     );
@@ -98,9 +106,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
   if (!view?.bound) {
     return (
       <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
-        The community fund is still being set up for this marketplace. Contact your administrator to finish
-        connecting it before accepting purchases.
-      </section>
+        {t("theCommunityFundIsStillBeingSetUpForThisMarketplace")}</section>
     );
   }
 
@@ -110,14 +116,13 @@ export function RewardsPanel({ slug }: { slug: string }) {
     <section className="mt-6 space-y-4">
       <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5">
         <p className="text-sm text-slate-700">
-          <span className="font-medium text-slate-900">{percent(view.communityBps)} of every sale</span>{" "}
+          <span className="font-medium text-slate-900">{percent(view.communityBps, locale)} {" "}{t("ofEverySale")}</span>{" "}
           {data.mode === "rewards"
-            ? "goes into a protected fund that, every period, is shared between the people who sold and bought here, by how much each one sold and bought. Periods follow one another by themselves."
-            : "goes into a protected fund until it reaches the target, then it is paid to the wallets fixed at launch."}{" "}
-          Nobody, including you, can withdraw it or change these rules.
-        </p>
+            ? t("goesIntoAProtectedFundThatEveryPeriodIsSharedBetween")
+            : t("goesIntoAProtectedFundUntilItReachesTheTargetThen")}{" "}
+          {t("nobodyIncludingYouCanWithdrawItOrChangeTheseRules")}</p>
         <p className="mt-2 text-xs text-slate-500">
-          Contract{" "}
+          {t("contract")}{" "}
           <a
             href={view.contractUrl}
             target="_blank"
@@ -126,8 +131,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
           >
             {shortAddress(view.contractId)} ↗
           </a>{" "}
-          · amounts in {view.assetCode}, self-issued testnet demo money (not Circle USDC)
-        </p>
+          {t("amountsIn")}{" "}{view.assetCode}{t("selfIssuedTestnetDemoMoneyNotCircleUsdc")}</p>
       </div>
 
       <TxBanner tx={tx} onDismiss={() => setTx({ state: "idle" })} />
@@ -135,9 +139,9 @@ export function RewardsPanel({ slug }: { slug: string }) {
       {data.rewards && (
         <>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Stat label="In the rewards fund" value={formatAmount(data.rewards.treasury?.heldUsd ?? 0)} accent />
-            <Stat label="Total contributed" value={formatAmount(data.rewards.treasury?.contributedUsd ?? 0)} />
-            <Stat label="Claimed by sellers and buyers" value={formatAmount(data.rewards.treasury?.claimedUsd ?? 0)} />
+            <Stat label={t("inTheRewardsFund")} value={formatAmount(data.rewards.treasury?.heldUsd ?? 0, locale)} accent />
+            <Stat label={t("totalContributed")} value={formatAmount(data.rewards.treasury?.contributedUsd ?? 0, locale)} />
+            <Stat label={t("claimedBySellersAndBuyers")} value={formatAmount(data.rewards.treasury?.claimedUsd ?? 0, locale)} />
           </div>
           <RewardsRules rewards={data.rewards} ledger={ledger} />
           <div className="space-y-3">
@@ -159,12 +163,9 @@ export function RewardsPanel({ slug }: { slug: string }) {
       {data.canManage && <GuaranteeChecks slug={slug} mode={data.mode} />}
 
       <details className="pt-2 text-xs leading-relaxed text-slate-500">
-        <summary className="cursor-pointer">How these numbers are verified</summary>
+        <summary className="cursor-pointer">{t("howTheseNumbersAreVerified")}</summary>
         <p className="mt-2">
-          Rules, pools, totals and recipients are read from Stellar on every refresh. Who sold and bought in each
-          period comes from Compaki&apos;s sale records; each person&apos;s exact reward is read from the
-          contract when they claim. Demo funds have no monetary value.
-        </p>
+          {t("rulesPoolsTotalsAndRecipientsAreReadFromStellarOnEvery")}</p>
       </details>
     </section>
   );
@@ -194,6 +195,8 @@ type CheckResult =
   | { state: "error"; message: string };
 
 function GuaranteeChecks({ slug, mode }: { slug: string; mode: CommunityMode }) {
+  const t = useTranslations("ui");
+
   const [results, setResults] = useState<Record<string, CheckResult>>({});
 
   const check = async (kind: CheckKind) => {
@@ -212,7 +215,7 @@ function GuaranteeChecks({ slug, mode }: { slug: string; mode: CommunityMode }) 
         control?: string;
         message?: string;
       };
-      if (!res.ok) throw new Error(body.error ?? "Check failed");
+      if (!res.ok) throw new Error(localizedMessage(body.error, t, t("checkFailed")));
       setResults((r) => ({
         ...r,
         [kind]: {
@@ -227,7 +230,7 @@ function GuaranteeChecks({ slug, mode }: { slug: string; mode: CommunityMode }) 
     } catch (err) {
       setResults((r) => ({
         ...r,
-        [kind]: { state: "error", message: err instanceof Error ? err.message : "Check failed" },
+        [kind]: { state: "error", message: localizedMessage(err, t, t("checkFailed")) },
       }));
     }
   };
@@ -235,15 +238,15 @@ function GuaranteeChecks({ slug, mode }: { slug: string; mode: CommunityMode }) 
   const checks: { kind: CheckKind; title: string; detail: string }[] = [
     {
       kind: "withdraw",
-      title: "Withdraw the fund to your account",
-      detail: "You move the saved tokens straight out of the contract via the token contract.",
+      title: t("withdrawTheFundToYourAccount"),
+      detail: t("youMoveTheSavedTokensStraightOutOfTheContractVia"),
     },
     ...(mode === "rewards"
       ? [
           {
             kind: "claim-for-someone" as const,
-            title: "Claim a buyer's reward for them",
-            detail: "You sign a claim for one of this period's participants. Only they can claim their reward.",
+            title: t("claimABuyerSRewardForThem"),
+            detail: t("youSignAClaimForOneOfThisPeriodSParticipants"),
           },
         ]
       : []),
@@ -251,11 +254,9 @@ function GuaranteeChecks({ slug, mode }: { slug: string; mode: CommunityMode }) 
 
   return (
     <details className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <summary className="cursor-pointer font-medium text-slate-900">How is the community fund protected?</summary>
+      <summary className="cursor-pointer font-medium text-slate-900">{t("howIsTheCommunityFundProtected")}</summary>
       <p className="mt-0.5 text-sm text-slate-500">
-        Each check evaluates the action with your operator signature against the live contract, exactly as the
-        network would. Nothing is submitted.
-      </p>
+        {t("eachCheckEvaluatesTheActionWithYourOperatorSignatureAgainstThe")}</p>
       <div className="mt-4 space-y-3">
         {checks.map((c) => {
           const r = results[c.kind] ?? { state: "idle" };
@@ -268,27 +269,26 @@ function GuaranteeChecks({ slug, mode }: { slug: string; mode: CommunityMode }) 
                 <p className="text-sm font-medium text-slate-800">{c.title}</p>
                 <p className="text-xs text-slate-500">{c.detail}</p>
                 {r.state === "done" && !r.applicable && (
-                  <p className="mt-1 text-xs text-slate-600">{r.message}</p>
+                  <p className="mt-1 text-xs text-slate-600">{localizedMessage(r.message, t, t("checkNotApplicable"))}</p>
                 )}
                 {r.state === "done" && r.applicable && r.rejected && (
                   <p className="mt-1 text-xs text-emerald-700">
-                    ✓ Rejected by the contract: <code className="font-mono">{r.reason}</code>
-                    {r.control && <span className="text-slate-500"> · control: {r.control}</span>}
+                    {t("rejectedByTheContract")}{" "}<code className="font-mono">{r.reason}</code>
+                    {r.control && <span className="text-slate-500"> {" "}{t("control")}{" "}{r.control}</span>}
                   </p>
                 )}
                 {r.state === "done" && r.applicable && !r.rejected && (
                   <p className="mt-1 text-xs font-medium text-red-700">
-                    ✗ The action was NOT rejected — report this.
-                  </p>
+                    {t("theActionWasNotRejectedReportThis")}</p>
                 )}
-                {r.state === "error" && <p className="mt-1 text-xs text-red-600">{r.message}</p>}
+                {r.state === "error" && <p className="mt-1 text-xs text-red-600">{localizedMessage(r.message, t, t("checkFailed"))}</p>}
               </div>
               <button
                 onClick={() => void check(c.kind)}
                 disabled={r.state === "running"}
                 className="shrink-0 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40"
               >
-                {r.state === "running" ? "Checking…" : "Check protection"}
+                {r.state === "running" ? t("checking") : t("checkProtection")}
               </button>
             </div>
           );

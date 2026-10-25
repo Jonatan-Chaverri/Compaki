@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 // Personal details and everyday account actions, with payment references on demand.
 
 import { AppHeader, EmptyState, PageHeading } from "@/components/shell";
@@ -8,8 +9,10 @@ import { ProfileView, type ProfileUser } from "./profile-view";
 export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {
+  const t = await getTranslations("ui");
+
   const res = await apiFetch("/api/me");
-  if (!res.ok) throw new Error(`Profile request failed (${res.status})`);
+  if (!res.ok) throw new Error(t("profileRequestFailedValue", { value1: res.status }));
   const { user } = (await res.json()) as { user: ProfileUser | null };
 
   if (!user) {
@@ -19,10 +22,10 @@ export default async function ProfilePage() {
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
           <EmptyState
             icon="shield"
-            title="Make yourself at home."
-            description="Sign in to manage your profile, check your balance and find your purchases and rewards."
+            title={t("makeYourselfAtHome")}
+            description={t("signInToManageYourProfileCheckYourBalanceAndFind")}
             href="/login?next=/profile"
-            action="Sign in"
+            action={t("signIn")}
           />
         </main>
       </div>
@@ -34,9 +37,9 @@ export default async function ProfilePage() {
       <AppHeader />
       <main id="main-content" tabIndex={-1} className="profile-page">
         <PageHeading
-          eyebrow="Your Compaki"
-          title="My profile"
-          description="A space for you, your purchases and your community."
+          eyebrow={t("yourCompaki")}
+          title={t("myProfile")}
+          description={t("aSpaceForYouYourPurchasesAndYourCommunity")}
         />
         <ProfileView user={user} />
       </main>

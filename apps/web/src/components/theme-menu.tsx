@@ -1,6 +1,8 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { LanguageOptions } from "./language-menu";
 import { Icon, type IconName } from "./icon";
 import {
   getServerThemePreference,
@@ -10,13 +12,15 @@ import {
   type ThemePreference,
 } from "@/lib/theme";
 
+export function ThemeOptions({ onSelect }: { onSelect?: () => void }) {
+  const t = useTranslations("ui");
+
 const OPTIONS: { value: ThemePreference; label: string; icon: IconName }[] = [
-  { value: "light", label: "Light", icon: "sun" },
-  { value: "dark", label: "Dark", icon: "moon" },
-  { value: "system", label: "Device", icon: "monitor" },
+  { value: "light", label: t("light"), icon: "sun" },
+  { value: "dark", label: t("dark"), icon: "moon" },
+  { value: "system", label: t("device"), icon: "monitor" },
 ];
 
-export function ThemeOptions({ onSelect }: { onSelect?: () => void }) {
   const preference = useSyncExternalStore(
     subscribeThemePreference,
     getThemePreference,
@@ -24,8 +28,8 @@ export function ThemeOptions({ onSelect }: { onSelect?: () => void }) {
   );
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   return (
-    <div className="theme-options" role="group" aria-label="Appearance">
-      <p>Appearance</p>
+    <div className="theme-options" role="group" aria-label={t("appearance")}>
+      <p>{t("appearance")}</p>
       <div>
         {OPTIONS.map((option, i) => (
           <button
@@ -59,8 +63,8 @@ export function ThemeOptions({ onSelect }: { onSelect?: () => void }) {
       </div>
       <small>
         {preference === "system"
-          ? "Matches your device’s appearance."
-          : `${preference === "dark" ? "Dark" : "Light"} appearance on this device.`}
+          ? t("matchesYourDeviceSAppearance")
+          : t("valueAppearanceOnThisDevice", { value1: preference === "dark" ? t("dark").toLocaleLowerCase() : t("light").toLocaleLowerCase() })}
       </small>
     </div>
   );
@@ -68,6 +72,8 @@ export function ThemeOptions({ onSelect }: { onSelect?: () => void }) {
 
 /** Compact standalone control for the sign-in header, which has no account menu. */
 export function ThemeMenu() {
+  const t = useTranslations("ui");
+
   const preference = useSyncExternalStore(
     subscribeThemePreference,
     getThemePreference,
@@ -115,8 +121,8 @@ export function ThemeMenu() {
         ref={toggle}
         type="button"
         className="theme-toggle"
-        aria-label="Appearance"
-        title="Appearance"
+        aria-label={t("languageAndAppearance")}
+        title={t("languageAndAppearance")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -135,9 +141,10 @@ export function ThemeMenu() {
       {open && (
         <div
           role="menu"
-          aria-label="Appearance settings"
+          aria-label={t("languageAndAppearance")}
           className="theme-popover"
         >
+          <LanguageOptions />
           <ThemeOptions
             onSelect={() => {
               setOpen(false);

@@ -1,4 +1,9 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useLocale } from "next-intl";
+
+import { useTranslations } from "next-intl";
 
 // Checkout for a pending order: shows the order summary and a live countdown
 // (orders expire 10 minutes after creation), collects the shipping address,
@@ -50,6 +55,8 @@ function secondsLeft(expiresAt: string): number {
 }
 
 function Countdown({ expiresAt, onExpire }: { expiresAt: string; onExpire: () => void }) {
+  const t = useTranslations("ui");
+
   const [left, setLeft] = useState(() => secondsLeft(expiresAt));
 
   useEffect(() => {
@@ -74,9 +81,7 @@ function Countdown({ expiresAt, onExpire }: { expiresAt: string; onExpire: () =>
         urgent ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"
       }`}
     >
-      ⏱ Order reserved for {minutes}:{String(seconds).padStart(2, "0")} — pay before it
-      expires
-    </p>
+      {t("orderReservedFor")}{" "}{minutes}:{String(seconds).padStart(2, "0")} {" "}{t("payBeforeItExpires")}</p>
   );
 }
 
@@ -87,6 +92,10 @@ export function OrderCheckout({
   order: OrderPayload;
   user: { name: string; email: string | null; country: string | null };
 }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [postalCode, setPostalCode] = useState("");
@@ -126,15 +135,15 @@ export function OrderCheckout({
       const result = await followSignatures(first, wallet.signXdr, (request) =>
         setApproval(
           request.steps && request.steps > 1
-            ? `Approve payment ${request.step} of ${request.steps} in your wallet…`
-            : "Approve the payment in your wallet…",
+            ? t("approvePaymentValueOfValueInYourWallet", { value1: request.step ?? 1, value2: request.steps })
+            : t("approveThePaymentInYourWallet"),
         ),
       );
-      if (result.status !== 200) throw new Error(result.body.error ?? "Payment failed");
+      if (result.status !== 200) throw new Error(localizedMessage(result.body.error, t, t("paymentFailed")));
       setSales(result.body.sales ?? []);
       setState("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Payment failed");
+      setError(localizedMessage(err, t, t("paymentFailed")));
       setState("idle");
     }
   };
@@ -144,17 +153,14 @@ export function OrderCheckout({
       <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
         <p className="text-3xl">⌛</p>
         <h1 className="mt-3 text-xl font-semibold tracking-tight text-slate-900">
-          This order expired
-        </h1>
+          {t("thisOrderExpired")}</h1>
         <p className="mx-auto mt-2 max-w-sm text-sm text-slate-600">
-          Orders are only valid for 10 minutes. You weren&apos;t charged — build your cart
-          again and check out when you&apos;re ready.
-        </p>
+          {t("ordersAreOnlyValidFor10MinutesYouWerenTCharged")}</p>
         <Link
           href={`/m/${order.marketplace.slug}`}
           className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-2.5 text-sm font-medium text-white transition hover:bg-navy-700"
         >
-          Back to {order.marketplace.name}
+          {t("backTo2")}{" "}{order.marketplace.name}
         </Link>
       </div>
     );
@@ -174,14 +180,12 @@ export function OrderCheckout({
           className="mt-4 text-xl font-semibold tracking-tight text-slate-900"
           style={{ animation: "rise-in 0.4s ease-out 0.1s both" }}
         >
-          Payment complete
-        </h1>
+          {t("paymentComplete")}</h1>
         <p
           className="mt-1 text-sm text-slate-600"
           style={{ animation: "rise-in 0.4s ease-out 0.2s both" }}
         >
-          Your {formatUsd(order.totalUsd)} demo order from {order.marketplace.name} is confirmed. See how each purchase was shared:
-        </p>
+          {t("your")}{" "}{formatUsd(order.totalUsd, locale)} {" "}{t("demoOrderFrom")}{" "}{order.marketplace.name} {" "}{t("isConfirmedSeeHowEachPurchaseWasShared")}</p>
 
         <ul className="mt-5 space-y-2.5 text-left text-sm">
           {(sales.length > 0
@@ -203,15 +207,14 @@ export function OrderCheckout({
               <span className="text-slate-600">
                 {sale.quantity} × <span className="font-medium text-slate-900">{sale.productName}</span>
                 {" — "}
-                {formatUsd(sale.amountUsd)}
+                {formatUsd(sale.amountUsd, locale)}
               </span>
               {sale.receiptPath && (
                 <Link
                   href={sale.receiptPath}
                   className="text-xs font-medium text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-900"
                 >
-                  receipt →
-                </Link>
+                  {t("receipt2")}</Link>
               )}
             </li>
           ))}
@@ -222,11 +225,10 @@ export function OrderCheckout({
             href="/orders"
             className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white transition hover:bg-navy-700"
           >
-            View my orders →
-          </Link>
+            {t("viewMyOrders")}</Link>
           <p className="mt-3 text-xs text-slate-500">
             <Link href={`/m/${order.marketplace.slug}`} className="hover:text-slate-700">
-              back to {order.marketplace.name}
+              {t("backTo3")}{" "}{order.marketplace.name}
             </Link>
           </p>
         </div>
@@ -237,14 +239,13 @@ export function OrderCheckout({
   return (
     <div>
       <CheckoutSteps current="payment" />
-      <h1 className="mb-2 text-3xl font-medium tracking-tight text-slate-900">One step closer to something good.</h1>
-      <p className="mb-6 text-sm leading-relaxed text-slate-500">Check your order, add delivery details, and try your payment with demo funds.</p>
+      <h1 className="mb-2 text-3xl font-medium tracking-tight text-slate-900">{t("oneStepCloserToSomethingGood")}</h1>
+      <p className="mb-6 text-sm leading-relaxed text-slate-500">{t("checkYourOrderAddDeliveryDetailsAndTryYourPaymentWith")}</p>
       <Link
         href={`/m/${order.marketplace.slug}/cart`}
         className="text-sm text-slate-500 transition hover:text-slate-700"
       >
-        ← Back to cart
-      </Link>
+        {t("backToCart")}</Link>
 
       {/* Order summary */}
       <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -257,19 +258,19 @@ export function OrderCheckout({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-900">{item.productName}</p>
                 <p className="text-xs text-slate-500">
-                  {item.quantity} × {formatUsd(item.unitPriceUsd)}
+                  {item.quantity} × {formatUsd(item.unitPriceUsd, locale)}
                 </p>
               </div>
               <p className="text-sm font-semibold tabular-nums text-slate-900">
-                {formatUsd(item.lineTotalUsd)}
+                {formatUsd(item.lineTotalUsd, locale)}
               </p>
             </li>
           ))}
         </ul>
         <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/60 px-5 py-3">
-          <span className="text-sm font-medium text-slate-600">Total</span>
+          <span className="text-sm font-medium text-slate-600">{t("total")}</span>
           <span className="font-semibold tabular-nums text-slate-900">
-            {formatUsd(order.totalUsd)}
+            {formatUsd(order.totalUsd, locale)}
           </span>
         </div>
       </div>
@@ -279,44 +280,43 @@ export function OrderCheckout({
       </div>
 
       <form className="mt-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" onSubmit={(event) => { event.preventDefault(); if (valid && state !== "processing") void submit(); }}>
-        <h2 className="mb-4 text-lg font-medium tracking-tight">Where should your order go?</h2>
+        <h2 className="mb-4 text-lg font-medium tracking-tight">{t("whereShouldYourOrderGo")}</h2>
         <p className="mb-5 rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
-          Buying as <span className="font-medium text-slate-900">{user.name}</span>
-          {user.email ? ` (${user.email})` : ""}
+          {t("buyingAs")}{" "}<span className="font-medium text-slate-900">{user.name}</span>
+          {user.email ? t("value", { value1: user.email }) : ""}
         </p>
 
         <div className="mb-5">
           <label htmlFor="shipping-address" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Shipping address
-          </label>
+            {t("shippingAddress")}</label>
           <input
             type="text"
             id="shipping-address"
             autoComplete="street-address"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="Street, number, apartment…"
+            placeholder={t("streetNumberApartment")}
             className={inputClass}
             disabled={state === "processing"}
           />
         </div>
         <div className="mb-5 grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="shipping-city" className="mb-1.5 block text-sm font-medium text-slate-700">City</label>
+            <label htmlFor="shipping-city" className="mb-1.5 block text-sm font-medium text-slate-700">{t("city")}</label>
             <input
               type="text"
               id="shipping-city"
               autoComplete="address-level2"
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              placeholder="San José"
+              placeholder={t("sanJose")}
               className={inputClass}
               disabled={state === "processing"}
             />
           </div>
           <div>
             <label htmlFor="shipping-postalCode" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Postal code <span className="font-normal text-slate-400">(optional)</span>
+              {t("postalCode")}{" "}<span className="font-normal text-slate-400">{t("optional")}</span>
             </label>
             <input
               type="text"
@@ -331,14 +331,14 @@ export function OrderCheckout({
           </div>
         </div>
         <div className="mb-6">
-          <label htmlFor="shipping-country" className="mb-1.5 block text-sm font-medium text-slate-700">Country</label>
+          <label htmlFor="shipping-country" className="mb-1.5 block text-sm font-medium text-slate-700">{t("country")}</label>
           <input
             type="text"
             id="shipping-country"
             autoComplete="country-name"
             value={country}
             onChange={(e) => setCountry(e.target.value)}
-            placeholder="Costa Rica"
+            placeholder={t("costaRica")}
             className={inputClass}
             disabled={state === "processing"}
           />
@@ -346,7 +346,7 @@ export function OrderCheckout({
 
         {error && (
           <p role="alert" className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5 text-sm text-red-700">
-            {error}
+            {localizedMessage(error, t, error)}
           </p>
         )}
 
@@ -358,17 +358,17 @@ export function OrderCheckout({
           {state === "processing" ? (
             <span className="inline-flex items-center gap-2">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              {approval ?? "Processing payment…"}
+              {approval ?? t("processingPayment")}
             </span>
           ) : (
-            `Pay ${formatUsd(order.totalUsd)} with demo funds`
+            t("payValueWithDemoFunds", { value1: formatUsd(order.totalUsd, locale) })
           )}
         </button>
 
         <p className="mt-3 text-center text-xs text-slate-400">
           {state === "processing"
-            ? "Confirming your order. This can take a few seconds per item."
-            : "Demo funds only. No real money will be charged."}
+            ? t("confirmingYourOrderThisCanTakeAFewSecondsPerItem")
+            : t("demoFundsOnlyNoRealMoneyWillBeCharged")}
         </p>
       </form>
     </div>

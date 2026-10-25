@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 // Cart UI shared across every /m/[slug] page: a provider that mirrors the
 // cart cookie into React state, a header link showing the item count, and the
@@ -93,11 +94,13 @@ export function CartProvider({ slug, children }: { slug: string; children: React
 
 /** Header cart link with a live item-count badge. */
 export function HeaderCartLink() {
+  const t = useTranslations("ui");
+
   const { slug, count, ready } = useCart();
   return (
     <Link
       href={`/m/${slug}/cart`}
-      aria-label={`Cart, ${count} item${count === 1 ? "" : "s"}`}
+      aria-label={t("cartCount", { count })}
       className="relative flex flex-col items-center gap-1 rounded-lg px-2 py-1 transition hover:bg-slate-50"
     >
       <span className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-600">
@@ -120,7 +123,7 @@ export function HeaderCartLink() {
           </span>
         )}
       </span>
-      <span className="text-[11px] font-medium leading-none text-slate-600">Cart</span>
+      <span className="text-[11px] font-medium leading-none text-slate-600">{t("cart")}</span>
     </Link>
   );
 }
@@ -138,6 +141,8 @@ export function AddToCartControls({
   stock: number;
   size?: "md" | "lg";
 }) {
+  const t = useTranslations("ui");
+
   const { items, add, remove } = useCart();
   const quantity = items[productId] ?? 0;
   const heightClass = size === "lg" ? "h-12 text-base" : "h-11 text-sm";
@@ -149,7 +154,7 @@ export function AddToCartControls({
         disabled={stock <= 0}
         className={`${heightClass} w-full rounded-full bg-navy-900 px-5 font-medium text-white transition hover:bg-navy-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400`}
       >
-        {stock <= 0 ? "Out of stock" : "Add to cart"}
+        {stock <= 0 ? t("outOfStock") : t("addToCart")}
       </button>
     );
   }
@@ -163,18 +168,18 @@ export function AddToCartControls({
     >
       <button
         onClick={() => remove(productId)}
-        aria-label="Remove one unit"
+        aria-label={t("removeOneUnit")}
         className={stepperButton}
       >
         −
       </button>
-      <span aria-label={`${quantity} in cart`} role="status" className="flex flex-1 items-center justify-center whitespace-nowrap font-semibold tabular-nums text-slate-900">
+      <span aria-label={t("valueInCart", { value1: quantity })} role="status" className="flex flex-1 items-center justify-center whitespace-nowrap font-semibold tabular-nums text-slate-900">
         {quantity}
       </span>
       <button
         onClick={() => add(productId, stock)}
         disabled={quantity >= stock}
-        aria-label="Add one unit"
+        aria-label={t("addOneUnit")}
         className={stepperButton}
       >
         +

@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -6,6 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icon";
 
 export function AppNavigation() {
+  const t = useTranslations("ui");
+
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -26,19 +29,19 @@ export function AppNavigation() {
     };
   }, [open]);
   const links = [
-    { href: "/marketplaces", label: "Explore marketplaces", active: pathname === "/marketplaces" || pathname.startsWith("/m/") },
-    { href: "/#how-it-works", label: "How it works", active: false },
-    { href: "/dashboard", label: "For your community", active: pathname.startsWith("/dashboard") || pathname === "/onboarding" },
+    { href: "/marketplaces", label: t("exploreMarketplaces"), active: pathname === "/marketplaces" || pathname.startsWith("/m/") },
+    { href: "/#how-it-works", label: t("howItWorks"), active: false },
+    { href: "/dashboard", label: t("forYourCommunity"), active: pathname.startsWith("/dashboard") || pathname === "/onboarding" },
   ];
   return <>
-    <nav className="desktop-nav" aria-label="Main navigation">
+    <nav className="desktop-nav" aria-label={t("mainNavigation")}>
       {links.map(link => <Link key={link.href} href={link.href} aria-current={link.active ? "page" : undefined}>{link.label}</Link>)}
     </nav>
-    <button ref={toggle} className="mobile-nav-toggle" aria-label={open ? "Close navigation" : "Open navigation"} aria-expanded={open} aria-controls="mobile-navigation" onClick={() => setOpen(!open)}><Icon name={open ? "close" : "menu"} /></button>
-    {open && <nav ref={menu} id="mobile-navigation" className="mobile-nav" aria-label="Mobile navigation">
+    <button ref={toggle} className="mobile-nav-toggle" aria-label={open ? t("closeNavigation") : t("openNavigation")} aria-expanded={open} aria-controls="mobile-navigation" onClick={() => setOpen(!open)}><Icon name={open ? "close" : "menu"} /></button>
+    {open && <nav ref={menu} id="mobile-navigation" className="mobile-nav" aria-label={t("mobileNavigation")}>
       {links.map(link => <Link key={link.href} href={link.href} aria-current={link.active ? "page" : undefined} onClick={() => setOpen(false)}>{link.label}<Icon name="chevron" className="h-4 w-4" /></Link>)}
-      <Link href="/orders" onClick={() => setOpen(false)}>My orders<Icon name="bag" className="h-4 w-4" /></Link>
-      <Link href="/rewards" onClick={() => setOpen(false)}>My community rewards<Icon name="leaf" className="h-4 w-4" /></Link>
+      <Link href="/orders" onClick={() => setOpen(false)}>{t("myOrders")}<Icon name="bag" className="h-4 w-4" /></Link>
+      <Link href="/rewards" onClick={() => setOpen(false)}>{t("myCommunityRewards")}<Icon name="leaf" className="h-4 w-4" /></Link>
     </nav>}
   </>;
 }

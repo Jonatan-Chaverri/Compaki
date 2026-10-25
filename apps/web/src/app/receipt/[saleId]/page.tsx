@@ -1,3 +1,6 @@
+import { recipientRole } from "@/i18n/labels";
+import { getLocale } from "next-intl/server";
+import { getTranslations } from "next-intl/server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -55,13 +58,17 @@ async function getReceipt(saleId: string): Promise<ReceiptPayload | null> {
 export async function generateMetadata(props: {
   params: Promise<{ saleId: string }>;
 }): Promise<Metadata> {
+  const locale = await getLocale();
+
+  const t = await getTranslations("ui");
+
   const { saleId } = await props.params;
   const receipt = await getReceipt(saleId);
-  if (!receipt) return { title: "Receipt — Compaki" };
+  if (!receipt) return { title: t("receiptCompaki") };
 
-  const title = `Where your money went — ${formatUsd(receipt.sale.amountUsd)} at ${receipt.marketplace.name}`;
+  const title = t("whereYourMoneyWentValueAtValue", { value1: formatUsd(receipt.sale.amountUsd, locale), value2: receipt.marketplace.name });
   const description = receipt.breakdown
-    .map((row) => `${formatUsd(row.amountUsd)} to ${row.recipient} (${row.role})`)
+    .map((row) => t("valueToValueValue", { value1: formatUsd(row.amountUsd, locale), value2: row.recipient, value3: recipientRole(row.key, t) }))
     .join(" · ");
   return {
     title,
@@ -79,6 +86,10 @@ export async function generateMetadata(props: {
 export const dynamic = "force-dynamic";
 
 export default async function ReceiptPage(props: { params: Promise<{ saleId: string }> }) {
+  const locale = await getLocale();
+
+  const t = await getTranslations("ui");
+
   const { saleId } = await props.params;
   const receipt = await getReceipt(saleId);
   if (!receipt) notFound();
@@ -87,16 +98,15 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
 
   return (
     <div className="min-h-screen bg-slate-50/60">
-      <AppHeader right={<span className="text-sm text-slate-500">Transparent receipt</span>} />
+      <AppHeader right={<span className="text-sm text-slate-500">{t("transparentReceipt")}</span>} />
       <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-4 py-10 sm:px-6">
         <div className="text-center">
           <span className="empty-icon"><Icon name="leaf" className="h-7 w-7" /></span>
-          <p className="eyebrow mb-3">A purchase with purpose</p>
+          <p className="eyebrow mb-3">{t("aPurchaseWithPurpose")}</p>
           <h1 className="text-3xl font-medium tracking-tight text-slate-900">
-            Where your money went
-          </h1>
+            {t("whereYourMoneyWent")}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {product.name} · {marketplace.name} · {formatDateTime(sale.createdAt)}
+            {product.name} · {marketplace.name} · {formatDateTime(sale.createdAt, locale)}
           </p>
         </div>
 
@@ -105,12 +115,11 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-                Buyer
-              </p>
+                {t("buyer")}</p>
               <p className="font-medium text-slate-900">{buyer.name}</p>
             </div>
             <p className="text-2xl font-semibold tracking-tight text-slate-900">
-              {formatUsd(sale.amountUsd)}
+              {formatUsd(sale.amountUsd, locale)}
             </p>
           </div>
 
@@ -139,23 +148,22 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
                     />
                     <span className="truncate font-medium text-slate-900">{row.recipient}</span>
                     <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs text-slate-500 ring-1 ring-slate-200">
-                      {row.role}
+                      {recipientRole(row.key, t)}
                     </span>
                   </span>
                   <span className="ml-auto font-semibold tabular-nums text-slate-900">
-                    {formatUsd(row.amountUsd)}
+                    {formatUsd(row.amountUsd, locale)}
                   </span>
                 </div>
                 <div className="mt-1 flex items-center justify-between pl-4 text-xs">
-                  <span className="text-slate-500">{row.percent}% of the sale</span>
+                  <span className="text-slate-500">{row.percent}{t("ofTheSale")}</span>
                   <a
                     href={verifyUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="font-medium text-emerald-700 hover:text-emerald-800"
                   >
-                    Verified ✓
-                  </a>
+                    {t("verified")}</a>
                 </div>
               </li>
             ))}
@@ -164,17 +172,15 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
 
         {/* The one and only blockchain mention — framed as trust. */}
         <p className="mt-5 text-center text-xs leading-relaxed text-slate-500">
-          This payment was settled on the Stellar network in{" "}
-          {sale.settleSeconds !== null ? `${sale.settleSeconds} seconds` : "seconds"} and cannot
-          be altered. This receipt uses demo funds with no monetary value.{" "}
+          {t("thisPaymentWasSettledOnTheStellarNetworkIn")}{" "}
+          {sale.settleSeconds !== null ? t("valueSeconds", { value1: sale.settleSeconds }) : t("settledQuickly")} {" "}{t("andCannotBeAlteredThisReceiptUsesDemoFundsWithNo")}{" "}
           <a
             href={verifyUrl}
             target="_blank"
             rel="noreferrer"
             className="underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
           >
-            See the transaction ↗
-          </a>
+            {t("seeTheTransaction")}</a>
         </p>
 
         <p className="mt-8 text-center text-sm">
@@ -182,7 +188,7 @@ export default async function ReceiptPage(props: { params: Promise<{ saleId: str
             href={`/m/${marketplace.slug}`}
             className="text-slate-500 transition hover:text-slate-700"
           >
-            ← Shop at {marketplace.name}
+            {t("shopAt")}{" "}{marketplace.name}
           </Link>
         </p>
       </main>

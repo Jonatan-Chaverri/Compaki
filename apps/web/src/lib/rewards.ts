@@ -1,3 +1,5 @@
+import type { UiTranslator } from "@/i18n/types";
+
 // Community Rewards and fundraising payload types (mirrors of
 // apps/api/src/lib/rewards.ts and fundraise.ts) and small display helpers
 // shared by the operator panel, the community page and the rewards page.
@@ -68,35 +70,35 @@ export interface FundraiseView {
 
 const DAY = 86_400;
 /** Rewards frequencies offered in the wizard (seconds), in display order. */
-export const REWARDS_FREQUENCIES: { seconds: number; label: string; testnetOnly?: boolean }[] = [
-  { seconds: 30 * DAY, label: "Every month" },
-  { seconds: 90 * DAY, label: "Every 3 months" },
-  { seconds: 180 * DAY, label: "Every 6 months" },
-  { seconds: 365 * DAY, label: "Every year" },
-  { seconds: 600, label: "Every 10 minutes (testnet demo)", testnetOnly: true },
-];
+export function getRewardsFrequencies(t: UiTranslator): { seconds: number; label: string; testnetOnly?: boolean }[] { return [
+  { seconds: 30 * DAY, label: t("monthly") },
+  { seconds: 90 * DAY, label: t("quarterly") },
+  { seconds: 180 * DAY, label: t("halfYearly") },
+  { seconds: 365 * DAY, label: t("yearly") },
+  { seconds: 600, label: t("demoFrequency"), testnetOnly: true },
+]; }
 
-export function frequencyLabel(seconds: number | null): string {
-  const known = REWARDS_FREQUENCIES.find((f) => f.seconds === seconds);
+export function frequencyLabel(seconds: number | null, t: UiTranslator): string {
+  const known = getRewardsFrequencies(t).find((f) => f.seconds === seconds);
   if (known) return known.label;
   if (!seconds) return "—";
-  return seconds % DAY === 0 ? `Every ${seconds / DAY} days` : `Every ${Math.round(seconds / 60)} minutes`;
+  return seconds % DAY === 0 ? t("everyDays", { count: seconds / DAY }) : t("everyMinutes", { count: Math.round(seconds / 60) });
 }
 
-export const POLICY_TEXT: Record<GoalPolicy, { label: string; detail: string }> = {
+export function getPolicyText(t: UiTranslator): Record<GoalPolicy, { label: string; detail: string }> { return {
   stop: {
-    label: "Stop fundraising",
-    detail: "After the target is paid out, sales stop collecting for the community; sellers keep that share.",
+    label: t("policyStopLabel"),
+    detail: t("policyStopDetail"),
   },
   "new-round": {
-    label: "Start a new round",
-    detail: "After each payout, a new round starts from zero toward the same target and recipients.",
+    label: t("policyNewRoundLabel"),
+    detail: t("policyNewRoundDetail"),
   },
   direct: {
-    label: "Pay recipients directly",
-    detail: "After the target is paid out, every sale sends its community share straight to the recipients’ accounts.",
+    label: t("policyDirectLabel"),
+    detail: t("policyDirectDetail"),
   },
-};
+}; }
 
 export function txUrl(hash: string): string {
   return `https://stellar.expert/explorer/testnet/tx/${hash}`;
@@ -106,13 +108,13 @@ export function shortAddress(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
-export function percent(bps: number): string {
-  return `${(bps / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
+export function percent(bps: number, locale: string): string {
+  return `${(bps / 100).toLocaleString(locale, { maximumFractionDigits: 2 })}%`;
 }
 
 /** Token amounts keep up to 7 decimals so tiny rewards don't round to $0.00. */
-export function formatAmount(amount: number): string {
-  return amount.toLocaleString("en-US", {
+export function formatAmount(amount: number, locale: string): string {
+  return amount.toLocaleString(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
@@ -120,8 +122,9 @@ export function formatAmount(amount: number): string {
   });
 }
 
-export function formatTs(ts: number): string {
-  return new Date(ts * 1000).toLocaleString("en-US", {
+export function formatTs(ts: number, locale: string): string {
+  return new Date(ts * 1000).toLocaleString(locale, {
+    timeZone: "UTC",
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -142,10 +145,10 @@ export function formatCountdown(seconds: number): string {
   return `${m}m ${rest}s`;
 }
 
-export const STATUS_STYLE: Record<PeriodStatus, { label: string; className: string }> = {
-  current: { label: "Collecting", className: "bg-emerald-50 text-emerald-700" },
-  ended: { label: "Ended · rewards can be claimed", className: "bg-amber-50 text-amber-700" },
-};
+export function getStatusStyle(t: UiTranslator): Record<PeriodStatus, { label: string; className: string }> { return {
+  current: { label: t("periodCollecting"), className: "bg-emerald-50 text-emerald-700" },
+  ended: { label: t("periodEnded"), className: "bg-amber-50 text-amber-700" },
+}; }
 
 /**
  * Ledger-time clock: the API reports the ledger timestamp at read time; this

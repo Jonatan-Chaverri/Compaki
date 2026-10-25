@@ -1,4 +1,9 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useLocale } from "next-intl";
+
+import { useTranslations } from "next-intl";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,14 +31,11 @@ export interface WalletInfo {
   assetCode: string;
 }
 
-const ACCESS_LABELS = {
-  cavos: { title: "Personal account · Cavos", detail: "You approve each payment and reward collection from your browser." },
-  "stellar-wallet": { title: "Connected account", detail: "Payments and reward collections need your approval in the app you connected." },
-  custodial: { title: "Managed by Compaki", detail: "Compaki manages the keys and approves payments for this older account type." },
-  none: { title: "Not set up yet", detail: "Your payment account will be set up when you buy, sell or receive a reward." },
-};
-
 export function ProfileView({ user }: { user: ProfileUser }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
   const router = useRouter();
   const signer = useCompakiWallet();
 
@@ -57,13 +59,13 @@ export function ProfileView({ user }: { user: ProfileUser }) {
       try {
         const res = await fetch("/api/wallet", { cache: "no-store" });
         const body = (await res.json()) as WalletInfo & { error?: string };
-        if (!res.ok) throw new Error("We couldn’t load your balance. Please try again.");
+        if (!res.ok) throw new Error(t("weCouldnTLoadYourBalancePleaseTryAgain"));
         if (!cancelled) {
           setWallet(body);
           setWalletError(null);
         }
       } catch {
-        if (!cancelled) setWalletError("We couldn’t load your balance. Please try again.");
+        if (!cancelled) setWalletError(t("weCouldnTLoadYourBalancePleaseTryAgain"));
       } finally {
         if (!cancelled) setRefreshing(false);
       }
@@ -72,7 +74,7 @@ export function ProfileView({ user }: { user: ProfileUser }) {
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, [version, t]);
 
   const copyAddress = async () => {
     if (!wallet?.address) return;
@@ -93,10 +95,10 @@ export function ProfileView({ user }: { user: ProfileUser }) {
         await readResult(await fetch("/api/wallet/setup", { method: "POST" })),
         signer.signXdr,
       );
-      if (result.status !== 200) throw new Error("We couldn’t finish setting up payments. Please try again.");
+      if (result.status !== 200) throw new Error(t("weCouldnTFinishSettingUpPaymentsPleaseTryAgain"));
       setVersion((v) => v + 1);
     } catch {
-      setWalletError("Payment setup wasn’t completed. Please try again when you’re ready to approve.");
+      setWalletError(t("paymentSetupWasnTCompletedPleaseTryAgainWhenYouRe"));
     } finally {
       setActivating(false);
     }
@@ -109,15 +111,15 @@ export function ProfileView({ user }: { user: ProfileUser }) {
       const res = await readResult<{ txHash: string; amountUsd: number; balanceUsd: number; code?: string }>(
         await fetch("/api/wallet/mint", { method: "POST" }),
       );
-      if (res.status === 429) throw new Error("Please wait a few seconds before adding more demo funds.");
-      if (res.status === 401) throw new Error("Please sign in again to add demo funds.");
-      if (res.body.code === "WALLET_SETUP") throw new Error("Set up payments before adding demo funds.");
-      if (res.status === 409) throw new Error("Your account can’t receive more demo funds right now. Refresh your balance and try again.");
-      if (res.status !== 200) throw new Error("We couldn’t add demo funds. Please try again.");
-      setMintResult({ ok: true, message: `${formatAmount(res.body.amountUsd)} in demo funds added.`, txHash: res.body.txHash });
+      if (res.status === 429) throw new Error(t("pleaseWaitAFewSecondsBeforeAddingMoreDemoFunds"));
+      if (res.status === 401) throw new Error(t("pleaseSignInAgainToAddDemoFunds"));
+      if (res.body.code === "WALLET_SETUP") throw new Error(t("setUpPaymentsBeforeAddingDemoFunds"));
+      if (res.status === 409) throw new Error(t("yourAccountCanTReceiveMoreDemoFundsRightNowRefresh"));
+      if (res.status !== 200) throw new Error(t("weCouldnTAddDemoFundsPleaseTryAgain"));
+      setMintResult({ ok: true, message: t("valueInDemoFundsAdded", { value1: formatAmount(res.body.amountUsd, locale) }), txHash: res.body.txHash });
       setWallet((w) => (w ? { ...w, balanceUsd: res.body.balanceUsd } : w));
     } catch (err) {
-      setMintResult({ ok: false, message: err instanceof Error ? err.message : "We couldn’t add demo funds. Please try again." });
+      setMintResult({ ok: false, message: localizedMessage(err, t, t("weCouldnTAddDemoFundsPleaseTryAgain")) });
     } finally {
       setMinting(false);
     }
@@ -134,11 +136,11 @@ export function ProfileView({ user }: { user: ProfileUser }) {
           body: JSON.stringify({ name: name.trim() }),
         }),
       );
-      if (res.status !== 200) throw new Error(res.body.error ?? "Could not save your name");
-      setSaveState({ ok: true, message: "Your name has been updated." });
+      if (res.status !== 200) throw new Error(localizedMessage(res.body.error, t, t("couldNotSaveYourName")));
+      setSaveState({ ok: true, message: t("yourNameHasBeenUpdated") });
       router.refresh();
     } catch (err) {
-      setSaveState({ ok: false, message: err instanceof Error ? err.message : "Could not save your name" });
+      setSaveState({ ok: false, message: localizedMessage(err, t, t("couldNotSaveYourName")) });
     } finally {
       setSaving(false);
     }
@@ -177,6 +179,17 @@ interface ProfileContentProps {
 
 /** Presentation is separate from account requests and payment approvals. */
 export function ProfileContent({ user, account, personalDetails }: ProfileContentProps) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
+const ACCESS_LABELS = {
+  cavos: { title: t("personalAccountCavos"), detail: t("youApproveEachPaymentAndRewardCollectionFromYourBrowser") },
+  "stellar-wallet": { title: t("connectedAccount"), detail: t("paymentsAndRewardCollectionsNeedYourApprovalInTheAppYou") },
+  custodial: { title: t("managedByCompaki"), detail: t("compakiManagesTheKeysAndApprovesPaymentsForThisOlderAccount") },
+  none: { title: t("notSetUpYet"), detail: t("yourPaymentAccountWillBeSetUpWhenYouBuySell") },
+};
+
   const { wallet, error, refreshing, activating, minting, mintResult, copyState } = account;
   const { name, saving, saveState } = personalDetails;
   const needsActivation = wallet !== null && wallet.walletAddress !== null && !wallet.walletReady;
@@ -185,65 +198,65 @@ export function ProfileContent({ user, account, personalDetails }: ProfileConten
   const initials = user.name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   const access = wallet ? ACCESS_LABELS[wallet.provider === "own" ? wallet.walletProvider ?? "cavos" : wallet.provider] : null;
   const country = user.country && /^[A-Za-z]{2}$/.test(user.country)
-    ? new Intl.DisplayNames(["en"], { type: "region" }).of(user.country.toUpperCase()) ?? user.country
+    ? new Intl.DisplayNames([locale], { type: "region" }).of(user.country.toUpperCase()) ?? user.country
     : user.country;
 
   return (
     <div className="profile-content">
-      <section className="profile-welcome" aria-label="Your profile overview">
+      <section className="profile-welcome" aria-label={t("yourProfileOverview")}>
         <div className="profile-avatar" aria-hidden="true">{initials || "C"}</div>
         <div className="profile-identity">
-          <p className="eyebrow">A little more you</p>
+          <p className="eyebrow">{t("aLittleMoreYou")}</p>
           <h2>{user.name}</h2>
-          <p>{country || "Part of the Compaki community"}<span aria-hidden="true"> · </span>Compaki member</p>
+          <p>{country || t("partOfTheCompakiCommunity")}<span aria-hidden="true"> · </span>{t("compakiMember")}</p>
         </div>
-        <span className="profile-welcome-note"><Icon name="leaf" className="h-5 w-5" />Good to have you here.</span>
+        <span className="profile-welcome-note"><Icon name="leaf" className="h-5 w-5" />{t("goodToHaveYouHere")}</span>
       </section>
 
       <div className="profile-main-grid">
         <section className="profile-personal profile-panel" aria-labelledby="profile-personal-title">
-          <div className="profile-section-heading"><span className="profile-section-icon"><Icon name="people" /></span><div><h2 id="profile-personal-title">Personal details</h2><p>A familiar face in every marketplace.</p></div></div>
+          <div className="profile-section-heading"><span className="profile-section-icon"><Icon name="people" /></span><div><h2 id="profile-personal-title">{t("personalDetails")}</h2><p>{t("aFamiliarFaceInEveryMarketplace")}</p></div></div>
           <form onSubmit={(event) => { event.preventDefault(); if (nameChanged && !saving) void personalDetails.onSave(); }}>
-            <label htmlFor="profile-name">Your name</label>
+            <label htmlFor="profile-name">{t("yourName")}</label>
             <input id="profile-name" autoComplete="name" value={name} required minLength={2} maxLength={60}
               onChange={(event) => personalDetails.onNameChange(event.target.value)} disabled={saving} aria-describedby="profile-name-hint" />
-            <p id="profile-name-hint" className="profile-field-hint">This is the name sellers and communities will see.</p>
+            <p id="profile-name-hint" className="profile-field-hint">{t("thisIsTheNameSellersAndCommunitiesWillSee")}</p>
             <dl className="profile-personal-facts">
-              <div><dt>Email address</dt><dd>{user.email || "No email linked"}</dd></div>
-              <div><dt>Country</dt><dd>{country || "Not added yet"}</dd></div>
+              <div><dt>{t("emailAddress")}</dt><dd>{user.email || t("noEmailLinked")}</dd></div>
+              <div><dt>{t("country")}</dt><dd>{country || t("notAddedYet")}</dd></div>
             </dl>
-            <div className="profile-save-row"><button type="submit" className="button-primary button-small" disabled={!nameChanged || saving}>{saving ? "Saving…" : "Save changes"}</button><span>Your profile works across Compaki.</span></div>
-            {saveState && <p role="status" className={`profile-feedback ${saveState.ok ? "" : "profile-feedback-error"}`}>{saveState.message}</p>}
+            <div className="profile-save-row"><button type="submit" className="button-primary button-small" disabled={!nameChanged || saving}>{saving ? t("saving") : t("saveChanges")}</button><span>{t("yourProfileWorksAcrossCompaki")}</span></div>
+            {saveState && <p role="status" className={`profile-feedback ${saveState.ok ? "" : "profile-feedback-error"}`}>{localizedMessage(saveState.message, t, saveState.message)}</p>}
           </form>
         </section>
 
         <section className="profile-balance" aria-labelledby="profile-balance-title">
-          <div className="profile-balance-top"><h2 id="profile-balance-title">Your balance</h2><span>Demo funds</span></div>
-          <p className="profile-balance-amount" aria-live="polite" aria-busy={refreshing}>{wallet?.balanceUsd != null ? formatAmount(wallet.balanceUsd) : refreshing ? "—" : wallet?.provider === "none" ? "Not set up yet" : "Unavailable"}</p>
-          <p className="profile-balance-description">{needsActivation ? "One quick step to start exploring payments." : wallet?.provider === "none" ? "Your balance will appear when your payment account is set up." : "For purchases in Compaki marketplaces."}</p>
-          {needsActivation ? <button type="button" className="profile-balance-action" onClick={() => void account.onActivate()} disabled={activating || refreshing}>{activating ? "Waiting for your approval…" : "Set up payments"}<Icon name="arrow" className="h-4 w-4" /></button>
-            : canTopUp ? <button type="button" className="profile-balance-action" onClick={() => void account.onTopUp()} disabled={minting || refreshing}>{minting ? "Adding demo funds…" : "Add $20 in demo funds"}<span aria-hidden="true">+</span></button> : null}
-          <div className="profile-balance-footer"><span><Icon name="spark" className="h-3.5 w-3.5" />For trying things out. No real money.</span><button type="button" disabled={refreshing || minting || activating} onClick={account.onRefresh} aria-label="Refresh balance">{refreshing ? "Updating…" : "Refresh"}</button></div>
-          {mintResult && <p role={mintResult.ok ? "status" : "alert"} className="profile-balance-message">{mintResult.message}{mintResult.txHash && <> <a href={txUrl(mintResult.txHash)} target="_blank" rel="noopener noreferrer">View receipt ↗</a></>}</p>}
-          {error && <p role="alert" className="profile-balance-message">{error}</p>}
+          <div className="profile-balance-top"><h2 id="profile-balance-title">{t("yourBalance")}</h2><span>{t("demoFunds")}</span></div>
+          <p className="profile-balance-amount" aria-live="polite" aria-busy={refreshing}>{wallet?.balanceUsd != null ? formatAmount(wallet.balanceUsd, locale) : refreshing ? "—" : wallet?.provider === "none" ? t("notSetUpYet") : t("unavailable")}</p>
+          <p className="profile-balance-description">{needsActivation ? t("oneQuickStepToStartExploringPayments") : wallet?.provider === "none" ? t("yourBalanceWillAppearWhenYourPaymentAccountIsSetUp") : t("forPurchasesInCompakiMarketplaces")}</p>
+          {needsActivation ? <button type="button" className="profile-balance-action" onClick={() => void account.onActivate()} disabled={activating || refreshing}>{activating ? t("waitingForYourApproval") : t("setUpPayments")}<Icon name="arrow" className="h-4 w-4" /></button>
+            : canTopUp ? <button type="button" className="profile-balance-action" onClick={() => void account.onTopUp()} disabled={minting || refreshing}>{minting ? t("addingDemoFunds") : t("add20InDemoFunds")}<span aria-hidden="true">+</span></button> : null}
+          <div className="profile-balance-footer"><span><Icon name="spark" className="h-3.5 w-3.5" />{t("forTryingThingsOutNoRealMoney")}</span><button type="button" disabled={refreshing || minting || activating} onClick={account.onRefresh} aria-label={t("refreshBalance")}>{refreshing ? t("updating") : t("refresh")}</button></div>
+          {mintResult && <p role={mintResult.ok ? "status" : "alert"} className="profile-balance-message">{localizedMessage(mintResult.message, t, mintResult.message)}{mintResult.txHash && <> <a href={txUrl(mintResult.txHash)} target="_blank" rel="noopener noreferrer">{t("viewReceipt")}</a></>}</p>}
+          {error && <p role="alert" className="profile-balance-message">{localizedMessage(error, t, error)}</p>}
         </section>
       </div>
 
-      <nav className="profile-shortcuts" aria-label="Your Compaki activity">
-        <Link href="/orders"><span className="profile-shortcut-icon"><Icon name="bag" /></span><div><h2>My orders</h2><p>Your purchases, all in one place.</p></div><Icon name="chevron" className="h-4 w-4" /></Link>
-        <Link href="/rewards"><span className="profile-shortcut-icon"><Icon name="heart" /></span><div><h2>My rewards</h2><p>See what your community shares.</p></div><Icon name="chevron" className="h-4 w-4" /></Link>
-        <Link href="/marketplaces"><span className="profile-shortcut-icon"><Icon name="store" /></span><div><h2>Explore marketplaces</h2><p>Find your next local favorite.</p></div><Icon name="chevron" className="h-4 w-4" /></Link>
+      <nav className="profile-shortcuts" aria-label={t("yourCompakiActivity")}>
+        <Link href="/orders"><span className="profile-shortcut-icon"><Icon name="bag" /></span><div><h2>{t("myOrders")}</h2><p>{t("yourPurchasesAllInOnePlace")}</p></div><Icon name="chevron" className="h-4 w-4" /></Link>
+        <Link href="/rewards"><span className="profile-shortcut-icon"><Icon name="heart" /></span><div><h2>{t("myRewards")}</h2><p>{t("seeWhatYourCommunityShares")}</p></div><Icon name="chevron" className="h-4 w-4" /></Link>
+        <Link href="/marketplaces"><span className="profile-shortcut-icon"><Icon name="store" /></span><div><h2>{t("exploreMarketplaces")}</h2><p>{t("findYourNextLocalFavorite")}</p></div><Icon name="chevron" className="h-4 w-4" /></Link>
       </nav>
 
       <details className="profile-account-details">
-        <summary><span className="profile-details-icon"><Icon name="shield" className="h-4 w-4" /></span><span><strong>Account details</strong><small>Payment information & account reference</small></span><Icon name="chevron" className="profile-details-chevron h-4 w-4" /></summary>
+        <summary><span className="profile-details-icon"><Icon name="shield" className="h-4 w-4" /></span><span><strong>{t("accountDetails")}</strong><small>{t("paymentInformationAccountReference")}</small></span><Icon name="chevron" className="profile-details-chevron h-4 w-4" /></summary>
         <div className="profile-details-body">
-          <p>Your account reference lets you look up payment activity and identify the account used for purchases and rewards.</p>
+          <p>{t("yourAccountReferenceLetsYouLookUpPaymentActivityAndIdentify")}</p>
           <dl className="profile-technical-facts">
-            <div className="profile-address"><dt>Account address</dt><dd>{wallet?.address ? <><code>{wallet.address}</code><div className="profile-address-actions"><button type="button" onClick={() => void account.onCopy()}>{copyState === "copied" ? "Copied ✓" : "Copy address"}</button><a href={`https://stellar.expert/explorer/testnet/account/${wallet.address}`} target="_blank" rel="noopener noreferrer">View activity ↗</a></div><span role="status">{copyState === "copied" ? "Address copied to clipboard." : copyState === "error" ? "Couldn’t copy. Select the address above to copy it manually." : ""}</span></> : refreshing ? "Loading…" : error ? "Could not load account details. Try refreshing your balance." : "Available once your payment account is set up."}</dd></div>
-            <div><dt>Currency</dt><dd>{wallet?.assetCode || "—"}<small>Demo asset · not issued by Circle</small></dd></div>
-            <div><dt>Network</dt><dd>Stellar testnet<small>A testing environment</small></dd></div>
-            {access && <div className="profile-account-access"><dt>Account access</dt><dd>{access.title}<small>{access.detail}</small></dd></div>}
+            <div className="profile-address"><dt>{t("accountAddress")}</dt><dd>{wallet?.address ? <><code>{wallet.address}</code><div className="profile-address-actions"><button type="button" onClick={() => void account.onCopy()}>{copyState === "copied" ? t("copied") : t("copyAddress")}</button><a href={`https://stellar.expert/explorer/testnet/account/${wallet.address}`} target="_blank" rel="noopener noreferrer">{t("viewActivity")}</a></div><span role="status">{copyState === "copied" ? t("addressCopiedToClipboard") : copyState === "error" ? t("couldnTCopySelectTheAddressAboveToCopyItManually") : ""}</span></> : refreshing ? t("loading") : error ? t("couldNotLoadAccountDetailsTryRefreshingYourBalance") : t("availableOnceYourPaymentAccountIsSetUp")}</dd></div>
+            <div><dt>{t("currency")}</dt><dd>{wallet?.assetCode || "—"}<small>{t("demoAssetNotIssuedByCircle")}</small></dd></div>
+            <div><dt>{t("network")}</dt><dd>{t("stellarTestnet")}<small>{t("aTestingEnvironment")}</small></dd></div>
+            {access && <div className="profile-account-access"><dt>{t("accountAccess")}</dt><dd>{access.title}<small>{access.detail}</small></dd></div>}
           </dl>
         </div>
       </details>

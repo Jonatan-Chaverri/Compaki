@@ -1,4 +1,7 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useTranslations } from "next-intl";
 
 // Shared product create/edit modal, used by the per-marketplace vendor
 // dashboard and the cross-marketplace "My products" page. Creating needs the
@@ -23,19 +26,21 @@ const EMOJI_CHOICES = ["☕", "🍫", "🧺", "🏺", "🧶", "🎨", "🍯", "�
 const inputClass =
   "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 bg-white";
 
-export function Modal({ children, onClose, label = "Details" }: { children: React.ReactNode; onClose: () => void; label?: string }) {
+export function Modal({ children, onClose, label }: { children: React.ReactNode; onClose: () => void; label?: string }) {
+  const t = useTranslations("ui");
+
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
     return () => { element?.close(); };
   }, []);
-  return <dialog ref={dialog} aria-label={label} className="app-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
+  return <dialog ref={dialog} aria-label={label ?? t("details")} className="app-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => {
     if (event.target !== event.currentTarget) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
   }}>
-    <button type="button" className="dialog-close" onClick={onClose} aria-label="Close dialog"><Icon name="close" className="h-4 w-4" /></button>
+    <button type="button" className="dialog-close" onClick={onClose} aria-label={t("closeDialog")}><Icon name="close" className="h-4 w-4" /></button>
     {children}
   </dialog>;
 }
@@ -50,6 +55,8 @@ export function ProductModal({
   product: EditableProduct | null;
   onClose: () => void;
 }) {
+  const t = useTranslations("ui");
+
   const router = useRouter();
   const [name, setName] = useState(product?.name ?? "");
   const [shortDescription, setShortDescription] = useState(product?.shortDescription ?? "");
@@ -84,36 +91,36 @@ export function ProductModal({
         }),
       });
       const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Could not save product");
+      if (!res.ok) throw new Error(localizedMessage(data.error, t, t("couldNotSaveProduct")));
       onClose();
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save product");
+      setError(localizedMessage(err, t, t("couldNotSaveProduct")));
       setBusy(false);
     }
   };
 
   return (
-    <Modal onClose={onClose} label={product ? "Edit product" : "Add a product"}>
+    <Modal onClose={onClose} label={product ? t("editProduct") : t("addAProduct")}>
       <h2 className="text-lg font-semibold tracking-tight text-slate-900">
-        {product ? "Edit product" : "Add a product"}
+        {product ? t("editProduct") : t("addAProduct")}
       </h2>
       <div className="mt-4 space-y-4">
         <div>
-          <label htmlFor="product-name" className="mb-1.5 block text-sm font-medium text-slate-700">Product name</label>
+          <label htmlFor="product-name" className="mb-1.5 block text-sm font-medium text-slate-700">{t("productName")}</label>
           <input
             type="text"
             id="product-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Hand-roasted coffee, 250g"
+            placeholder={t("handRoastedCoffee250g")}
             className={inputClass}
           />
         </div>
         <div>
           <label htmlFor="product-short" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Short description{" "}
-            <span className="font-normal text-slate-400">(shown on the storefront)</span>
+            {t("shortDescription")}{" "}
+            <span className="font-normal text-slate-400">{t("shownOnTheStorefront")}</span>
           </label>
           <input
             type="text"
@@ -121,27 +128,27 @@ export function ProductModal({
             value={shortDescription}
             onChange={(e) => setShortDescription(e.target.value)}
             maxLength={140}
-            placeholder="One line that sells it"
+            placeholder={t("oneLineThatSellsIt")}
             className={inputClass}
           />
         </div>
         <div>
           <label htmlFor="product-description" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Full description{" "}
-            <span className="font-normal text-slate-400">(shown on the product page)</span>
+            {t("fullDescription")}{" "}
+            <span className="font-normal text-slate-400">{t("shownOnTheProductPage")}</span>
           </label>
           <textarea
             id="product-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What makes it special?"
+            placeholder={t("whatMakesItSpecial")}
             rows={3}
             className={inputClass}
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="product-price" className="mb-1.5 block text-sm font-medium text-slate-700">Price ($)</label>
+            <label htmlFor="product-price" className="mb-1.5 block text-sm font-medium text-slate-700">{t("price2")}</label>
             <input
               type="number"
               min="0.01"
@@ -155,7 +162,7 @@ export function ProductModal({
           </div>
           <div>
             <label htmlFor="product-stock" className="mb-1.5 block text-sm font-medium text-slate-700">
-              Stock <span className="font-normal text-slate-400">(units)</span>
+              {t("stock")}{" "}<span className="font-normal text-slate-400">{t("units")}</span>
             </label>
             <input
               type="number"
@@ -171,7 +178,7 @@ export function ProductModal({
         </div>
         <div>
           <label htmlFor="product-image" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Image URL <span className="font-normal text-slate-400">or pick an emoji</span>
+            {t("imageUrl")}{" "}<span className="font-normal text-slate-400">{t("orPickAnEmoji")}</span>
           </label>
           <input
             type="text"
@@ -186,7 +193,7 @@ export function ProductModal({
               <button
                 key={emoji}
                 onClick={() => setImageUrl(emoji)}
-                aria-label={`Use ${emoji} as product image`}
+                aria-label={t("useValueAsProductImage", { value1: emoji })}
                 aria-pressed={imageUrl === emoji}
                 className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition hover:bg-slate-100 ${
                   imageUrl === emoji ? "bg-slate-100 ring-2 ring-brand-600" : ""
@@ -199,21 +206,20 @@ export function ProductModal({
         </div>
       </div>
 
-      {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-4 text-sm text-red-600">{localizedMessage(error, t, error)}</p>}
 
       <div className="mt-6 flex justify-end gap-3">
         <button
           onClick={onClose}
           className="rounded-full px-5 py-2 text-sm font-medium text-slate-500 hover:text-slate-900"
         >
-          Cancel
-        </button>
+          {t("cancel")}</button>
         <button
           onClick={() => void save()}
           disabled={!valid || busy}
           className="rounded-full bg-navy-900 px-6 py-2 text-sm font-medium text-white hover:bg-navy-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? "Saving…" : "Save product"}
+          {busy ? t("saving") : t("saveProduct")}
         </button>
       </div>
     </Modal>

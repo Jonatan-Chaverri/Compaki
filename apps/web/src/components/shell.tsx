@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import Image from "next/image";
 import Link from "next/link";
 import { AppNavigation } from "./app-navigation";
@@ -9,15 +10,19 @@ export function Logo() {
 }
 
 export function DemoNotice() {
-  return <div className="demo-notice"><span className="demo-dot" /><strong>Explore the demo</strong><span>All purchases and balances use test funds. No real money.</span></div>;
+  const t = useTranslations("ui");
+
+  return <div className="demo-notice"><span className="demo-dot" /><strong>{t("exploreTheDemo")}</strong><span>{t("allPurchasesAndBalancesUseTestFundsNoRealMoney")}</span></div>;
 }
 
 export function AppHeader({ right }: { right?: React.ReactNode }) {
+  const t = useTranslations("ui");
+
   return <>
     <DemoNotice />
     <header className="app-header">
       <div className="header-inner">
-        <Link href="/" aria-label="Compaki home" className="shrink-0"><Logo /></Link>
+        <Link href="/" aria-label={t("compakiHome")} className="shrink-0"><Logo /></Link>
         <AppNavigation />
         <div className="header-actions">{right}<UserMenu /></div>
       </div>
@@ -26,10 +31,12 @@ export function AppHeader({ right }: { right?: React.ReactNode }) {
 }
 
 export function AppFooter() {
+  const t = useTranslations("ui");
+
   return <footer className="app-footer"><div className="footer-inner">
-    <div><Link href="/" aria-label="Compaki home"><Logo /></Link><p>Good things happen when we grow together.</p></div>
-    <nav aria-label="Footer navigation"><Link href="/marketplaces">Explore</Link><Link href="/onboarding">Start a marketplace</Link><Link href="/#how-it-works">How it works</Link></nav>
-    <span className="footer-note">Built for people. Powered by Stellar.<br />© {new Date().getFullYear()} Compaki · Testnet demo</span>
+    <div><Link href="/" aria-label={t("compakiHome")}><Logo /></Link><p>{t("goodThingsHappenWhenWeGrowTogether")}</p></div>
+    <nav aria-label={t("footerNavigation")}><Link href="/marketplaces">{t("explore")}</Link><Link href="/onboarding">{t("startAMarketplace")}</Link><Link href="/#how-it-works">{t("howItWorks")}</Link></nav>
+    <span className="footer-note">{t("builtForPeoplePoweredByStellar")}<br />© {new Date().getFullYear()} {" "}{t("compakiTestnetDemo")}</span>
   </div></footer>;
 }
 
@@ -42,6 +49,7 @@ export function EmptyState({ title, description, href, action, icon = "bag" }: {
 }
 
 export function ProductVisual({ imageUrl, size = "md" }: { imageUrl: string | null; size?: "sm" | "md" }) {
+
   const classes = size === "sm" ? "product-visual product-visual-small" : "product-visual";
   if (imageUrl && /^(https?:\/\/|\/)/.test(imageUrl)) {
     // eslint-disable-next-line @next/next/no-img-element -- vendor-managed external product images
@@ -51,5 +59,7 @@ export function ProductVisual({ imageUrl, size = "md" }: { imageUrl: string | nu
 }
 
 export function CheckoutSteps({ current }: { current: "cart" | "payment" | "done" }) {
-  return <nav className="checkout-steps" aria-label="Checkout progress"><span aria-current={current === "cart" ? "step" : undefined}><b>1</b>Your cart</span><i aria-hidden="true" /><span aria-current={current === "payment" ? "step" : undefined}><b>2</b>Details & payment</span><i aria-hidden="true" /><span aria-current={current === "done" ? "step" : undefined}><b>3</b>All done</span></nav>;
+  const t = useTranslations("ui");
+
+  return <nav className="checkout-steps" aria-label={t("checkoutProgress")}><span aria-current={current === "cart" ? "step" : undefined}><b>1</b>{t("yourCart")}</span><i aria-hidden="true" /><span aria-current={current === "payment" ? "step" : undefined}><b>2</b>{t("detailsPayment")}</span><i aria-hidden="true" /><span aria-current={current === "done" ? "step" : undefined}><b>3</b>{t("allDone")}</span></nav>;
 }

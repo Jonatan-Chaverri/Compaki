@@ -1,3 +1,5 @@
+import { getLocale } from "next-intl/server";
+import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -31,10 +33,14 @@ export const dynamic = "force-dynamic";
 export default async function ProductPage(props: {
   params: Promise<{ slug: string; productId: string }>;
 }) {
+  const locale = await getLocale();
+
+  const t = await getTranslations("ui");
+
   const { slug, productId } = await props.params;
   const res = await apiFetch(`/api/products/${encodeURIComponent(productId)}`);
   if (res.status === 404) notFound();
-  if (!res.ok) throw new Error(`Product request failed (${res.status})`);
+  if (!res.ok) throw new Error(t("productRequestFailedValue", { value1: res.status }));
   const { product, marketplace } = (await res.json()) as ProductPayload;
   if (marketplace.slug !== slug) notFound();
 
@@ -46,7 +52,7 @@ export default async function ProductPage(props: {
         href={`/m/${marketplace.slug}`}
         className="text-sm text-slate-500 transition hover:text-slate-700"
       >
-        ← Back to {marketplace.name}
+        {t("backTo")}{" "}{marketplace.name}
       </Link>
 
       <div className="mt-4 grid gap-8 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm sm:grid-cols-2">
@@ -57,15 +63,15 @@ export default async function ProductPage(props: {
           <h1 className="text-3xl font-medium tracking-tight text-slate-900">
             {product.name}
           </h1>
-          <p className="mt-2 text-sm text-slate-500">Made available by <strong className="font-medium text-slate-700">{product.vendorName}</strong></p>
+          <p className="mt-2 text-sm text-slate-500">{t("madeAvailableBy")}{" "}<strong className="font-medium text-slate-700">{product.vendorName}</strong></p>
           <p className="mt-4 text-sm leading-relaxed text-slate-500">{product.shortDescription}</p>
           <p className="mt-4 text-2xl font-semibold text-slate-900">
-            {formatUsd(product.priceUsd)}
+            {formatUsd(product.priceUsd, locale)}
           </p>
           <p className={`mt-2 text-sm font-medium ${inStock ? "text-emerald-600" : "text-red-600"}`}>
             {inStock
-              ? `${product.stock} unit${product.stock === 1 ? "" : "s"} in stock`
-              : "Out of stock"}
+              ? t("unitsInStock", { count: product.stock })
+              : t("outOfStock")}
           </p>
           <div className="mt-6">
             <AddToCartControls productId={product.id} stock={product.stock} size="lg" />
@@ -74,16 +80,14 @@ export default async function ProductPage(props: {
             href={`/m/${marketplace.slug}/cart`}
             className="mt-3 text-center text-sm text-slate-500 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-700"
           >
-            View cart
-          </Link>
+            {t("viewCart")}</Link>
         </div>
       </div>
 
       {product.description && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
           <h2 className="text-sm font-medium uppercase tracking-wider text-slate-400">
-            About this product
-          </h2>
+            {t("aboutThisProduct")}</h2>
           <p className="mt-3 whitespace-pre-line leading-relaxed text-slate-700">
             {product.description}
           </p>
@@ -92,8 +96,8 @@ export default async function ProductPage(props: {
 
       {marketplace.regenerativeEnabled && marketplace.splitCommunityBps > 0 && (
         <p className="mt-4 text-center text-xs text-emerald-700">
-          ♻ {marketplace.splitCommunityBps / 100}% of this purchase funds{" "}
-          {communityFundLabel(marketplace.communityFundName)}. <Link href={`/m/${marketplace.slug}/community`} className="font-medium underline underline-offset-4">See the community benefits →</Link>
+          ♻ {marketplace.splitCommunityBps / 100}{t("ofThisPurchaseFunds")}{" "}
+          {communityFundLabel(marketplace.communityFundName, t)}. <Link href={`/m/${marketplace.slug}/community`} className="font-medium underline underline-offset-4">{t("seeTheCommunityBenefits")}</Link>
         </p>
       )}
     </main>

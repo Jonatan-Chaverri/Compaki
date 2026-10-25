@@ -1,4 +1,7 @@
 "use client";
+import { useLocale } from "next-intl";
+
+import { useTranslations } from "next-intl";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -50,6 +53,8 @@ function TabButton({
 
 /** Live m:ss until the order expires; hides the order once it hits zero. */
 function PendingCountdown({ expiresAt }: { expiresAt: string }) {
+  const t = useTranslations("ui");
+
   const compute = () =>
     Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
   const [left, setLeft] = useState(compute);
@@ -60,15 +65,18 @@ function PendingCountdown({ expiresAt }: { expiresAt: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiresAt]);
 
-  if (left <= 0) return <span className="text-xs font-medium text-red-600">Expired</span>;
+  if (left <= 0) return <span className="text-xs font-medium text-red-600">{t("expired")}</span>;
   return (
     <span className="text-xs font-medium text-amber-700">
-      ⏱ {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} left to pay
-    </span>
+      ⏱ {Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")} {" "}{t("leftToPay")}</span>
   );
 }
 
 function OrderCard({ order }: { order: OrderRow }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
   const pending = order.status === "PENDING";
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -79,18 +87,17 @@ function OrderCard({ order }: { order: OrderRow }) {
               {order.marketplace.name}
             </Link>
           </p>
-          <p className="text-xs text-slate-500">{formatDateTime(order.createdAt)}</p>
+          <p className="text-xs text-slate-500">{formatDateTime(order.createdAt, locale)}</p>
         </div>
         <div className="flex items-center gap-3">
           {pending ? (
             <PendingCountdown expiresAt={order.expiresAt} />
           ) : (
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-              Completed
-            </span>
+              {t("completed")}</span>
           )}
           <span className="font-semibold tabular-nums text-slate-900">
-            {formatUsd(order.totalUsd)}
+            {formatUsd(order.totalUsd, locale)}
           </span>
         </div>
       </div>
@@ -109,10 +116,9 @@ function OrderCard({ order }: { order: OrderRow }) {
                 href={item.receiptPath}
                 className="text-xs font-medium text-slate-400 underline decoration-slate-200 underline-offset-2 hover:text-slate-700"
               >
-                receipt
-              </Link>
+                {t("receipt3")}</Link>
             )}
-            <span className="tabular-nums text-slate-500">{formatUsd(item.lineTotalUsd)}</span>
+            <span className="tabular-nums text-slate-500">{formatUsd(item.lineTotalUsd, locale)}</span>
           </li>
         ))}
       </ul>
@@ -122,14 +128,15 @@ function OrderCard({ order }: { order: OrderRow }) {
           href={`/m/${order.marketplace.slug}/checkout/${order.id}`}
           className="mt-4 block rounded-full bg-navy-900 px-5 py-2.5 text-center text-sm font-medium text-white transition hover:bg-navy-700"
         >
-          Complete checkout →
-        </Link>
+          {t("completeCheckout")}</Link>
       )}
     </div>
   );
 }
 
 export function OrdersList({ orders }: { orders: OrderRow[] }) {
+  const t = useTranslations("ui");
+
   const [tab, setTab] = useState<"PENDING" | "COMPLETED">(orders.some(o => o.status === "PENDING") ? "PENDING" : "COMPLETED");
   const pending = orders.filter((o) => o.status === "PENDING");
   const completed = orders.filter((o) => o.status === "COMPLETED");
@@ -139,15 +146,15 @@ export function OrdersList({ orders }: { orders: OrderRow[] }) {
     <div className="mt-6">
       <div className="dashboard-tabs">
         <TabButton active={tab === "PENDING"} onClick={() => setTab("PENDING")}>
-          Pending ({pending.length})
+          {t("pending")}{pending.length})
         </TabButton>
         <TabButton active={tab === "COMPLETED"} onClick={() => setTab("COMPLETED")}>
-          Completed ({completed.length})
+          {t("completed2")}{completed.length})
         </TabButton>
       </div>
 
       {shown.length === 0 ? (
-        <div className="mt-4"><EmptyState title={tab === "PENDING" ? "You’re all caught up." : "Your first good find is waiting."} description={tab === "PENDING" ? "No checkouts to finish. Explore a marketplace and discover something special." : "Once you complete an order, you’ll find it here along with a clear receipt for each purchase."} href="/marketplaces" action="Explore marketplaces" /></div>
+        <div className="mt-4"><EmptyState title={tab === "PENDING" ? t("youReAllCaughtUp") : t("yourFirstGoodFindIsWaiting")} description={tab === "PENDING" ? t("noCheckoutsToFinishExploreAMarketplaceAndDiscoverSomethingSpecial") : t("onceYouCompleteAnOrderYouLlFindItHereAlong")} href="/marketplaces" action={t("exploreMarketplaces")} /></div>
       ) : (
         <div className="mt-4 space-y-4">
           {shown.map((order) => (

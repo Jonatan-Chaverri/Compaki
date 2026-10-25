@@ -1,4 +1,5 @@
 "use client";
+import { useLocale } from "next-intl";
 
 // Live on-chain balance widget: polls the real testnet token balance so the
 // number visibly updates seconds after a sale settles.
@@ -18,6 +19,8 @@ export function LiveBalance({
   accent?: boolean;
   pollMs?: number;
 }) {
+  const locale = useLocale();
+
   const [balance, setBalance] = useState<number | null>(null);
 
   useEffect(() => {
@@ -48,7 +51,7 @@ export function LiveBalance({
           accent ? "text-emerald-600" : "text-slate-900"
         }`}
       >
-        {balance === null ? "—" : formatUsd(balance)}
+        {balance === null ? "—" : formatUsd(balance, locale)}
       </p>
     </div>
   );

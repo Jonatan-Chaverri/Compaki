@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -19,12 +20,14 @@ type VendorDashboardPayload =
     };
 
 export default async function VendorPage(props: { params: Promise<{ slug: string }> }) {
+  const t = await getTranslations("ui");
+
   const { slug } = await props.params;
   const res = await apiFetch(
     `/api/marketplaces/${encodeURIComponent(slug)}/vendor-dashboard`,
   );
   if (res.status === 404) notFound();
-  if (!res.ok) throw new Error(`Vendor dashboard request failed (${res.status})`);
+  if (!res.ok) throw new Error(t("vendorDashboardRequestFailedValue", { value1: res.status }));
   const data = (await res.json()) as VendorDashboardPayload;
 
   if (!data.member) {
@@ -33,18 +36,14 @@ export default async function VendorPage(props: { params: Promise<{ slug: string
         <AppHeader />
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-xl px-6 py-20 text-center">
           <h1 className="text-xl font-semibold text-slate-900">
-            You&apos;re not a vendor here (yet)
-          </h1>
+            {t("youReNotAVendorHereYet")}</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Register as a vendor of {data.marketplace.name} to manage products and see your
-            sales.
-          </p>
+            {t("registerAsAVendorOf")}{" "}{data.marketplace.name} {" "}{t("toManageProductsAndSeeYourSales")}</p>
           <Link
             href={`/m/${slug}/join`}
             className="mt-6 inline-block rounded-full bg-navy-900 px-7 py-3 text-sm font-medium text-white hover:bg-navy-700"
           >
-            Become a vendor
-          </Link>
+            {t("becomeAVendor")}</Link>
         </main>
       </div>
     );

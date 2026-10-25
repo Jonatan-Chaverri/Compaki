@@ -1,11 +1,13 @@
+import { useLocale } from "next-intl";
+import { useTranslations } from "next-intl";
 // Shared views of a protected community fund (Community Rewards periods and
 // fundraising progress), used by the operator dashboard and the public
 // community page. Rules, pools, totals and recipients come from the
 // contract; who took part comes from recorded sales.
 
 import {
-  POLICY_TEXT,
-  STATUS_STYLE,
+  getPolicyText,
+  getStatusStyle,
   formatAmount,
   formatCountdown,
   frequencyLabel,
@@ -17,18 +19,20 @@ import {
   type RewardsView,
 } from "@/lib/rewards";
 
-function date(ts: number) {
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(ts * 1000));
+function date(ts: number, locale: string) {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(ts * 1000));
 }
 
 export function WalletLink({ address }: { address: string }) {
+  const t = useTranslations("ui");
+
   return (
     <a
       href={`https://stellar.expert/explorer/testnet/${address.startsWith("C") ? "contract" : "account"}/${encodeURIComponent(address)}`}
       target="_blank"
       rel="noopener noreferrer"
       className="font-mono text-xs text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-700"
-      aria-label={`View wallet ${address} on Stellar`}
+      aria-label={t("viewWalletValueOnStellar", { value1: address })}
     >
       {shortAddress(address)} ↗
     </a>
@@ -36,25 +40,29 @@ export function WalletLink({ address }: { address: string }) {
 }
 
 export function RewardsRules({ rewards, ledger }: { rewards: RewardsView; ledger: number }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+
   const current = rewards.periods.find((p) => p.status === "current");
   return (
     <dl className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-sm sm:grid-cols-4">
       <div>
-        <dt className="text-xs text-slate-500">Shared</dt>
-        <dd className="mt-1 font-medium">{frequencyLabel(rewards.periodSeconds)}</dd>
+        <dt className="text-xs text-slate-500">{t("shared")}</dt>
+        <dd className="mt-1 font-medium">{frequencyLabel(rewards.periodSeconds, t)}</dd>
       </div>
       <div>
-        <dt className="text-xs text-slate-500">Sellers&apos; part</dt>
-        <dd className="mt-1 font-medium">{percent(rewards.vendorPoolBps ?? 0)} · by sales</dd>
+        <dt className="text-xs text-slate-500">{t("sellersPart")}</dt>
+        <dd className="mt-1 font-medium">{percent(rewards.vendorPoolBps ?? 0, locale)} {" "}{t("bySales")}</dd>
       </div>
       <div>
-        <dt className="text-xs text-slate-500">Buyers&apos; part</dt>
-        <dd className="mt-1 font-medium">{percent(rewards.buyerPoolBps ?? 0)} · by purchases</dd>
+        <dt className="text-xs text-slate-500">{t("buyersPart")}</dt>
+        <dd className="mt-1 font-medium">{percent(rewards.buyerPoolBps ?? 0, locale)} {" "}{t("byPurchases")}</dd>
       </div>
       <div>
-        <dt className="text-xs text-slate-500">Current period</dt>
+        <dt className="text-xs text-slate-500">{t("currentPeriod")}</dt>
         <dd className="mt-1 font-medium">
-          {current ? `Period ${current.periodId + 1} · ends in ${formatCountdown(current.endTs - ledger)}` : "—"}
+          {current ? t("periodValueEndsInValue", { value1: current.periodId + 1, value2: formatCountdown(current.endTs - ledger) }) : "—"}
         </dd>
       </div>
     </dl>
@@ -62,6 +70,11 @@ export function RewardsRules({ rewards, ledger }: { rewards: RewardsView; ledger
 }
 
 export function RewardsPeriodCard({ period, ledger }: { period: PeriodView; ledger: number }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+  const STATUS_STYLE = getStatusStyle(t);
+
   // The ledger clock may pass the end between refreshes.
   const status = period.status === "current" && ledger >= period.endTs ? "ended" : period.status;
   const style = STATUS_STYLE[status];
@@ -71,59 +84,57 @@ export function RewardsPeriodCard({ period, ledger }: { period: PeriodView; ledg
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
-            Period {period.periodId + 1}
+            {t("period")}{" "}{period.periodId + 1}
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.className}`}>{style.label}</span>
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {date(period.startTs)} → {date(period.endTs)}
-            {status === "current" && ` · ends in ${formatCountdown(period.endTs - ledger)}`}
+            {date(period.startTs, locale)} → {date(period.endTs, locale)}
+            {status === "current" && t("endsInValue2", { value1: formatCountdown(period.endTs - ledger) })}
           </p>
         </div>
         <div className="text-right">
-          <p className="text-xs uppercase tracking-wider text-slate-400">Rewards pool</p>
-          <p className="text-xl font-semibold tabular-nums text-slate-900">{formatAmount(pool)}</p>
+          <p className="text-xs uppercase tracking-wider text-slate-400">{t("rewardsPool")}</p>
+          <p className="text-xl font-semibold tabular-nums text-slate-900">{formatAmount(pool, locale)}</p>
           <p className="text-xs text-slate-500">
-            {formatAmount(period.vendorPoolUsd)} sellers · {formatAmount(period.buyerPoolUsd)} buyers
-          </p>
+            {formatAmount(period.vendorPoolUsd, locale)} {" "}{t("sellers4")}{" "}{formatAmount(period.buyerPoolUsd, locale)} {" "}{t("buyers2")}</p>
         </div>
       </div>
       <p className="mt-3 text-xs text-slate-500">
-        {formatAmount(period.salesUsd)} sold in {period.salesCount} recorded sale{period.salesCount === 1 ? "" : "s"}
-        {status === "ended" && ` · ${formatAmount(period.claimedUsd)} claimed so far`}
+        {formatAmount(period.salesUsd, locale)} {" "}{t("soldIn")}{" "}{t("recordedSalesCount", { count: period.salesCount })}
+        {status === "ended" && t("valueClaimedSoFar", { value1: formatAmount(period.claimedUsd, locale) })}
       </p>
 
       {period.participants.length > 0 ? (
         <div className="scroll-table">
           <table className="mt-4 w-full text-sm">
-            <caption className="sr-only">Sellers and buyers of period {period.periodId + 1} and their rewards</caption>
+            <caption className="sr-only">{t("sellersAndBuyersOfPeriod")}{" "}{period.periodId + 1} {" "}{t("andTheirRewards")}</caption>
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
-                <th className="py-2 font-medium">Participant</th>
-                <th className="py-2 text-right font-medium">Sold</th>
-                <th className="py-2 text-right font-medium">Bought</th>
-                <th className="py-2 text-right font-medium">{status === "ended" ? "Reward" : "Estimated"}</th>
-                <th className="py-2 text-right font-medium">Status</th>
+                <th className="py-2 font-medium">{t("participant")}</th>
+                <th className="py-2 text-right font-medium">{t("sold")}</th>
+                <th className="py-2 text-right font-medium">{t("bought")}</th>
+                <th className="py-2 text-right font-medium">{status === "ended" ? t("reward") : t("estimated")}</th>
+                <th className="py-2 text-right font-medium">{t("status")}</th>
               </tr>
             </thead>
             <tbody>
               {period.participants.map((p) => (
                 <tr key={p.address} className="border-b border-slate-50 last:border-0">
                   <td className="py-2">
-                    <span className="mr-2 font-medium text-slate-900">{p.name ?? "Community member"}</span>
+                    <span className="mr-2 font-medium text-slate-900">{p.name ?? t("communityMember")}</span>
                     <WalletLink address={p.address} />
                   </td>
-                  <td className="py-2 text-right tabular-nums text-slate-600">{p.soldUsd ? formatAmount(p.soldUsd) : "—"}</td>
-                  <td className="py-2 text-right tabular-nums text-slate-600">{p.boughtUsd ? formatAmount(p.boughtUsd) : "—"}</td>
-                  <td className="py-2 text-right font-semibold tabular-nums text-slate-900">{formatAmount(p.estimatedUsd)}</td>
+                  <td className="py-2 text-right tabular-nums text-slate-600">{p.soldUsd ? formatAmount(p.soldUsd, locale) : "—"}</td>
+                  <td className="py-2 text-right tabular-nums text-slate-600">{p.boughtUsd ? formatAmount(p.boughtUsd, locale) : "—"}</td>
+                  <td className="py-2 text-right font-semibold tabular-nums text-slate-900">{formatAmount(p.estimatedUsd, locale)}</td>
                   <td className="py-2 text-right text-xs">
                     {p.claimTxHash ? (
                       <a href={txUrl(p.claimTxHash)} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">
-                        claimed ↗
-                      </a>
+                        {t("claimed")}</a>
                     ) : status === "ended" ? (
-                      <span className="text-amber-700">ready to claim</span>
+                      <span className="text-amber-700">{t("readyToClaim")}</span>
                     ) : (
-                      <span className="text-slate-400">after the period ends</span>
+                      <span className="text-slate-400">{t("afterThePeriodEnds")}</span>
                     )}
                   </td>
                 </tr>
@@ -132,7 +143,7 @@ export function RewardsPeriodCard({ period, ledger }: { period: PeriodView; ledg
           </table>
         </div>
       ) : (
-        <p className="mt-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-500">No sales in this period yet.</p>
+        <p className="mt-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-500">{t("noSalesInThisPeriodYet")}</p>
       )}
     </article>
   );
@@ -147,6 +158,11 @@ export function FundraiseProgress({
   onRelease?: () => void;
   releasing?: boolean;
 }) {
+  const locale = useLocale();
+
+  const t = useTranslations("ui");
+  const POLICY_TEXT = getPolicyText(t);
+
   const target = fundraise.targetUsd ?? 0;
   const progress = target > 0 ? Math.min(100, (fundraise.raisedUsd / target) * 100) : 0;
   const policy = fundraise.policy ? POLICY_TEXT[fundraise.policy] : null;
@@ -157,30 +173,30 @@ export function FundraiseProgress({
           <div>
             <p className="eyebrow">
               {fundraise.collecting
-                ? `Fundraising${fundraise.round ? ` · round ${fundraise.round + 1}` : ""}`
-                : "Target reached"}
+                ? fundraise.round ? t("fundraisingRound", { round: fundraise.round + 1 }) : t("fundraisingvalue", { value1: "" })
+                : t("targetReached")}
             </p>
             <h3 className="mt-2 text-2xl font-medium tracking-tight">
-              {formatAmount(fundraise.raisedUsd)}{" "}
-              <span className="text-base text-slate-500">raised toward {formatAmount(target)}</span>
+              {formatAmount(fundraise.raisedUsd, locale)}{" "}
+              <span className="text-base text-slate-500">{t("raisedToward")}{" "}{formatAmount(target, locale)}</span>
             </h3>
           </div>
           <span className="text-sm font-semibold tabular-nums">
-            {progress.toLocaleString("en-US", { maximumFractionDigits: 1 })}%
+            {progress.toLocaleString(locale, { maximumFractionDigits: 1 })}%
           </span>
         </div>
-        <progress aria-label="Fundraising progress" max={100} value={progress} className="mt-4 w-full" />
+        <progress aria-label={t("fundraisingProgress")} max={100} value={progress} className="mt-4 w-full" />
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
           {fundraise.collecting
-            ? "The contract holds what is raised. Once the target is reached it is paid to the wallets below, at their fixed shares."
+            ? t("theContractHoldsWhatIsRaisedOnceTheTargetIsReached")
             : fundraise.policy === "direct"
-              ? "The target was paid out. Every sale now sends its community share straight to the wallets below."
-              : "The target was paid out and fundraising has ended. Sellers keep the community share of new sales."}
-          {policy && fundraise.collecting && ` After a payout: ${policy.label.toLowerCase()}.`}
+              ? t("theTargetWasPaidOutEverySaleNowSendsItsCommunity")
+              : t("theTargetWasPaidOutAndFundraisingHasEndedSellersKeep")}
+          {policy && fundraise.collecting && t("afterAPayoutValue", { value1: policy.label.toLowerCase() })}
         </p>
         {fundraise.releasable && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
-            <span>The target is reached. The payout is usually sent right after the sale that reached it.</span>
+            <span>{t("theTargetIsReachedThePayoutIsUsuallySentRightAfter")}</span>
             {onRelease && (
               <button
                 type="button"
@@ -188,7 +204,7 @@ export function FundraiseProgress({
                 disabled={releasing}
                 className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700 disabled:opacity-40"
               >
-                {releasing ? "Paying out…" : "Pay out now"}
+                {releasing ? t("payingOut") : t("payOutNow")}
               </button>
             )}
           </div>
@@ -196,28 +212,27 @@ export function FundraiseProgress({
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="font-medium text-slate-900">Who receives the funds</h3>
+        <h3 className="font-medium text-slate-900">{t("whoReceivesTheFunds")}</h3>
         <p className="mt-1 text-xs text-slate-500">
-          Fixed in the contract when the marketplace launched. Nobody can change them.
-        </p>
+          {t("fixedInTheContractWhenTheMarketplaceLaunchedNobodyCanChange")}</p>
         <div className="scroll-table">
           <table className="mt-3 w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
-                <th className="py-2 font-medium">Recipient</th>
-                <th className="py-2 text-right font-medium">Share</th>
-                <th className="py-2 text-right font-medium">Per payout of {formatAmount(target)}</th>
+                <th className="py-2 font-medium">{t("recipient")}</th>
+                <th className="py-2 text-right font-medium">{t("share")}</th>
+                <th className="py-2 text-right font-medium">{t("perPayoutOf")}{" "}{formatAmount(target, locale)}</th>
               </tr>
             </thead>
             <tbody>
               {fundraise.recipients.map((r) => (
                 <tr key={r.address} className="border-b border-slate-50 last:border-0">
                   <td className="py-2">
-                    <span className="mr-2 font-medium text-slate-900">{r.label || r.name || "Recipient"}</span>
+                    <span className="mr-2 font-medium text-slate-900">{r.label || r.name || t("recipient")}</span>
                     <WalletLink address={r.address} />
                   </td>
-                  <td className="py-2 text-right tabular-nums">{percent(r.shareBps)}</td>
-                  <td className="py-2 text-right tabular-nums">{formatAmount((target * r.shareBps) / 10_000)}</td>
+                  <td className="py-2 text-right tabular-nums">{percent(r.shareBps, locale)}</td>
+                  <td className="py-2 text-right tabular-nums">{formatAmount((target * r.shareBps) / 10_000, locale)}</td>
                 </tr>
               ))}
             </tbody>
@@ -227,19 +242,17 @@ export function FundraiseProgress({
 
       {fundraise.releases.length > 0 && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="font-medium text-slate-900">Payouts</h3>
+          <h3 className="font-medium text-slate-900">{t("payouts")}</h3>
           <p className="mt-1 text-xs text-slate-500">
-            {formatAmount(fundraise.totalReleasedUsd)} paid out in total.
-          </p>
+            {formatAmount(fundraise.totalReleasedUsd, locale)} {" "}{t("paidOutInTotal")}</p>
           <ul className="mt-3 space-y-2 text-sm">
             {fundraise.releases.map((r) => (
               <li key={r.txHash} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
                 <span>
-                  Round {r.round + 1} · <strong>{formatAmount(r.amountUsd)}</strong>
+                  {t("round")}{" "}{r.round + 1} · <strong>{formatAmount(r.amountUsd, locale)}</strong>
                 </span>
                 <a href={r.verifyUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline">
-                  Verify payout ↗
-                </a>
+                  {t("verifyPayout")}</a>
               </li>
             ))}
           </ul>

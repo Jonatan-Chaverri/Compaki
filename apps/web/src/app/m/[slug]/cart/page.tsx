@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
@@ -12,13 +13,15 @@ interface StorefrontPayload {
 export const dynamic = "force-dynamic";
 
 export default async function CartPage(props: { params: Promise<{ slug: string }> }) {
+  const t = await getTranslations("ui");
+
   const { slug } = await props.params;
   const [res, meRes] = await Promise.all([
     apiFetch(`/api/marketplaces/${encodeURIComponent(slug)}/storefront`),
     apiFetch("/api/me"),
   ]);
   if (res.status === 404) notFound();
-  if (!res.ok) throw new Error(`Storefront request failed (${res.status})`);
+  if (!res.ok) throw new Error(t("storefrontRequestFailedValue", { value1: res.status }));
   const { marketplace, products } = (await res.json()) as StorefrontPayload;
   const { user } = (await meRes.json()) as { user: { id: string } | null };
 

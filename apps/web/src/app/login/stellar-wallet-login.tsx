@@ -1,4 +1,7 @@
 "use client";
+import { localizedMessage } from "@/i18n/errors";
+
+import { useTranslations } from "next-intl";
 
 // Sign-in with a Stellar wallet the user already has (Freighter, xBull,
 // Albedo, Lobstr…) via Stellar Wallets Kit:
@@ -21,6 +24,8 @@ const inputClass =
 type Step = "start" | "working" | "profile";
 
 export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boolean) => void }) {
+  const t = useTranslations("ui");
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") ?? "/";
@@ -36,19 +41,19 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
   useEffect(() => { onBusyChange?.(busy || step !== "start"); }, [busy, step, onBusyChange]);
 
   const fail = (err: unknown, back: Step) => {
-    setError(err instanceof Error ? err.message : "Something went wrong");
+    setError(localizedMessage(err, t, t("somethingWentWrong")));
     setStep(back);
     setBusy(false);
   };
 
   const activateAndGo = async (account: string) => {
     setStep("working");
-    setProgress("Activating your wallet on Stellar testnet — approve it in your wallet…");
+    setProgress(t("activatingYourWalletOnStellarTestnetApproveItInYourWallet"));
     const result = await followSignatures(
       await readResult(await fetch("/api/wallet/setup", { method: "POST" })),
       (xdr) => signWithStellarWallet(xdr, account),
     );
-    if (result.status !== 200) throw new Error(result.body.error ?? "Wallet activation failed");
+    if (result.status !== 200) throw new Error(localizedMessage(result.body.error, t, t("walletActivationFailed")));
     router.push(next.startsWith("/") ? next : "/");
     router.refresh();
   };
@@ -60,7 +65,7 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
       const account = await connectStellarWallet();
       setAddress(account);
       setStep("working");
-      setProgress("Approve the sign-in request in your wallet (nothing is sent to the network)…");
+      setProgress(t("approveTheSignInRequestInYourWalletNothingIsSent"));
       const challenge = await readResult<{ xdr: string }>(
         await fetch("/api/auth/wallet/challenge", {
           method: "POST",
@@ -68,7 +73,7 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
           body: JSON.stringify({ address: account }),
         }),
       );
-      if (challenge.status !== 200) throw new Error(challenge.body.error ?? "Sign-in failed");
+      if (challenge.status !== 200) throw new Error(localizedMessage(challenge.body.error, t, t("signInFailed")));
       const signedXdr = await signWithStellarWallet(challenge.body.xdr, account);
       const login = await readResult<{ needsProfile: boolean; walletReady: boolean }>(
         await fetch("/api/auth/wallet", {
@@ -77,7 +82,7 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
           body: JSON.stringify({ address: account, signedXdr }),
         }),
       );
-      if (login.status !== 200) throw new Error(login.body.error ?? "Sign-in failed");
+      if (login.status !== 200) throw new Error(localizedMessage(login.body.error, t, t("signInFailed")));
       if (login.body.needsProfile) {
         setStep("profile");
         setBusy(false);
@@ -106,7 +111,7 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
           body: JSON.stringify({ name, country }),
         }),
       );
-      if (res.status !== 200) throw new Error(res.body.error ?? "Could not save your profile");
+      if (res.status !== 200) throw new Error(localizedMessage(res.body.error, t, t("couldNotSaveYourProfile")));
       await activateAndGo(address);
     } catch (err) {
       fail(err, "profile");
@@ -117,18 +122,16 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
     <div className="login-wallet-form">
       {step === "start" && (
         <>
-          <p className="login-wallet-label">For people with an existing wallet</p>
+          <p className="login-wallet-label">{t("forPeopleWithAnExistingWallet")}</p>
           <p className="mt-1 text-xs text-slate-500">
-            Freighter, xBull, Albedo, Lobstr and more. Switch it to <strong>Testnet</strong> first.
-          </p>
+            {t("freighterXbullAlbedoLobstrAndMoreSwitchItTo")}{" "}<strong>{t("testnet")}</strong> {" "}{t("first")}</p>
           <button
             type="button"
             onClick={() => void connect()}
             disabled={busy}
             className="login-submit mt-5"
           >
-            Connect a Stellar wallet
-          </button>
+            {t("connectAStellarWallet")}</button>
         </>
       )}
 
@@ -146,29 +149,29 @@ export function StellarWalletLogin({ onBusyChange }: { onBusyChange?: (busy: boo
             if (!busy && name.trim().length >= 2 && country.trim().length >= 2) void saveProfile();
           }}
         >
-          <p className="text-sm font-medium text-slate-800">Welcome! Tell us about you</p>
+          <p className="text-sm font-medium text-slate-800">{t("welcomeTellUsAboutYou")}</p>
           <p className="mt-1 break-all font-mono text-xs text-slate-400">{address}</p>
           <div className="mt-4 mb-4">
-            <label htmlFor="wallet-name" className="mb-1.5 block text-sm font-medium text-slate-700">Your name</label>
-            <input id="wallet-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ana Retana" className={inputClass} disabled={busy} />
+            <label htmlFor="wallet-name" className="mb-1.5 block text-sm font-medium text-slate-700">{t("yourName")}</label>
+            <input id="wallet-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("anaRetana")} className={inputClass} disabled={busy} />
           </div>
           <div className="mb-4">
-            <label htmlFor="wallet-country" className="mb-1.5 block text-sm font-medium text-slate-700">Country of residence</label>
-            <input id="wallet-country" autoComplete="country-name" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Costa Rica" className={inputClass} disabled={busy} />
+            <label htmlFor="wallet-country" className="mb-1.5 block text-sm font-medium text-slate-700">{t("countryOfResidence")}</label>
+            <input id="wallet-country" autoComplete="country-name" value={country} onChange={(e) => setCountry(e.target.value)} placeholder={t("costaRica")} className={inputClass} disabled={busy} />
           </div>
           <button
             type="submit"
             disabled={busy || name.trim().length < 2 || country.trim().length < 2}
             className="login-submit"
           >
-            {busy ? "One moment…" : "Continue"}
+            {busy ? t("oneMoment") : t("continue")}
           </button>
         </form>
       )}
 
       {error && (
         <p role="alert" className="login-error">
-          {error}
+          {localizedMessage(error, t, error)}
         </p>
       )}
     </div>

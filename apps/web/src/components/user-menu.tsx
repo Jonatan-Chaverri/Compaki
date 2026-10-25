@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 // Session widget for every top bar: a user icon with the name beneath it that
 // opens a dropdown. The dropdown shows "Sign in or create account" (one flow:
@@ -11,6 +12,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { useCompakiWallet } from "@/components/cavos-provider";
+import { LanguageOptions } from "./language-menu";
 import { ThemeOptions } from "./theme-menu";
 
 interface SessionUser {
@@ -52,6 +54,8 @@ function initialsOf(name: string): string {
 }
 
 export function UserMenu() {
+  const t = useTranslations("ui");
+
   const pathname = usePathname();
   const router = useRouter();
   const wallet = useCompakiWallet();
@@ -120,7 +124,7 @@ export function UserMenu() {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={loggedIn ? `Account: ${user.name}` : "Sign in or create an account"}
+        aria-label={loggedIn ? t("accountValue", { value1: user.name }) : t("signInOrCreateAnAccount")}
         className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 transition hover:bg-slate-50"
       >
         <span
@@ -131,7 +135,7 @@ export function UserMenu() {
           {loggedIn ? initialsOf(user.name) : <UserIcon className="h-4 w-4" />}
         </span>
         <span className="hidden max-w-[7rem] truncate text-xs font-medium leading-none text-slate-600 sm:block">
-          {loggedIn ? user.name.split(/\s+/)[0] : "Sign in"}
+          {loggedIn ? user.name.split(/\s+/)[0] : t("signIn")}
         </span>
       </button>
 
@@ -155,7 +159,7 @@ export function UserMenu() {
                   )}
                 </span>
               </div>
-              <Link role="menuitem" href="/dashboard" onClick={() => setOpen(false)} className="block px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50">Manage my marketplace</Link>
+              <Link role="menuitem" href="/dashboard" onClick={() => setOpen(false)} className="block px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50">{t("manageMyMarketplace")}</Link>
               <Link
                 role="menuitem"
                 href="/profile"
@@ -163,8 +167,7 @@ export function UserMenu() {
                 className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
               >
                 <UserIcon className="h-4 w-4 text-slate-400" />
-                My profile
-              </Link>
+                {t("myProfile")}</Link>
               <Link
                 role="menuitem"
                 href="/orders"
@@ -183,8 +186,7 @@ export function UserMenu() {
                   <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4H6z" />
                   <path d="M3 6h18M16 10a4 4 0 0 1-8 0" />
                 </svg>
-                My orders
-              </Link>
+                {t("myOrders")}</Link>
               <Link
                 role="menuitem"
                 href="/rewards"
@@ -203,8 +205,7 @@ export function UserMenu() {
                   <path d="M20 12v9H4v-9M2 7h20v5H2zM12 21V7" />
                   <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
                 </svg>
-                My rewards
-              </Link>
+                {t("myRewards")}</Link>
               {vendorMarketplaces.map((marketplace) => (
                 <Link
                   key={marketplace.slug}
@@ -227,8 +228,7 @@ export function UserMenu() {
                     <path d="M5 11.5V21h14v-9.5M9 21v-6h6v6" />
                   </svg>
                   <span className="min-w-0">
-                    Vendor dashboard
-                    {vendorMarketplaces.length > 1 && (
+                    {t("vendorDashboard")}{vendorMarketplaces.length > 1 && (
                       <span className="block truncate text-xs text-slate-400">
                         {marketplace.name}
                       </span>
@@ -236,6 +236,7 @@ export function UserMenu() {
                   </span>
                 </Link>
               ))}
+              <LanguageOptions />
               <ThemeOptions />
               <button
                 role="menuitem"
@@ -254,14 +255,12 @@ export function UserMenu() {
                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                   <path d="M16 17l5-5-5-5M21 12H9" />
                 </svg>
-                Sign out
-              </button>
+                {t("signOut")}</button>
             </>
           ) : (
             <>
               <p className="border-b border-slate-100 px-4 py-3 text-xs text-slate-500">
-                Browse freely — sign in to buy or sell.
-              </p>
+                {t("browseFreelySignInToBuyOrSell")}</p>
               <Link
                 role="menuitem"
                 href={`/login?next=${next}`}
@@ -269,8 +268,8 @@ export function UserMenu() {
                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-800 transition hover:bg-slate-50"
               >
                 <UserIcon className="h-4 w-4 text-slate-400" />
-                Sign in or create account
-              </Link>
+                {t("signInOrCreateAccount")}</Link>
+              <LanguageOptions />
               <ThemeOptions />
             </>
           )}
