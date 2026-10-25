@@ -185,7 +185,7 @@ export function ProductModal({
             id="product-image"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
-            placeholder="https://… or an emoji"
+            placeholder={t("imageUrlPlaceholder")}
             className={inputClass}
           />
           <div className="mt-2 flex flex-wrap gap-1">

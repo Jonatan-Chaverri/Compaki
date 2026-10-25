@@ -11,6 +11,7 @@ import { Hono } from "hono";
 
 import { prisma, parseSplitSnapshot } from "@/lib/db";
 import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails } from "@/lib/community";
+import { fulfillmentOf } from "@/lib/fulfillment";
 import { loadFundraiseView, parseFundraiseRecipients, type FundraiseRecipient } from "@/lib/fundraise";
 import { boundOnChainId, communityModeOf, loadRewardsView, PERIOD_HISTORY_LIMIT, type CommunityMode } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
@@ -807,6 +808,7 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
         createdAt: s.createdAt.toISOString(),
         // Where to send it: the seller fulfils their own items. Null for
         // sales recorded before checkout asked for an address.
+        fulfillment: fulfillmentOf(s),
         shipTo: s.shipAddress
           ? {
               name: s.buyer.name,

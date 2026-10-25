@@ -285,7 +285,7 @@ export function CavosLogin({ onProgressChange }: { onProgressChange?: (active: b
             </svg>
             {t("continueWithGoogle")}</button>
           <div className="login-divider"><span />{t("orContinueWithEmail")}<span /></div>
-          <div className="login-field"><label htmlFor="cavos-email">{t("yourEmail")}</label><input id="cavos-email" autoComplete="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass} disabled={busy} aria-describedby="login-email-hint" /></div>
+          <div className="login-field"><label htmlFor="cavos-email">{t("yourEmail")}</label><input id="cavos-email" autoComplete="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("emailPlaceholder")} className={inputClass} disabled={busy} aria-describedby="login-email-hint" /></div>
         </>}
         {step === "code" && <>
           <div className="login-field"><label htmlFor="cavos-code">{t("signInCode")}</label><input id="cavos-code" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("enterYourCode")} className={`${inputClass} login-code-input`} disabled={busy} aria-describedby="login-code-hint" /></div>

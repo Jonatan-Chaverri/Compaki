@@ -65,7 +65,7 @@ export function AuthForm({ onBusyChange }: { onBusyChange?: (busy: boolean) => v
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="ana@example.com"
+          placeholder={t("emailPlaceholder")}
           className={inputClass}
           disabled={busy}
         />

@@ -220,6 +220,14 @@ model Sale {
   shipCity       String?
   shipPostalCode String?
   shipCountry    String?
+  // Fulfilment, advanced by the item's vendor: "PAID" (to ship) → "SHIPPED"
+  // → "DELIVERED". Each sale is one order item, so a cart with items from
+  // several vendors ships (and is tracked) item by item.
+  fulfillmentStatus String    @default("PAID")
+  // Optional carrier / tracking number the vendor adds when shipping.
+  trackingInfo      String?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
   createdAt     DateTime @default(now())
 
   productId String

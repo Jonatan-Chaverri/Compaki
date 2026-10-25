@@ -8,10 +8,12 @@ import { Icon } from "@/components/icon";
 import { PageHeading } from "@/components/shell";
 import { useState } from "react";
 
+import { FulfillmentActions, FulfillmentBadge, FulfillmentDetails } from "@/components/fulfillment";
 import { LiveBalance } from "@/components/live-balance";
 import { Modal, ProductModal } from "@/components/product-modal";
 import { ProductVisual } from "@/components/shell";
 import { formatDateTime, formatUsd } from "@/lib/format";
+import type { Fulfillment } from "@/lib/fulfillment";
 
 export interface ProductRow {
   id: string;
@@ -31,6 +33,7 @@ export interface SaleRow {
   vendorShareUsd: number;
   txHash: string;
   createdAt: string;
+  fulfillment: Fulfillment;
   shipTo: {
     name: string;
     address: string;
@@ -46,7 +49,7 @@ export function VendorDashboard({
   vendorAccount,
   vendorBps,
   products,
-  sales,
+  sales: initialSales,
 }: {
   slug: string;
   marketplaceName: string;
@@ -62,6 +65,8 @@ export function VendorDashboard({
   const [tab, setTab] = useState<"products" | "sales">("products");
   const [editing, setEditing] = useState<ProductRow | "new" | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [sales, setSales] = useState(initialSales);
+  const toShip = sales.filter((s) => s.fulfillment.status === "PAID").length;
 
   return (
     <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-6 py-8">
@@ -73,7 +78,13 @@ export function VendorDashboard({
             <TabButton active={tab === "products"} onClick={() => setTab("products")}>
               {t("myProducts")}</TabButton>
             <TabButton active={tab === "sales"} onClick={() => setTab("sales")}>
-              {t("mySales")}</TabButton>
+              {t("mySales")}
+              {toShip > 0 && (
+                <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-amber-800">
+                  {t("toShipCount", { count: toShip })}
+                </span>
+              )}
+            </TabButton>
           </div>
         </div>
         <div className="flex flex-col gap-2">
@@ -150,6 +161,7 @@ export function VendorDashboard({
                     <th className="px-4 py-3 font-medium">{t("product")}</th>
                     <th className="px-4 py-3 font-medium">{t("when")}</th>
                     <th className="px-4 py-3 font-medium">{t("shipTo")}</th>
+                    <th className="px-4 py-3 font-medium">{t("deliveryStatus")}</th>
                     <th className="px-4 py-3 text-right font-medium">{t("sale")}</th>
                     <th className="px-4 py-3 text-right font-medium">{t("youReceived")}</th>
                   </tr>
@@ -174,6 +186,17 @@ export function VendorDashboard({
                         ) : (
                           <span className="text-xs text-slate-400">{t("noShippingAddress")}</span>
                         )}
+                      </td>
+                      <td className="min-w-44 px-4 py-3">
+                        <FulfillmentBadge status={s.fulfillment.status} audience="vendor" />
+                        <FulfillmentDetails fulfillment={s.fulfillment} />
+                        <FulfillmentActions
+                          saleId={s.id}
+                          fulfillment={s.fulfillment}
+                          onChange={(next) =>
+                            setSales((rows) => rows.map((row) => (row.id === s.id ? { ...row, fulfillment: next } : row)))
+                          }
+                        />
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-500">
                         {formatUsd(s.amountUsd, locale)}

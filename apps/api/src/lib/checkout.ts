@@ -15,6 +15,7 @@
 // moves. A payment that fails puts the units back (releaseStock).
 
 import { prisma } from "@/lib/db";
+import { fulfillmentOf } from "@/lib/fulfillment";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import { releaseIfReachedById } from "@/lib/fundraise";
 import { boundOnChainId } from "@/lib/rewards";
@@ -37,7 +38,9 @@ export const orderItemsInclude = {
       product: {
         select: { id: true, name: true, imageUrl: true, stock: true },
       },
-      sale: { select: { id: true } },
+      sale: {
+        select: { id: true, fulfillmentStatus: true, trackingInfo: true, shippedAt: true, deliveredAt: true },
+      },
     },
   },
   marketplace: { select: { name: true, slug: true } },
@@ -57,7 +60,13 @@ export function orderPayload(
       quantity: number;
       unitPriceUsd: number;
       product: { id: string; name: string; imageUrl: string | null };
-      sale?: { id: string } | null;
+      sale?: {
+        id: string;
+        fulfillmentStatus?: string;
+        trackingInfo?: string | null;
+        shippedAt?: Date | null;
+        deliveredAt?: Date | null;
+      } | null;
     }[];
   },
 ) {
@@ -78,6 +87,15 @@ export function orderPayload(
       unitPriceUsd: item.unitPriceUsd,
       lineTotalUsd: Math.round(item.unitPriceUsd * item.quantity * 100) / 100,
       receiptPath: item.sale ? `/receipt/${item.sale.id}` : null,
+      fulfillment:
+        item.sale?.fulfillmentStatus !== undefined
+          ? fulfillmentOf({
+              fulfillmentStatus: item.sale.fulfillmentStatus,
+              trackingInfo: item.sale.trackingInfo ?? null,
+              shippedAt: item.sale.shippedAt ?? null,
+              deliveredAt: item.sale.deliveredAt ?? null,
+            })
+          : null,
     })),
   };
 }
