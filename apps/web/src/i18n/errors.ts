@@ -35,6 +35,7 @@ export function localizedMessage(error: unknown, t: UiTranslator, fallback: stri
     [/^(.+)'s wallet doesn't exist on Stellar testnet\./, (m) => t("apiRecipientWalletMissing", { name: m[1] })],
     [/^(.+)'s wallet doesn't accept (\S+) yet\./, (m) => t("apiRecipientNoTrustline", { name: m[1], code: m[2] })],
     [/^(.+) is not ready for purchase yet$/, (m) => t("apiProductNotReady", { product: m[1] })],
+    [/^(.+) is already paid$/, (m) => t("apiProductAlreadyPaid", { product: m[1] })],
     [/^You already have \$(\d+) or more in demo money$/, (m) => t("apiFaucetMax", { amount: m[1] })],
     [/^(Community purpose|Who benefits|Distribution explanation) must be text$/, (m) => t("apiFieldText", { field: fieldLabel(m[1], t) })],
     [

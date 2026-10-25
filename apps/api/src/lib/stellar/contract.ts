@@ -18,7 +18,7 @@ import {
 } from "@stellar/stellar-sdk";
 
 import { stellarConfig } from "./config";
-import { sleep, withTimeoutRetry } from "./retry";
+import { ConfirmationTimeoutError, sleep, withTimeoutRetry } from "./retry";
 
 export interface MarketplaceConfigOnChain {
   operator: string;
@@ -189,7 +189,7 @@ async function sendAndConfirm(signed: Transaction, label: string): Promise<Invok
     }
     await sleep(1_500);
   }
-  throw new Error(`Transaction ${sent.hash} timed out waiting for confirmation (${label})`);
+  throw new ConfirmationTimeoutError(`Transaction ${sent.hash} timed out waiting for confirmation (${label})`);
 }
 
 /**

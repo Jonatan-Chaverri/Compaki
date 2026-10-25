@@ -10,7 +10,7 @@
 
 import { Hono } from "hono";
 
-import { completePurchaseStep } from "@/lib/checkout";
+import { completePurchaseStep, PurchaseRefusedError, releaseStock, reservePurchaseStock } from "@/lib/checkout";
 import { takePending, type PendingTx } from "@/lib/pending-tx";
 import { describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
@@ -46,6 +46,18 @@ tx.post("/:id", async (c) => {
     return c.json({ error: "This signing request expired — please try again" }, 410);
   }
 
+  // A purchase takes its stock before it's submitted (see src/lib/checkout.ts):
+  // when the product sold out meanwhile, the signed payment is dropped unsent.
+  let reserved: Awaited<ReturnType<typeof reservePurchaseStock>> | null = null;
+  if (pending.kind === "purchase") {
+    try {
+      reserved = await reservePurchaseStock(pending);
+    } catch (error) {
+      if (error instanceof PurchaseRefusedError) return c.json({ error: error.message }, 409);
+      throw error;
+    }
+  }
+
   let result;
   try {
     result = await submitUserSignedXdr({
@@ -55,6 +67,7 @@ tx.post("/:id", async (c) => {
       label: LABELS[pending.kind],
     });
   } catch (error) {
+    if (reserved) await releaseStock(reserved, error);
     if (error instanceof SignedTxMismatchError) return c.json({ error: error.message }, 400);
     console.error(`[tx] ${pending.kind} submission failed:`, error);
     return c.json({ error: "The network rejected the transaction — please try again." }, 502);

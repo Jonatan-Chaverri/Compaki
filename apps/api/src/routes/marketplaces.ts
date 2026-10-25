@@ -649,15 +649,22 @@ marketplaces.get("/:slug/dashboard", async (c) => {
     return c.json({ error: "Only the marketplace operator can view this dashboard" }, 403);
   }
 
-  const sales = await prisma.sale.findMany({
-    where: { product: { marketplaceId: marketplace.id } },
-    include: {
-      product: { select: { name: true, vendor: { select: { name: true } } } },
-      buyer: { select: { name: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  // The feed shows the latest 50 sales; the totals cover all of them.
+  const [sales, allSales] = await Promise.all([
+    prisma.sale.findMany({
+      where: { product: { marketplaceId: marketplace.id } },
+      include: {
+        product: { select: { name: true, vendor: { select: { name: true } } } },
+        buyer: { select: { name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    prisma.sale.findMany({
+      where: { product: { marketplaceId: marketplace.id } },
+      select: { amountUsd: true, splitSnapshot: true },
+    }),
+  ]);
 
   // Revenue by recipient, from the split snapshots frozen at purchase time.
   const parseSplitOrFallback = (raw: string, amountUsd: number) => {
@@ -668,7 +675,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       return { vendorAmountUsd: amountUsd, operatorAmountUsd: 0, communityAmountUsd: 0, platformAmountUsd: 0 };
     }
   };
-  const splitsPerSale = sales.map((s) => parseSplitOrFallback(s.splitSnapshot, s.amountUsd));
+  const splitsPerSale = allSales.map((s) => parseSplitOrFallback(s.splitSnapshot, s.amountUsd));
   const sum = (pick: (s: (typeof splitsPerSale)[number]) => number) =>
     splitsPerSale.reduce((acc, s) => acc + pick(s), 0);
 
@@ -692,8 +699,8 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       ? null
       : marketplace.communityFund?.stellarPublicKey ?? null,
     stats: {
-      totalSales: sales.length,
-      grossVolume: sales.reduce((acc, s) => acc + s.amountUsd, 0),
+      totalSales: allSales.length,
+      grossVolume: allSales.reduce((acc, s) => acc + s.amountUsd, 0),
       vendorRevenue: sum((s) => s.vendorAmountUsd),
       operatorRevenue: sum((s) => s.operatorAmountUsd),
       communityRevenue: sum((s) => s.communityAmountUsd),
@@ -761,7 +768,7 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
   });
   const sales = await prisma.sale.findMany({
     where: { product: { marketplaceId: marketplace.id, vendorId: user.id } },
-    include: { product: { select: { name: true } } },
+    include: { product: { select: { name: true } }, buyer: { select: { name: true } } },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
@@ -793,10 +800,22 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
       return {
         id: s.id,
         productName: s.product.name,
+        quantity: s.quantity,
         amountUsd: s.amountUsd,
         vendorShareUsd,
         txHash: s.txHash,
         createdAt: s.createdAt.toISOString(),
+        // Where to send it: the seller fulfils their own items. Null for
+        // sales recorded before checkout asked for an address.
+        shipTo: s.shipAddress
+          ? {
+              name: s.buyer.name,
+              address: s.shipAddress,
+              city: s.shipCity ?? "",
+              postalCode: s.shipPostalCode ?? "",
+              country: s.shipCountry ?? "",
+            }
+          : null,
       };
     }),
   });

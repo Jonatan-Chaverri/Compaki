@@ -20,7 +20,11 @@ import {
   nextOwnWalletPurchaseStep,
   orderItemsInclude,
   orderPayload,
+  outOfStockMessage,
+  PurchaseRefusedError,
   recordSale,
+  releaseStock,
+  reserveStock,
   topUpDemoBalance,
   vendorAddressFor,
 } from "@/lib/checkout";
@@ -87,7 +91,7 @@ orders.post("/", async (c) => {
     const quantity = requested.get(product.id) ?? 0;
     if (product.stock < quantity) {
       return c.json(
-        { error: `Only ${product.stock} unit${product.stock === 1 ? "" : "s"} of ${product.name} left in stock` },
+        { error: outOfStockMessage(product.name, product.stock) },
         409,
       );
     }
@@ -209,11 +213,9 @@ orders.post("/:id/pay", async (c) => {
     if (!vendorAddressFor(order, item)) {
       return c.json({ error: `${item.product.name} is not ready for purchase yet` }, 409);
     }
+    // Early, friendly check; reserveStock below is what actually guarantees it.
     if (item.product.stock < item.quantity) {
-      return c.json(
-        { error: `Only ${item.product.stock} unit${item.product.stock === 1 ? "" : "s"} of ${item.product.name} left in stock` },
-        409,
-      );
+      return c.json({ error: outOfStockMessage(item.product.name, item.product.stock) }, 409);
     }
   }
   if (ownWalletPending(sessionUser)) {
@@ -274,12 +276,20 @@ orders.post("/:id/pay", async (c) => {
     // settles so a failure mid-order can be retried without re-charging.
     for (const item of unsettled) {
       const settleStart = Date.now();
-      const { txHash, receipt } = await purchase({
-        buyerSecret,
-        marketplaceId: onChainId,
-        vendorPublicKey: vendorAddressFor(order, item) as string,
-        amountStroops: lineAmount(item).amountStroops,
-      });
+      await reserveStock(item);
+      let settled;
+      try {
+        settled = await purchase({
+          buyerSecret,
+          marketplaceId: onChainId,
+          vendorPublicKey: vendorAddressFor(order, item) as string,
+          amountStroops: lineAmount(item).amountStroops,
+        });
+      } catch (error) {
+        await releaseStock(item, error);
+        throw error;
+      }
+      const { txHash, receipt } = settled;
       await recordSale({
         order,
         item,
@@ -294,6 +304,7 @@ orders.post("/:id/pay", async (c) => {
 
     return c.json(await completeOrder(order.id, shipping));
   } catch (error) {
+    if (error instanceof PurchaseRefusedError) return c.json({ error: error.message }, 409);
     const known = describeContractError(error);
     if (known) {
       return c.json({ error: known.message, code: known.code }, known.status);

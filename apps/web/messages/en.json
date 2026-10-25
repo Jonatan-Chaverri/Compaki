@@ -1146,6 +1146,9 @@
     "availableProducts": "Products available",
     "createdOn": "Created",
     "manage": "Manage",
-    "apiSignInToSeeYourMarketplaces": "Sign in to see your marketplaces"
+    "apiSignInToSeeYourMarketplaces": "Sign in to see your marketplaces",
+    "shipTo": "Ship to",
+    "noShippingAddress": "No address (older sale)",
+    "apiProductAlreadyPaid": "{product} is already paid"
   }
 }

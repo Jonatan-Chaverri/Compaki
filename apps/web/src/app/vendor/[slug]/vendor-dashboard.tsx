@@ -26,10 +26,18 @@ export interface ProductRow {
 export interface SaleRow {
   id: string;
   productName: string;
+  quantity: number;
   amountUsd: number;
   vendorShareUsd: number;
   txHash: string;
   createdAt: string;
+  shipTo: {
+    name: string;
+    address: string;
+    city: string;
+    postalCode: string;
+    country: string;
+  } | null;
 }
 
 export function VendorDashboard({
@@ -141,15 +149,32 @@ export function VendorDashboard({
                   <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
                     <th className="px-4 py-3 font-medium">{t("product")}</th>
                     <th className="px-4 py-3 font-medium">{t("when")}</th>
+                    <th className="px-4 py-3 font-medium">{t("shipTo")}</th>
                     <th className="px-4 py-3 text-right font-medium">{t("sale")}</th>
                     <th className="px-4 py-3 text-right font-medium">{t("youReceived")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sales.map((s) => (
-                    <tr key={s.id} className="border-b border-slate-50 last:border-0">
-                      <td className="px-4 py-3 font-medium text-slate-900">{s.productName}</td>
-                      <td className="px-4 py-3 text-slate-500">{formatDateTime(s.createdAt, locale)}</td>
+                    <tr key={s.id} className="border-b border-slate-50 align-top last:border-0">
+                      <td className="px-4 py-3 font-medium text-slate-900">
+                        {s.quantity > 1 && <span className="tabular-nums text-slate-500">{s.quantity} × </span>}
+                        {s.productName}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-500">{formatDateTime(s.createdAt, locale)}</td>
+                      <td className="min-w-48 px-4 py-3 text-slate-600">
+                        {s.shipTo ? (
+                          <address className="not-italic leading-relaxed">
+                            <span className="block font-medium text-slate-900">{s.shipTo.name}</span>
+                            <span className="block">{s.shipTo.address}</span>
+                            <span className="block">
+                              {[s.shipTo.postalCode, s.shipTo.city].filter(Boolean).join(" ")}, {s.shipTo.country}
+                            </span>
+                          </address>
+                        ) : (
+                          <span className="text-xs text-slate-400">{t("noShippingAddress")}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-500">
                         {formatUsd(s.amountUsd, locale)}
                       </td>

@@ -6,8 +6,13 @@
 //     here for the next item (completePurchaseStep).
 //
 // Either way each order item settles as its own atomic on-chain purchase and
-// writes its Sale row + stock decrement right away, so a failure mid-order can
-// be retried without re-charging settled items.
+// writes its Sale row right away, so a failure mid-order can be retried
+// without re-charging settled items.
+//
+// Stock is taken *before* the payment is submitted (reserveStock), with a
+// conditional update, so two buyers paying for the last unit at the same
+// time can't both be charged: the second one is refused before any money
+// moves. A payment that fails puts the units back (releaseStock).
 
 import { prisma } from "@/lib/db";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
@@ -15,6 +20,7 @@ import { releaseIfReachedById } from "@/lib/fundraise";
 import { boundOnChainId } from "@/lib/rewards";
 import { splitSnapshot } from "@/lib/splits";
 import {
+  ConfirmationTimeoutError,
   getUsdBalance,
   mintDemoUsd,
   preparePurchase,
@@ -127,7 +133,41 @@ export async function topUpDemoBalance(address: string, totalUsd: number) {
   }
 }
 
-/** Records one settled item: Sale row (split frozen at purchase time) + stock. */
+export function outOfStockMessage(productName: string, left: number): string {
+  return `Only ${left} unit${left === 1 ? "" : "s"} of ${productName} left in stock`;
+}
+
+/** A purchase refused before any money moved (sold out, already paid). */
+export class PurchaseRefusedError extends Error {}
+
+/**
+ * Takes the item's units out of stock, or throws PurchaseRefusedError when there
+ * aren't enough left. Call right before submitting the item's payment.
+ */
+export async function reserveStock(item: { productId: string; quantity: number; product: { name: string } }) {
+  const { count } = await prisma.product.updateMany({
+    where: { id: item.productId, stock: { gte: item.quantity } },
+    data: { stock: { decrement: item.quantity } },
+  });
+  if (count === 1) return;
+  const product = await prisma.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
+  throw new PurchaseRefusedError(outOfStockMessage(item.product.name, Math.max(0, product?.stock ?? 0)));
+}
+
+/**
+ * Puts a reservation back after its payment failed. A payment whose
+ * confirmation timed out may still have gone through, so its units stay
+ * taken (at worst a unit is under-sold, never sold twice).
+ */
+export async function releaseStock(item: { productId: string; quantity: number }, cause: unknown) {
+  if (cause instanceof ConfirmationTimeoutError) return;
+  await prisma.product.update({
+    where: { id: item.productId },
+    data: { stock: { increment: item.quantity } },
+  });
+}
+
+/** Records one settled item: Sale row, with the split frozen at purchase time. */
 export async function recordSale(params: {
   order: PaymentOrder;
   item: PaymentOrder["items"][number];
@@ -150,28 +190,22 @@ export async function recordSale(params: {
     params.receipt,
     { buyerAddress: params.buyerAddress, vendorAddress: vendorAddressFor(order, item) ?? "" },
   );
-  await prisma.$transaction([
-    prisma.sale.create({
-      data: {
-        amountUsd: lineUsd,
-        quantity: item.quantity,
-        txHash: params.txHash,
-        splitSnapshot: JSON.stringify(snapshot),
-        settleSeconds: params.settleSeconds,
-        shipAddress: shipping.address,
-        shipCity: shipping.city,
-        shipPostalCode: shipping.postalCode || null,
-        shipCountry: shipping.country,
-        productId: item.productId,
-        buyerId: params.buyerId,
-        orderItemId: item.id,
-      },
-    }),
-    prisma.product.update({
-      where: { id: item.productId },
-      data: { stock: { decrement: item.quantity } },
-    }),
-  ]);
+  await prisma.sale.create({
+    data: {
+      amountUsd: lineUsd,
+      quantity: item.quantity,
+      txHash: params.txHash,
+      splitSnapshot: JSON.stringify(snapshot),
+      settleSeconds: params.settleSeconds,
+      shipAddress: shipping.address,
+      shipCity: shipping.city,
+      shipPostalCode: shipping.postalCode || null,
+      shipCountry: shipping.country,
+      productId: item.productId,
+      buyerId: params.buyerId,
+      orderItemId: item.id,
+    },
+  });
   // A fundraising round that this sale pushed past its target is released
   // right away (permissionless on-chain; the API just pays the fee).
   if (params.receipt.round !== null) {
@@ -272,6 +306,24 @@ export async function nextOwnWalletPurchaseStep(orderId: string, buyer: { id: st
     step: settledCount + 1,
     steps: order.items.length,
   });
+}
+
+/**
+ * Called by POST /api/tx/:id before it submits a signed purchase: reserves the
+ * item's stock (PurchaseRefusedError when it's gone) and returns what to put back
+ * if the submission fails. Refuses an item that is already paid, so a second
+ * signed copy of the same purchase is never submitted.
+ */
+export async function reservePurchaseStock(pending: PendingTx) {
+  const context = pending.context as PurchaseContext;
+  const item = await prisma.orderItem.findUnique({
+    where: { id: context.itemId },
+    select: { productId: true, quantity: true, product: { select: { name: true } }, sale: { select: { id: true } } },
+  });
+  if (!item) throw new Error(`Order item ${context.itemId} vanished`);
+  if (item.sale) throw new PurchaseRefusedError(`${item.product.name} is already paid`);
+  await reserveStock(item);
+  return item;
 }
 
 /** Called by POST /api/tx/:id once a signed purchase confirmed on-chain. */

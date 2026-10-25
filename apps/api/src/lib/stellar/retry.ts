@@ -12,7 +12,16 @@ const TIMEOUT_PATTERNS = [
   "503",
 ];
 
+/**
+ * A transaction was submitted but its confirmation didn't arrive in time: it
+ * may still have gone through. Never retried (a retry would submit a second
+ * transaction, e.g. charge a buyer twice), and callers must not assume it
+ * failed.
+ */
+export class ConfirmationTimeoutError extends Error {}
+
 export function isTimeoutish(error: unknown): boolean {
+  if (error instanceof ConfirmationTimeoutError) return false;
   // Message (and cause) only: stack traces always contain "withTimeoutRetry",
   // which would make every error look like a timeout.
   const message =
