@@ -11,6 +11,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { useCompakiWallet } from "@/components/cavos-provider";
+import { ThemeOptions } from "./theme-menu";
 
 interface SessionUser {
   id: string;
@@ -59,6 +60,7 @@ export function UserMenu() {
   const [vendorMarketplaces, setVendorMarketplaces] = useState<VendorMarketplace[]>([]);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +89,7 @@ export function UserMenu() {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") { setOpen(false); toggleRef.current?.focus(); }
     };
     document.addEventListener("mousedown", onPointer);
     document.addEventListener("keydown", onKey);
@@ -114,6 +116,7 @@ export function UserMenu() {
   return (
     <div className="relative" ref={menuRef}>
       <button
+        ref={toggleRef}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -233,6 +236,7 @@ export function UserMenu() {
                   </span>
                 </Link>
               ))}
+              <ThemeOptions />
               <button
                 role="menuitem"
                 onClick={() => void signOut()}
@@ -267,6 +271,7 @@ export function UserMenu() {
                 <UserIcon className="h-4 w-4 text-slate-400" />
                 Sign in or create account
               </Link>
+              <ThemeOptions />
             </>
           )}
         </div>

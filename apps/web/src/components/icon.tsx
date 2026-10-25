@@ -1,7 +1,10 @@
 import type { CSSProperties } from "react";
 
-export type IconName = "arrow" | "leaf" | "bag" | "people" | "check" | "search" | "grid" | "spark" | "store" | "heart" | "close" | "menu" | "chevron" | "shield";
+export type IconName = "arrow" | "leaf" | "bag" | "people" | "check" | "search" | "grid" | "spark" | "store" | "heart" | "close" | "menu" | "chevron" | "shield" | "sun" | "moon" | "monitor";
 const paths: Record<IconName, React.ReactNode> = {
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>,
+  moon: <path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z" />,
+  monitor: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M12 17v4m-4 0h8" /></>,
   arrow: <><path d="M4 12h16M14 6l6 6-6 6" /></>,
   leaf: <><path d="M20 4c-9-2-16 2-16 9a7 7 0 0 0 7 7c7 0 11-7 9-16Z" /><path d="m4 20 11-11M10 14v-4m0 4h4" /></>,
   bag: <><path d="M5 7h14l1 14H4L5 7Z" /><path d="M8 8V6a4 4 0 0 1 8 0v2" /></>,

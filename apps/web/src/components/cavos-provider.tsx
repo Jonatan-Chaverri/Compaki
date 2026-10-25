@@ -9,9 +9,22 @@
 // is that address, otherwise the connected Stellar wallet is asked to.
 
 import { CavosProvider, useCavos } from "@cavos/kit/react";
-import { createContext, useContext, useMemo } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
-import { disconnectStellarWallet, signWithStellarWallet } from "@/lib/stellar-wallets";
+import {
+  getResolvedTheme,
+  getServerResolvedTheme,
+  subscribeThemePreference,
+} from "@/lib/theme";
+import {
+  disconnectStellarWallet,
+  signWithStellarWallet,
+} from "@/lib/stellar-wallets";
 
 export const CAVOS_APP_ID = process.env.NEXT_PUBLIC_CAVOS_APP_ID ?? "";
 export const cavosConfigured = CAVOS_APP_ID !== "";
@@ -52,22 +65,36 @@ function CavosBridge({ children }: { children: React.ReactNode }) {
     }),
     [wallet, logout],
   );
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return (
+    <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
+  );
 }
 
-export function CompakiCavosProvider({ children }: { children: React.ReactNode }) {
+export function CompakiCavosProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const theme = useSyncExternalStore(
+    subscribeThemePreference,
+    getResolvedTheme,
+    getServerResolvedTheme,
+  );
   if (!cavosConfigured) return <>{children}</>;
   return (
     <CavosProvider
       config={{
         appId: CAVOS_APP_ID,
-        environment: process.env.NEXT_PUBLIC_CAVOS_ENV === "production" ? "production" : "development",
+        environment:
+          process.env.NEXT_PUBLIC_CAVOS_ENV === "production"
+            ? "production"
+            : "development",
         chains: ["stellar"],
         defaultChain: "stellar",
         network: "testnet",
         appSalt: CAVOS_APP_SALT,
       }}
-      modal={{ appName: "Compaki" }}
+      modal={{ appName: "Compaki", theme }}
     >
       <CavosBridge>{children}</CavosBridge>
     </CavosProvider>

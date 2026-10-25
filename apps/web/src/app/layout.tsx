@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { CompakiCavosProvider } from "@/components/cavos-provider";
 import { AppFooter } from "@/components/shell";
+import { ThemeSync } from "@/components/theme-sync";
+import { themeBootstrap } from "@/lib/theme";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,9 +30,25 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-theme="light"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col"><a className="skip-link" href="#main-content">Skip to content</a><CompakiCavosProvider><div id="app-content" className="flex-1">{children}</div><AppFooter /></CompakiCavosProvider></body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
+      </head>
+      <body className="min-h-full flex flex-col">
+        <ThemeSync />
+        <a className="skip-link" href="#main-content">
+          Skip to content
+        </a>
+        <CompakiCavosProvider>
+          <div id="app-content" className="flex-1">
+            {children}
+          </div>
+          <AppFooter />
+        </CompakiCavosProvider>
+      </body>
     </html>
   );
 }

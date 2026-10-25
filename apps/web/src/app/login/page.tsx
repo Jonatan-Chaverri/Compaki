@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icon";
 import { MarketArt } from "@/components/market-art";
 import { DemoNotice, Logo } from "@/components/shell";
+import { ThemeMenu } from "@/components/theme-menu";
 import { SignIn } from "./sign-in";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export default function LoginPage() {
       <DemoNotice />
       <header className="login-header">
         <Link href="/" aria-label="Compaki home"><Logo /></Link>
-        <Link href="/marketplaces" className="login-browse"><span>Just exploring?</span> Browse marketplaces <Icon name="arrow" className="h-4 w-4" /></Link>
+        <div className="login-header-actions"><Link href="/marketplaces" className="login-browse"><span>Just exploring?</span> Browse marketplaces <Icon name="arrow" className="h-4 w-4" /></Link><ThemeMenu /></div>
       </header>
       <main id="main-content" tabIndex={-1} className="login-layout">
         <section className="login-story" aria-labelledby="login-story-title">

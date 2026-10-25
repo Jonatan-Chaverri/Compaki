@@ -3,18 +3,41 @@
 // import time and is large, so it never runs during server rendering. The kit
 // remembers the chosen wallet in localStorage between visits.
 
+import { getResolvedTheme } from "./theme";
+
+let updateKitTheme: (() => void) | null = null;
+
+/** The SDK stays lazy; appearance updates never initialize a wallet session. */
+export function syncStellarWalletTheme(): void {
+  updateKitTheme?.();
+}
+
 const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 
-let ready: Promise<typeof import("@creit.tech/stellar-wallets-kit/sdk").StellarWalletsKit> | null = null;
+let ready: Promise<
+  typeof import("@creit.tech/stellar-wallets-kit/sdk").StellarWalletsKit
+> | null = null;
 
 function kit() {
   ready ??= (async () => {
-    const [{ StellarWalletsKit }, { defaultModules }, { Networks }] = await Promise.all([
+    const [
+      { StellarWalletsKit },
+      { defaultModules },
+      { Networks, SwkAppDarkTheme, SwkAppLightTheme },
+    ] = await Promise.all([
       import("@creit.tech/stellar-wallets-kit/sdk"),
       import("@creit.tech/stellar-wallets-kit/modules/utils"),
       import("@creit.tech/stellar-wallets-kit/types"),
     ]);
-    StellarWalletsKit.init({ modules: defaultModules(), network: Networks.TESTNET });
+    StellarWalletsKit.init({
+      modules: defaultModules(),
+      network: Networks.TESTNET,
+    });
+    updateKitTheme = () =>
+      StellarWalletsKit.setTheme(
+        getResolvedTheme() === "dark" ? SwkAppDarkTheme : SwkAppLightTheme,
+      );
+    updateKitTheme();
     return StellarWalletsKit;
   })();
   return ready;
@@ -27,8 +50,13 @@ export async function connectStellarWallet(): Promise<string> {
 }
 
 /** Asks the connected wallet to sign a testnet transaction for `address`. */
-export async function signWithStellarWallet(xdr: string, address: string): Promise<string> {
-  const { signedTxXdr } = await (await kit()).signTransaction(xdr, {
+export async function signWithStellarWallet(
+  xdr: string,
+  address: string,
+): Promise<string> {
+  const { signedTxXdr } = await (
+    await kit()
+  ).signTransaction(xdr, {
     networkPassphrase: TESTNET_PASSPHRASE,
     address,
   });

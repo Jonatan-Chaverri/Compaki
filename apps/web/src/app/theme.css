@@ -1,0 +1,181 @@
+/* Semantic colors are shared by custom components and Tailwind utilities.
+   light-dark() in globals.css preserves the existing light palette exactly. */
+:root {
+  color-scheme: light;
+  --surface-base: #f9faf6;
+  --surface-card: #fffffc;
+  --surface-raised: #ffffff;
+  --surface-soft: #f1f5e9;
+  --surface-sage: #e2ebd3;
+  --surface-warm: #faf5e9;
+  --surface-danger: #fff5f0;
+  --surface-success: #eff6eb;
+  --line: #dfe5d9;
+  --line-strong: #9bad8d;
+  --ink: #243d32;
+  --ink-muted: #63715f;
+  --ink-soft: #778474;
+  --accent: #527a40;
+  --warm-accent: #946b38;
+  --action: #254d38;
+  --action-hover: #396346;
+  --on-action: #ffffff;
+  --feature-bg: #254d38;
+  --feature-ink: #fafbed;
+  --feature-muted: #c4d2b5;
+  --status-warning: #946b38;
+  --status-error: #a55c41;
+  --status-success: #467047;
+  --header-surface: #fdfefbf2;
+  --focus-ring: #b38441;
+  --overlay: #18382166;
+  --shadow: #243d3214;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-base: #101914;
+  --surface-card: #19251d;
+  --surface-raised: #223027;
+  --surface-soft: #1e2e23;
+  --surface-sage: #2c3e2c;
+  --surface-warm: #332d22;
+  --surface-danger: #382620;
+  --surface-success: #213829;
+  --line: #354637;
+  --line-strong: #69815c;
+  --ink: #e7eddf;
+  --ink-muted: #b8c4ad;
+  --ink-soft: #a4b498;
+  --accent: #b7d799;
+  --warm-accent: #e1be8c;
+  --action: #3d674a;
+  --action-hover: #4b7857;
+  --on-action: #f5f8ee;
+  --feature-bg: #173222;
+  --feature-ink: #f0f5e7;
+  --feature-muted: #c4d7b6;
+  --status-warning: #e8c98d;
+  --status-error: #f1ae98;
+  --status-success: #a7d9ab;
+  --header-surface: #101914f2;
+  --focus-ring: #dfba78;
+  --overlay: #050c08c2;
+  --shadow: #00000040;
+}
+
+/* White surfaces must adapt without changing white labels on solid buttons. */
+@layer utilities {
+  .bg-white {
+    background-color: light-dark(#ffffff, var(--surface-card));
+  }
+}
+
+.theme-options {
+  padding: 15px;
+  border-top: 1px solid var(--line);
+}
+.theme-options > p {
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--ink-muted);
+}
+.theme-options > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.theme-options button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 58px;
+  padding: 9px 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-card);
+  color: var(--ink-muted);
+  font-size: 10px;
+}
+.theme-options button:hover {
+  background: var(--surface-soft);
+  border-color: var(--line-strong);
+}
+.theme-options button[aria-checked="true"] {
+  background: var(--surface-soft);
+  color: var(--accent);
+  border-color: var(--line-strong);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.theme-options small {
+  display: block;
+  margin-top: 10px;
+  font-size: 9px;
+  color: var(--ink-soft);
+  line-height: 1.8;
+}
+.theme-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-card);
+  color: var(--ink-muted);
+}
+.theme-toggle:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+.theme-popover {
+  position: absolute;
+  z-index: 60;
+  right: 0;
+  top: calc(100% + 9px);
+  width: 246px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 30px var(--shadow);
+}
+.theme-popover .theme-options {
+  border-top: 0;
+}
+.login-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+:root[data-theme="dark"] .brand-logo img {
+  mix-blend-mode: normal;
+  border-radius: 8px;
+}
+/* Illustrations and product photography retain their original colors. */
+:root[data-theme="dark"] .collection-art > svg,
+:root[data-theme="dark"] .hero-scene > svg,
+:root[data-theme="dark"] .storefront-hero > svg,
+:root[data-theme="dark"] .login-illustration > svg,
+:root[data-theme="dark"] .onboarding-preview-art > svg {
+  opacity: 0.9;
+}
+@media (max-width: 420px) {
+  .login-header-actions {
+    gap: 10px;
+  }
+  .login-browse {
+    max-width: 115px;
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  .theme-toggle {
+    width: 36px;
+    height: 38px;
+  }
+}
