@@ -1371,6 +1371,7 @@
     "apiCouldNotDeleteMarketplace": "No se pudo eliminar este marketplace. Inténtalo de nuevo.",
     "apiInvalidProductVisibility": "La visibilidad del producto no es válida",
     "apiMarketplaceIsRequired": "Elige un marketplace",
-    "apiCouldNotLoadMarketplaceRules": "No se pudieron cargar las reglas actuales del marketplace"
+    "apiCouldNotLoadMarketplaceRules": "No se pudieron cargar las reglas actuales del marketplace",
+    "apiTooManySignInAttempts": "Demasiados intentos de inicio de sesión. Espera unos minutos y vuelve a intentarlo."
   }
 }

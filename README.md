@@ -417,7 +417,8 @@ Environment variables used by this release:
 | --- | --- | --- |
 | `MARKETPLACE_CONTRACT_ID` | API | Contract the API talks to (written by deploy). |
 | `DEMO_USDC_CODE` / `_ISSUER_*` / `_SAC_ADDRESS` | API | Demo asset (historical names; the asset is not USDC). |
-| `WALLET_ENCRYPTION_KEY`, `SESSION_SECRET` | API | Custodial key encryption; session HMAC (falls back to the wallet key). |
+| `WALLET_ENCRYPTION_KEY` | API | Custodial key encryption. |
+| `SESSION_SECRET` | API | Signs session cookies (`userId.expiresAt.signature`, 30 days, Secure over HTTPS). Set it: without it a key derived from `WALLET_ENCRYPTION_KEY` is used, and changing it signs everyone out. |
 | `ENABLE_DEMO_IMPERSONATION` | API | `true` to allow the local demo switcher (ignored in production). |
 | `DEMO_SEED_PASSWORD`, `SEED_PERIOD_SECONDS` | seed | Demo logins; seeded period length (default 600). |
 | `COMMUNITY_SCHEDULER`, `COMMUNITY_TICK_SECONDS` | API | `off` disables automatic distributions and payouts (run it on one API instance); how often it checks (default 30). |
@@ -502,9 +503,17 @@ claimable there with `stellar contract invoke`.
 
 ```bash
 cargo build --target wasm32v1-none --release && cargo test   # 44 tests (repo root)
-cd apps/api && npm run typecheck && npm run test:community && npm run test:sep10 && npm run build
+cd apps/api && npm run typecheck && npm test && npm run contract:client:check && npm run build
 cd apps/web && npm run typecheck && npm run lint && node --test tests/*.test.mjs && npm run build
 ```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs all of this on every push
+and pull request, plus the API's database migrations and route tests on an
+empty Postgres. `contract:client:check` fails when the contract changed but the
+API's generated client wasn't regenerated (`npm run contract:client`).
+`npm test` covers the community, SEP-10 and session/sign-in-limit unit tests;
+password sign-in answers 429 after 5 failures for an email (or 20 from one
+client) within 15 minutes.
 
 The contract tests cover the split and platform fee; rewards booked by sales
 and purchases; distribution timing; new rules for the next period (validated,

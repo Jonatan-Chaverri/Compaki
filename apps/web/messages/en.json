@@ -1371,6 +1371,7 @@
     "apiCouldNotDeleteMarketplace": "Could not delete this marketplace. Please try again.",
     "apiInvalidProductVisibility": "Invalid product visibility",
     "apiMarketplaceIsRequired": "Marketplace is required",
-    "apiCouldNotLoadMarketplaceRules": "Could not load the current marketplace rules"
+    "apiCouldNotLoadMarketplaceRules": "Could not load the current marketplace rules",
+    "apiTooManySignInAttempts": "Too many sign-in attempts. Please wait a few minutes and try again."
   }
 }

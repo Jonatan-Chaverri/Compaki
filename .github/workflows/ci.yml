@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Contract (Soroban)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      # Built first so the upgrade test can install the real wasm.
+      - name: Build wasm
+        run: cargo build --target wasm32v1-none --release
+      - name: Test
+        run: cargo test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contract-wasm
+          path: target/wasm32v1-none/release/compaki_marketplace.wasm
+
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    needs: contract
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: compaki
+          POSTGRES_PASSWORD: compaki
+          POSTGRES_DB: compaki
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U compaki"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://compaki:compaki@localhost:5432/compaki
+      DIRECT_URL: postgresql://compaki:compaki@localhost:5432/compaki
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - name: Unit tests (community, SEP-10, session)
+        run: npm test
+      - name: Migrations on an empty database
+        run: npx prisma migrate deploy
+      - name: Route tests against the database
+        run: node --import tsx --test src/routes/*.test.ts
+        env:
+          COMPAKI_DATABASE_TESTS: "1"
+      - uses: actions/download-artifact@v4
+        with:
+          name: contract-wasm
+          path: ${{ runner.temp }}/wasm
+      - name: Generated contract client matches the contract
+        run: npm run contract:client:check -- "${{ runner.temp }}/wasm/compaki_marketplace.wasm"
+      - run: npm run build
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - name: Tests (i18n, theme, navigation)
+        run: node --test tests/*.test.mjs
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build

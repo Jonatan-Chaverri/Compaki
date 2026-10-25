@@ -44,6 +44,6 @@ demo.get("/impersonate", async (c) => {
 
   // Relative Location on purpose: the browser resolves it against the web
   // app's origin (the request arrives through the /api proxy).
-  c.header("Set-Cookie", sessionCookieHeader(membership.userId));
+  c.header("Set-Cookie", sessionCookieHeader(c, membership.userId));
   return c.redirect(redirect, 302);
 });
