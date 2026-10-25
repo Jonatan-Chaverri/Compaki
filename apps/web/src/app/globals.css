@@ -33,16 +33,17 @@
   --color-navy-700: light-dark(#416d50, #4b7857);
   --color-navy-800: light-dark(#355e46, #456f50);
   --color-navy-900: light-dark(#254d38, #3d674a);
-  --color-slate-50: light-dark(#f5f7f2, #17231c);
-  --color-slate-100: light-dark(#edf0e8, #223027);
-  --color-slate-200: light-dark(#dfe5d9, #354637);
-  --color-slate-300: light-dark(#c5cfc0, #607354);
-  --color-slate-400: light-dark(#778474, #a4b498);
-  --color-slate-500: light-dark(#63715f, #b8c4ad);
-  --color-slate-600: light-dark(#536350, #c6d1bc);
-  --color-slate-700: light-dark(#3f513e, #d3ddca);
-  --color-slate-800: light-dark(#2e432f, #dfe8d6);
-  --color-slate-900: light-dark(#243d32, #edf2e7);
+  /* Neutral utilities share the same dark surfaces as custom components. */
+  --color-slate-50: light-dark(#f5f7f2, #0c0c0c);
+  --color-slate-100: light-dark(#edf0e8, var(--surface-raised));
+  --color-slate-200: light-dark(#dfe5d9, var(--line));
+  --color-slate-300: light-dark(#c5cfc0, var(--line-strong));
+  --color-slate-400: light-dark(#778474, var(--ink-soft));
+  --color-slate-500: light-dark(#63715f, var(--ink-muted));
+  --color-slate-600: light-dark(#536350, #c7c7c7);
+  --color-slate-700: light-dark(#3f513e, #d4d4d4);
+  --color-slate-800: light-dark(#2e432f, #e3e3e3);
+  --color-slate-900: light-dark(#243d32, var(--ink));
 }
 @layer base {
   * { box-sizing: border-box; }
