@@ -4,8 +4,10 @@
  *   1. creates + funds the demo-asset issuer account (Friendbot),
  *   2. deploys the Stellar Asset Contract (SAC) for <CODE>:<issuer>,
  *   3. builds (cargo) + uploads + deploys the marketplace Soroban contract,
- *   4. calls initialize(admin = issuer, token = SAC),
- *   5. writes every address/id to .env.local for the API.
+ *   4. creates the platform fee account (receives Compaki's fixed 2% of every
+ *      sale; it needs a trustline to the demo asset),
+ *   5. calls initialize(admin = issuer, token = SAC, platform = that account),
+ *   6. writes every address/id to .env.local for the API.
  *
  * The demo asset is self-issued test money. Fresh deploys name it CPKUSD
  * ("Compaki demo USD", override with DEMO_ASSET_CODE) so it can't be mistaken
@@ -38,7 +40,10 @@ import {
   Contract,
   Keypair,
   Operation,
+  SorobanDataBuilder,
+  Transaction,
   TransactionBuilder,
+  type FeeBumpTransaction,
   nativeToScVal,
   rpc,
   scValToNative,
@@ -90,6 +95,46 @@ async function waitForAccountOnRpc(publicKey: string): Promise<void> {
 }
 
 /** Simulate → sign → submit → poll one Soroban operation. Retries once on timeout-ish errors. */
+const UINT32_MAX = 4_294_967_295;
+
+/**
+ * Simulates, assembles and signs a Soroban transaction. A transaction's own
+ * fee is a uint32 (max ~429 XLM), but uploading new contract code can cost
+ * more than that on testnet. In that case the signed transaction is wrapped
+ * in a fee bump, whose fee is an int64; the signer pays for both. (The first
+ * call into newly uploaded code, like initialize, can be just as expensive.)
+ */
+async function prepareSigned(
+  tx: Transaction,
+  signer: Keypair,
+  label: string,
+): Promise<Transaction | FeeBumpTransaction> {
+  const sim = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(sim)) throw new Error(`${label}: simulation failed: ${sim.error}`);
+  if (BigInt(tx.fee) + BigInt(sim.minResourceFee) <= UINT32_MAX) {
+    const prepared = rpc.assembleTransaction(tx, sim).build();
+    prepared.sign(signer);
+    return prepared;
+  }
+
+  // TransactionBuilder refuses a resource fee above uint32: assemble it
+  // (auth entries included) with a zero resource fee, then put the real
+  // simulated Soroban data back on the envelope.
+  const sorobanData = sim.transactionData.build();
+  const assembled = rpc
+    .assembleTransaction(tx, sim)
+    .setSorobanData(new SorobanDataBuilder(sorobanData).setResourceFee(0).build())
+    .build();
+  const envelope = assembled.toEnvelope();
+  envelope.v1().tx().ext(new xdr.TransactionExt(1, sorobanData));
+  const inner = new Transaction(envelope, PASSPHRASE);
+  inner.sign(signer);
+  console.log(`    ${label}: resource fee ${(Number(sim.minResourceFee) / 1e7).toFixed(2)} XLM is above the per-tx cap, paying via fee bump`);
+  const bump = TransactionBuilder.buildFeeBumpTransaction(signer, BASE_FEE, inner, PASSPHRASE);
+  bump.sign(signer);
+  return bump;
+}
+
 async function submitSoroban(
   operation: xdr.Operation,
   signer: Keypair,
@@ -105,8 +150,7 @@ async function submitSoroban(
       .setTimeout(120)
       .build();
 
-    const prepared = await server.prepareTransaction(tx);
-    prepared.sign(signer);
+    const prepared = await prepareSigned(tx, signer, label);
     const sent = await server.sendTransaction(prepared);
     if (sent.status === "ERROR") {
       throw new Error(`${label}: submission failed: ${JSON.stringify(sent.errorResult)}`);
@@ -150,8 +194,46 @@ function existingEnvValue(key: string): string | undefined {
   return match?.[1]?.replace(/^"|"$/g, "") || undefined;
 }
 
+/** Submits a classic (non-Soroban) transaction through RPC and waits for it. */
+async function submitClassic(build: (builder: TransactionBuilder) => TransactionBuilder, signer: Keypair, label: string) {
+  const account = await server.getAccount(signer.publicKey());
+  const tx = build(
+    new TransactionBuilder(account, { fee: (Number(BASE_FEE) * 10).toString(), networkPassphrase: PASSPHRASE }),
+  )
+    .setTimeout(120)
+    .build();
+  tx.sign(signer);
+  const sent = await server.sendTransaction(tx);
+  if (sent.status === "ERROR") throw new Error(`${label}: submission failed: ${JSON.stringify(sent.errorResult)}`);
+  for (let i = 0; i < 30; i++) {
+    const result = await server.getTransaction(sent.hash);
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) return;
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) throw new Error(`${label}: tx ${sent.hash} failed`);
+    await sleep(1_500);
+  }
+  throw new Error(`${label}: tx ${sent.hash} confirmation timeout`);
+}
+
+/**
+ * The account that receives Compaki's 2% platform fee: funded by Friendbot
+ * and trusting the demo asset (an account can't receive a token it doesn't
+ * trust, and the contract's purchase would fail).
+ */
+async function createPlatformAccount(assetCode: string, issuerPublic: string): Promise<Keypair> {
+  const platform = Keypair.random();
+  await friendbot(platform.publicKey());
+  await waitForAccountOnRpc(platform.publicKey());
+  await submitClassic(
+    (b) => b.addOperation(Operation.changeTrust({ asset: new Asset(assetCode, issuerPublic) })),
+    platform,
+    "platform trustline",
+  );
+  console.log(`    platform fee account: ${platform.publicKey()}`);
+  return platform;
+}
+
 /** Builds, uploads, deploys and initializes the marketplace contract. */
-async function deployMarketplaceContract(issuer: Keypair, sacAddress: string): Promise<string> {
+async function deployMarketplaceContract(issuer: Keypair, sacAddress: string, platformPublic: string): Promise<string> {
   console.log("Building marketplace contract (cargo → wasm)...");
   // wasm32v1-none emits pure WASM-1.0 (MVP) bytecode. The default
   // wasm32-unknown-unknown target on rustc ≥1.82 emits reference-types,
@@ -194,6 +276,7 @@ async function deployMarketplaceContract(issuer: Keypair, sacAddress: string): P
       "initialize",
       nativeToScVal(issuer.publicKey(), { type: "address" }),
       nativeToScVal(sacAddress, { type: "address" }),
+      nativeToScVal(platformPublic, { type: "address" }),
     ),
     issuer,
     "initialize",
@@ -212,17 +295,27 @@ async function deployContractOnly(): Promise<void> {
   }
   const issuer = Keypair.fromSecret(issuerSecret);
   console.log(`    reusing issuer ${issuer.publicKey()} and token ${sacAddress}`);
-  const contractId = await deployMarketplaceContract(issuer, sacAddress);
+  // Reuse the platform fee account if this env already has one.
+  let platformPublic = existingEnvValue("PLATFORM_FEE_PUBLIC");
+  let newPlatform: Keypair | null = null;
+  if (!platformPublic) {
+    newPlatform = await createPlatformAccount(existingEnvValue("DEMO_USDC_CODE") ?? "USDC", issuer.publicKey());
+    platformPublic = newPlatform.publicKey();
+  }
+  const contractId = await deployMarketplaceContract(issuer, sacAddress, platformPublic);
 
-  const env = readFileSync(ENV_LOCAL, "utf8");
+  let env = readFileSync(ENV_LOCAL, "utf8");
   const line = `MARKETPLACE_CONTRACT_ID=${contractId}`;
-  const updated = /^MARKETPLACE_CONTRACT_ID=.*$/m.test(env)
+  env = /^MARKETPLACE_CONTRACT_ID=.*$/m.test(env)
     ? env.replace(
         /^MARKETPLACE_CONTRACT_ID=.*$/m,
         `# Previous contract (${new Date().toISOString()}): ${previous ?? "none"}\n${line}`,
       )
     : `${env.trimEnd()}\n${line}\n`;
-  writeFileSync(ENV_LOCAL, updated);
+  if (newPlatform) {
+    env = `${env.trimEnd()}\n\n# Receives Compaki's fixed 2% platform fee.\nPLATFORM_FEE_PUBLIC=${newPlatform.publicKey()}\nPLATFORM_FEE_SECRET=${newPlatform.secret()}\n`;
+  }
+  writeFileSync(ENV_LOCAL, env);
 
   console.log("────────────────────────────────────────────────────────");
   console.log(`✔ Updated MARKETPLACE_CONTRACT_ID in ${ENV_LOCAL}`);
@@ -253,9 +346,10 @@ async function main(): Promise<void> {
   );
   console.log(`    SAC: ${sacAddress}`);
 
-  // 3. Marketplace contract.
-  console.log("3/3 Marketplace contract...");
-  const contractId = await deployMarketplaceContract(issuer, sacAddress);
+  // 3. Platform fee account + marketplace contract.
+  console.log("3/3 Platform fee account + marketplace contract...");
+  const platform = await createPlatformAccount(assetCode, issuer.publicKey());
+  const contractId = await deployMarketplaceContract(issuer, sacAddress, platform.publicKey());
 
   // 4. Write the env file.
   const walletKey =
@@ -276,6 +370,10 @@ DEMO_USDC_ISSUER_SECRET=${issuer.secret()}
 DEMO_USDC_SAC_ADDRESS=${sacAddress}
 
 MARKETPLACE_CONTRACT_ID=${contractId}
+
+# Receives Compaki's fixed 2% platform fee.
+PLATFORM_FEE_PUBLIC=${platform.publicKey()}
+PLATFORM_FEE_SECRET=${platform.secret()}
 
 WALLET_ENCRYPTION_KEY=${walletKey}
 `;

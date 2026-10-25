@@ -48,12 +48,23 @@ sales.get("/:id/receipt", async (c) => {
       percent: snapshot.vendorBps / 100,
     },
     {
-      key: "platform",
-      role: "Platform",
+      key: "marketplace",
+      role: "Marketplace",
       recipient: marketplace.operator.name,
       amountUsd: snapshot.operatorAmountUsd,
       percent: snapshot.operatorBps / 100,
     },
+    ...(snapshot.platformAmountUsd !== undefined && snapshot.platformBps
+      ? [
+          {
+            key: "compaki",
+            role: "Compaki fee",
+            recipient: "Compaki",
+            amountUsd: snapshot.platformAmountUsd,
+            percent: snapshot.platformBps / 100,
+          },
+        ]
+      : []),
     ...(snapshot.communityBps > 0
       ? [
           {

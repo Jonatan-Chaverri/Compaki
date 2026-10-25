@@ -34,17 +34,19 @@ export function parseCommunityDetails(body: Record<string, unknown>, required: b
 
 /** Never substitute a malformed historical snapshot with invented contributions. */
 export function summarizeCommunitySales(sales: { amountUsd: number; splitSnapshot: string }[]) {
-  const total = { salesCount: sales.length, grossUsd: 0, vendorUsd: 0, operatorUsd: 0, communityUsd: 0, unclassifiedSales: 0 };
+  const total = { salesCount: sales.length, grossUsd: 0, vendorUsd: 0, operatorUsd: 0, communityUsd: 0, platformUsd: 0, unclassifiedSales: 0 };
   for (const sale of sales) {
     total.grossUsd += sale.amountUsd;
     try {
       const snapshot = JSON.parse(sale.splitSnapshot) as Record<string, unknown>;
-      const values = [snapshot.vendorAmountUsd, snapshot.operatorAmountUsd, snapshot.communityAmountUsd];
+      // Compaki's platform fee is absent on sales predating it.
+      const values = [snapshot.vendorAmountUsd, snapshot.operatorAmountUsd, snapshot.communityAmountUsd, snapshot.platformAmountUsd ?? 0];
       if (!values.every(v => typeof v === "number" && Number.isFinite(v) && v >= 0)) throw new Error("Invalid amounts");
       if (Math.abs((values as number[]).reduce((sum, value) => sum + value, 0) - sale.amountUsd) > 0.0000001) throw new Error("Split does not match the sale");
       total.vendorUsd += values[0] as number;
       total.operatorUsd += values[1] as number;
       total.communityUsd += values[2] as number;
+      total.platformUsd += values[3] as number;
     } catch { total.unclassifiedSales++; }
   }
   return total;

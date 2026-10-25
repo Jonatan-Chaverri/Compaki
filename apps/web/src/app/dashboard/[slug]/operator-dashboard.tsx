@@ -77,6 +77,7 @@ export function OperatorDashboard({
     vendorRevenue: number;
     operatorRevenue: number;
     communityRevenue: number;
+    platformRevenue: number;
   };
   sales: SaleFeedRow[];
   vendors: VendorRow[];
@@ -115,7 +116,7 @@ export function OperatorDashboard({
             <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
               Good shared with every sale
             </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <RevenueRow label="Vendors" amount={stats.vendorRevenue} dot="bg-navy-900" />
               <RevenueRow label="Your marketplace" amount={stats.operatorRevenue} dot="bg-slate-400" />
               <RevenueRow
@@ -123,6 +124,7 @@ export function OperatorDashboard({
                 amount={stats.communityRevenue}
                 dot="bg-emerald-500"
               />
+              <RevenueRow label="Compaki fee (2%)" amount={stats.platformRevenue ?? 0} dot="bg-brand-500" />
             </div>
           </div>
 

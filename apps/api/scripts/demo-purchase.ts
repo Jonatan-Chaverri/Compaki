@@ -38,11 +38,11 @@ async function main(): Promise<void> {
   console.log(`  vendor:         ${vendor.publicKey}`);
   console.log(`  buyer:          ${buyer.publicKey} ($100.00 starting balance)`);
 
-  console.log("Creating marketplace on-chain (90% vendor / 8% operator / 2% community)...");
+  console.log("Creating marketplace on-chain (88% vendor / 8% operator / 2% community + 2% Compaki)...");
   const { marketplaceId, txHash: createTx } = await createMarketplace({
     operatorSecret: decryptSecret(operator.secretEncrypted),
     communityFundPublicKey: communityFund.publicKey,
-    vendorBps: 9_000,
+    vendorBps: 8_800,
     operatorBps: 800,
     communityBps: 200,
   });
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
 
   console.log("────────────────────────────────────────────────────────");
   console.log("Resulting balances:");
-  console.log(`  vendor:         $${vendorBal.toFixed(2)}   (expected $37.80)`);
+  console.log(`  vendor:         $${vendorBal.toFixed(2)}   (expected $36.96)`);
   console.log(`  operator:       $${operatorBal.toFixed(2)}    (expected $3.36)`);
   console.log(`  community fund: $${communityBal.toFixed(2)}    (expected $0.84)`);
   console.log(`  buyer:          $${buyerBal.toFixed(2)}   (expected $58.00)`);

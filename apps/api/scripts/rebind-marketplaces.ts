@@ -18,7 +18,9 @@
  *                   already valid there). Never re-registers anything.
  *   --dry-run       print the plan, change nothing.
  *
- * Splits are re-registered exactly as stored. Funds already paid out under
+ * Splits are re-registered as stored, except that marketplaces created before
+ * Compaki's fixed 2% platform fee (shares adding up to 100%) give those 2
+ * points from the vendor share (e.g. 85/10/5 → 83/10/5). Funds already paid out under
  * the old contract stay where they are (old community fund accounts keep
  * their balances); sale history and receipts are untouched.
  *
@@ -38,6 +40,7 @@ import {
   registerVendor,
   stellarConfig,
 } from "../src/lib/stellar";
+import { BPS_DENOM, PLATFORM_FEE_BPS } from "../src/lib/splits";
 
 const prisma = new PrismaClient();
 
@@ -104,12 +107,20 @@ async function main(): Promise<void> {
       console.log("    skipped: classic marketplace without a community fund account");
       continue;
     }
+    // Pre-fee marketplaces: the platform's 2% comes out of the vendor share.
+    const legacy = m.splitVendorBps + m.splitOperatorBps + m.splitCommunityBps === BPS_DENOM;
+    const vendorBps = legacy ? m.splitVendorBps - PLATFORM_FEE_BPS : m.splitVendorBps;
+    if (vendorBps < 0) {
+      console.log("    skipped: vendor share is below the 2% platform fee");
+      continue;
+    }
+    if (legacy) console.log(`    vendor share ${m.splitVendorBps} → ${vendorBps} bps (2% platform fee)`);
     if (dryRun) continue;
 
     const operatorSecret = decryptSecret(m.operator.stellarSecretEncrypted);
     const split = {
       operatorSecret,
-      vendorBps: m.splitVendorBps,
+      vendorBps,
       operatorBps: m.splitOperatorBps,
       communityBps: m.splitCommunityBps,
     };
@@ -144,6 +155,7 @@ async function main(): Promise<void> {
           contractId,
           contractMarketplaceId: created.marketplaceId.toString(),
           createTxHash: created.txHash,
+          splitVendorBps: vendorBps,
           rewardsEnabled: rewards,
           regenerativeEnabled: m.regenerativeEnabled || rewards,
         },

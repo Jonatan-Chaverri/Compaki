@@ -14,6 +14,11 @@ import { slugify } from "@/lib/slug";
 const CATEGORIES = ["Coffee & agriculture", "Crafts", "Services", "Other"] as const;
 type Category = (typeof CATEGORIES)[number];
 
+/** Compaki's fixed platform fee on every sale (set in the contract). */
+const PLATFORM_PERCENT = 2;
+/** What sellers + marketplace + community share: everything but the fee. */
+const SHARE_PERCENT = 100 - PLATFORM_PERCENT;
+
 interface Splits {
   vendor: number; // whole percents, always summing to 100
   operator: number;
@@ -63,7 +68,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
   const [category, setCategory] = useState<Category>("Coffee & agriculture");
 
   // Step 2
-  const [splits, setSplits] = useState<Splits>({ vendor: 90, operator: 10, community: 0 });
+  const [splits, setSplits] = useState<Splits>({ vendor: 93, operator: 5, community: 0 });
   const [regenerative, setRegenerative] = useState(false);
   const [rewards, setRewards] = useState(false);
   const [community, setCommunity] = useState(emptyCommunityDraft);
@@ -102,14 +107,14 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
       const value = Math.max(0, Math.min(100, Math.round(raw)));
       const next = { ...prev };
       if (key === "vendor") {
-        next.vendor = Math.min(value, 100 - prev.community);
-        next.operator = 100 - next.vendor - prev.community;
+        next.vendor = Math.min(value, SHARE_PERCENT - prev.community);
+        next.operator = SHARE_PERCENT - next.vendor - prev.community;
       } else if (key === "operator") {
-        next.operator = Math.min(value, 100 - prev.community);
-        next.vendor = 100 - next.operator - prev.community;
+        next.operator = Math.min(value, SHARE_PERCENT - prev.community);
+        next.vendor = SHARE_PERCENT - next.operator - prev.community;
       } else {
-        next.community = Math.min(value, 100 - prev.operator);
-        next.vendor = 100 - prev.operator - next.community;
+        next.community = Math.min(value, SHARE_PERCENT - prev.operator);
+        next.vendor = SHARE_PERCENT - prev.operator - next.community;
       }
       return next;
     });
@@ -119,8 +124,8 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
     setRegenerative(enabled);
     setSplits((prev) => {
       const community = enabled ? 5 : 0;
-      const operator = Math.min(prev.operator, 100 - community);
-      return { vendor: 100 - operator - community, operator, community };
+      const operator = Math.min(prev.operator, SHARE_PERCENT - community);
+      return { vendor: SHARE_PERCENT - operator - community, operator, community };
     });
   }, []);
 
@@ -278,7 +283,7 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
           {step === 1 && (
             <StepCard
               title="Make every sale work for everyone"
-              subtitle="Choose what sellers keep, your marketplace fee, and an optional community contribution. The total always adds up to 100%."
+              subtitle={`Choose what sellers keep, your marketplace fee, and an optional community contribution. Together they make up ${SHARE_PERCENT}%; Compaki keeps a fixed ${PLATFORM_PERCENT}%.`}
             >
               <SplitSlider
                 label="Sellers"
@@ -302,14 +307,23 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 color="bg-emerald-500"
                 disabled={!regenerative}
               />
+              <div className="mb-5 flex items-baseline justify-between">
+                <span className="text-sm font-medium text-slate-700">
+                  <span className="mr-2 inline-block h-2 w-2 rounded-full bg-brand-500" />
+                  Compaki
+                  <span className="ml-2 text-xs font-normal text-slate-400">platform fee · fixed</span>
+                </span>
+                <span className="text-sm font-semibold tabular-nums text-slate-900">{PLATFORM_PERCENT}%</span>
+              </div>
 
               <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-100">
                 <div className="bg-navy-900 transition-all" style={{ width: `${splits.vendor}%` }} />
                 <div className="bg-slate-400 transition-all" style={{ width: `${splits.operator}%` }} />
                 <div className="bg-emerald-500 transition-all" style={{ width: `${splits.community}%` }} />
+                <div className="bg-brand-500" style={{ width: `${PLATFORM_PERCENT}%` }} />
               </div>
               <p className="mt-1 text-right text-xs font-medium text-slate-500">
-                Total: {splits.vendor + splits.operator + splits.community}%
+                Total: {splits.vendor + splits.operator + splits.community + PLATFORM_PERCENT}%
               </p>
 
               <div className="mt-6 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
@@ -357,7 +371,38 @@ export function OnboardingWizard({ operatorName }: { operatorName: string }) {
                 </p>
               )}
 
-              <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-medium text-slate-700">For every $100 in sales</p><div className="mt-3 flex flex-wrap justify-between gap-3 text-xs text-slate-500"><span>Sellers <strong className="text-slate-900">${splits.vendor.toFixed(2)}</strong></span><span>Your marketplace <strong className="text-slate-900">${splits.operator.toFixed(2)}</strong></span><span>Community <strong className="text-slate-900">${splits.community.toFixed(2)}</strong></span></div><p className="mt-3 text-[11px] text-slate-500">Launching <strong>{name}</strong> · These percentages are fixed when you launch.</p></div>
+              <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium text-slate-700">
+                  When a seller sells a $100 product, the buyer pays $100:
+                </p>
+                <ul className="mt-3 space-y-1.5 text-xs text-slate-600">
+                  <li>
+                    The seller receives <strong className="text-slate-900">${splits.vendor.toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    Your marketplace keeps <strong className="text-slate-900">${splits.operator.toFixed(2)}</strong> as its fee
+                  </li>
+                  {splits.community > 0 && (
+                    <li>
+                      The community fund receives <strong className="text-slate-900">${splits.community.toFixed(2)}</strong>
+                    </li>
+                  )}
+                  <li>
+                    Compaki keeps <strong className="text-slate-900">${PLATFORM_PERCENT.toFixed(2)}</strong> as its platform fee
+                  </li>
+                </ul>
+                <p className="mt-3 text-[11px] text-slate-500">
+                  Fees come out of the sale price — buyers never pay extra, and sellers get their share in seconds.
+                </p>
+              </div>
+              <div role="note" className="mt-3 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <span aria-hidden>⚠</span>
+                <span>
+                  <strong>These percentages can&apos;t be changed after launch.</strong> They&apos;re written into the
+                  smart contract that pays out every sale{name ? ` at ${name}` : ""}. To use different ones later
+                  you&apos;d need to launch a new marketplace.
+                </span>
+              </div>
               <WizardNav
                 onBack={() => setStep(0)}
                 onNext={startLaunch}
@@ -580,7 +625,7 @@ function SplitSlider({
         type="range"
         aria-label={label}
         min={0}
-        max={100}
+        max={SHARE_PERCENT}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}

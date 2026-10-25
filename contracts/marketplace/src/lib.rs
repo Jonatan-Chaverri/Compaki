@@ -3,10 +3,14 @@
 //! ONE deployment supports many marketplace instances, each keyed by a
 //! `marketplace_id` with its own revenue-split config and vendor registry.
 //! On-chain responsibilities are deliberately minimal: split config, vendor
-//! registration, atomic 3-way payment splitting and — for marketplaces created
-//! with Community Rewards — a protected community treasury distributed to
-//! registered members per period. Everything else (catalog, sessions, images)
-//! lives off-chain.
+//! registration, atomic payment splitting (vendor / operator / community plus
+//! Compaki's fixed platform fee) and — for marketplaces created with Community
+//! Rewards — a protected community treasury distributed to registered members
+//! per period. Everything else (catalog, sessions, images) lives off-chain.
+//!
+//! Every payment leg is a direct token transfer from the buyer to its
+//! recipient inside the `purchase` call; the contract only holds tokens for
+//! the Community Rewards treasury.
 //!
 //! Community Rewards invariants (see README "Guarantees"):
 //! - The community share of a rewards marketplace is held by THIS contract and
@@ -26,6 +30,11 @@ use soroban_sdk::{
 };
 
 pub const BPS_DENOM: u32 = 10_000;
+/// Compaki's platform fee on every sale (2%), paid to the platform recipient
+/// fixed at `initialize`. A constant: no one can change it on this deployment.
+pub const PLATFORM_FEE_BPS: u32 = 200;
+/// What a marketplace's vendor / operator / community shares must add up to.
+pub const MARKETPLACE_SHARE_BPS: u32 = BPS_DENOM - PLATFORM_FEE_BPS;
 /// Hard cap on beneficiaries per period. Keeps `close_period` (which writes one
 /// entitlement per member) well inside Soroban's per-transaction limits.
 pub const MAX_BENEFICIARIES: u32 = 20;
@@ -80,6 +89,8 @@ pub enum Error {
 pub enum DataKey {
     Admin,
     Token,
+    /// Recipient of the platform fee (set once at initialize).
+    Platform,
     NextId,
     /// Marketplace config, keyed by marketplace_id.
     Config(u64),
@@ -162,6 +173,15 @@ pub struct PurchaseEvent {
     pub vendor_amount: i128,
     pub operator_amount: i128,
     pub community_amount: i128,
+    pub platform_amount: i128,
+}
+
+/// Read-only view of the platform fee.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformConfig {
+    pub recipient: Address,
+    pub fee_bps: u32,
 }
 
 fn bump_instance(env: &Env) {
@@ -231,12 +251,14 @@ fn token_client(env: &Env) -> Result<token::Client<'_>, Error> {
     Ok(token::Client::new(env, &token_addr))
 }
 
+/// The marketplace's three shares must cover exactly what the platform fee
+/// leaves: vendor + operator + community == MARKETPLACE_SHARE_BPS (9_800).
 fn validate_split(vendor_bps: u32, operator_bps: u32, community_bps: u32) -> Result<(), Error> {
     let sum = vendor_bps
         .checked_add(operator_bps)
         .and_then(|s| s.checked_add(community_bps))
         .ok_or(Error::InvalidSplit)?;
-    if sum != BPS_DENOM {
+    if sum != MARKETPLACE_SHARE_BPS {
         return Err(Error::InvalidSplit);
     }
     Ok(())
@@ -263,15 +285,21 @@ pub struct MarketplaceContract;
 
 #[contractimpl]
 impl MarketplaceContract {
-    /// One-time setup: stores the admin and the payment token (demo USD SAC).
-    /// The admin has no privileged functions; it is recorded for provenance.
-    pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), Error> {
+    /// One-time setup: stores the admin, the payment token (demo USD SAC) and
+    /// the platform fee recipient. The admin has no privileged functions; it
+    /// is recorded for provenance. None of these can be changed later.
+    pub fn initialize(env: Env, admin: Address, token: Address, platform: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
         admin.require_auth();
+        // Fees sent to the contract itself would be stranded.
+        if platform == env.current_contract_address() {
+            return Err(Error::InvalidAddress);
+        }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
+        env.storage().instance().set(&DataKey::Platform, &platform);
         env.storage().instance().set(&DataKey::NextId, &0u64);
         bump_instance(&env);
         Ok(())
@@ -279,7 +307,8 @@ impl MarketplaceContract {
 
     /// Registers a classic marketplace (community share paid straight to the
     /// `community_fund` account) and returns its id.
-    /// The three bps values must sum to exactly 10_000.
+    /// The three bps values must sum to exactly 9_800: the remaining 2% is
+    /// Compaki's fixed platform fee.
     pub fn create_marketplace(
         env: Env,
         operator: Address,
@@ -313,7 +342,8 @@ impl MarketplaceContract {
 
     /// Registers a Community Rewards marketplace: the community share of each
     /// purchase is held by this contract and distributed per period.
-    /// `community_bps` must be > 0. The mode is fixed at creation.
+    /// `community_bps` must be > 0 and the three shares must sum to 9_800 (the
+    /// remaining 2% is the platform fee). The mode is fixed at creation.
     pub fn create_rewards_marketplace(
         env: Env,
         operator: Address,
@@ -371,8 +401,9 @@ impl MarketplaceContract {
 
     /// Executes a purchase: atomically moves `amount` of the payment token
     /// from the buyer to vendor / operator / community according to the
-    /// marketplace's split. The rounding remainder always goes to the
-    /// community share so no dust is ever lost.
+    /// marketplace's split, plus the 2% platform fee to the platform
+    /// recipient — each leg a direct transfer from the buyer. The rounding
+    /// remainder always goes to the community share so no dust is ever lost.
     ///
     /// Rewards marketplaces: the community share is transferred to this
     /// contract and booked to the active period, whose id is returned. With no
@@ -404,8 +435,18 @@ impl MarketplaceContract {
         bump(&env, &vendor_key);
 
         let client = token_client(&env)?;
+        let platform: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Platform)
+            .ok_or(Error::NotInitialized)?;
 
-        // Integer split; both shares round down, remainder → community.
+        // Integer split; vendor, operator and platform shares round down, the
+        // remainder (including all rounding dust) goes to the community.
+        let platform_amount = amount
+            .checked_mul(PLATFORM_FEE_BPS as i128)
+            .ok_or(Error::Overflow)?
+            / BPS_DENOM as i128;
         let vendor_amount = amount
             .checked_mul(config.vendor_bps as i128)
             .ok_or(Error::Overflow)?
@@ -414,7 +455,7 @@ impl MarketplaceContract {
             .checked_mul(config.operator_bps as i128)
             .ok_or(Error::Overflow)?
             / BPS_DENOM as i128;
-        let community_amount = amount - vendor_amount - operator_amount;
+        let community_amount = amount - vendor_amount - operator_amount - platform_amount;
 
         // Rewards bookkeeping is resolved before any transfer; every leg and
         // the accounting update happen inside this single invocation.
@@ -458,6 +499,9 @@ impl MarketplaceContract {
             // For rewards marketplaces community_fund is this contract.
             client.transfer(&buyer, &config.community_fund, &community_amount);
         }
+        if platform_amount > 0 {
+            client.transfer(&buyer, &platform, &platform_amount);
+        }
 
         if let Some(period_id) = rewards_period {
             env.events().publish(
@@ -474,6 +518,7 @@ impl MarketplaceContract {
                 vendor_amount,
                 operator_amount,
                 community_amount,
+                platform_amount,
             },
         );
         Ok(rewards_period)
@@ -664,6 +709,16 @@ impl MarketplaceContract {
             (member, amount),
         );
         Ok(amount)
+    }
+
+    /// The platform fee: its recipient and rate (fixed for this deployment).
+    pub fn get_platform(env: Env) -> Result<PlatformConfig, Error> {
+        let recipient: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Platform)
+            .ok_or(Error::NotInitialized)?;
+        Ok(PlatformConfig { recipient, fee_bps: PLATFORM_FEE_BPS })
     }
 
     /// Read-only accessor for a marketplace's split config.

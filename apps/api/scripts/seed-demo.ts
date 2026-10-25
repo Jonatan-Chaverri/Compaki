@@ -1,7 +1,7 @@
 /**
  * Demo seed — builds the full pitch scenario against REAL testnet:
  *
- *   Marketplace "Café de Altura" (Community Rewards, 85/10/5 split)
+ *   Marketplace "Café de Altura" (Community Rewards, 83/10/5 split + Compaki's 2%)
  *   ├─ operator María Castillo
  *   ├─ vendors Don Carlos (coffee) and Finca La Esperanza (2-3 products each)
  *   ├─ community members Escuela Verde (50%), Brigada de Reforestación (30%)
@@ -25,7 +25,7 @@ import "./load-env";
 
 import { PrismaClient, type User } from "@prisma/client";
 
-import type { SplitSnapshot } from "../src/lib/db/types";
+import { splitSnapshot } from "../src/lib/splits";
 import { hashPassword } from "../src/lib/passwords";
 import { boundOnChainId } from "../src/lib/rewards";
 import {
@@ -46,7 +46,8 @@ import {
 const prisma = new PrismaClient();
 
 const SLUG = "cafe-de-altura";
-const SPLITS = { vendorBps: 8_500, operatorBps: 1_000, communityBps: 500 };
+// Shares of the 98% left after Compaki's fixed 2% platform fee.
+const SPLITS = { vendorBps: 8_300, operatorBps: 1_000, communityBps: 500 };
 const SALES_TARGET = 5;
 const PERIOD_MINUTES = Number(process.env.SEED_PERIOD_MINUTES ?? 10);
 const DEMO_PASSWORD = process.env.DEMO_SEED_PASSWORD ?? "";
@@ -193,7 +194,7 @@ async function main(): Promise<void> {
     );
   }
   if (!marketplace.contractMarketplaceId) {
-    console.log("Registering Community Rewards marketplace on-chain (85/10/5)...");
+    console.log("Registering Community Rewards marketplace on-chain (83/10/5 + 2% Compaki)...");
     const result = await createRewardsMarketplace({
       operatorSecret: decryptSecret(operator.stellarSecretEncrypted as string),
       ...SPLITS,
@@ -326,17 +327,7 @@ async function main(): Promise<void> {
     });
     const settleSeconds = Math.max(1, Math.round((Date.now() - settleStart) / 1000));
 
-    const vendorStroops = (amountStroops * BigInt(SPLITS.vendorBps)) / 10_000n;
-    const operatorStroops = (amountStroops * BigInt(SPLITS.operatorBps)) / 10_000n;
-    const snapshot: SplitSnapshot = {
-      vendorBps: SPLITS.vendorBps,
-      operatorBps: SPLITS.operatorBps,
-      communityBps: SPLITS.communityBps,
-      vendorAmountUsd: stroopsToUsd(vendorStroops),
-      operatorAmountUsd: stroopsToUsd(operatorStroops),
-      communityAmountUsd: stroopsToUsd(amountStroops - vendorStroops - operatorStroops),
-      rewardsPeriodId,
-    };
+    const snapshot = splitSnapshot(amountStroops, SPLITS, rewardsPeriodId);
 
     // Backdate so the dashboard reads like an operating store, not a fresh seed.
     const hoursAgo = (salesToCreate - i) * 11 + 3;

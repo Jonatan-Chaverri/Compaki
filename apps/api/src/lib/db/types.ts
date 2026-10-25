@@ -16,6 +16,9 @@ export interface SplitSnapshot {
   vendorAmountUsd: number;
   operatorAmountUsd: number;
   communityAmountUsd: number;
+  /** Compaki's fixed platform fee (absent on sales predating it). */
+  platformBps?: number;
+  platformAmountUsd?: number;
   /**
    * Community Rewards marketplaces: the on-chain period the community share
    * was booked to (returned by the purchase transaction). Absent for classic

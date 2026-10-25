@@ -17,6 +17,7 @@ struct Setup<'a> {
     community_fund: Address,
     vendor: Address,
     buyer: Address,
+    platform: Address,
 }
 
 fn setup<'a>() -> Setup<'a> {
@@ -32,7 +33,8 @@ fn setup<'a>() -> Setup<'a> {
     let client = MarketplaceContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    client.initialize(&admin, &sac.address());
+    let platform = Address::generate(&env);
+    client.initialize(&admin, &sac.address(), &platform);
 
     Setup {
         client,
@@ -42,6 +44,7 @@ fn setup<'a>() -> Setup<'a> {
         community_fund: Address::generate(&env),
         vendor: Address::generate(&env),
         buyer: Address::generate(&env),
+        platform,
         env,
     }
 }
@@ -50,10 +53,10 @@ fn setup<'a>() -> Setup<'a> {
 fn happy_path_purchase_splits_correctly() {
     let s = setup();
 
-    // 90% vendor / 8% operator / 2% community.
+    // 88% vendor / 8% operator / 2% community (+ 2% platform fee).
     let id = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &200);
+        .create_marketplace(&s.operator, &s.community_fund, &8_800, &800, &200);
     assert_eq!(id, 0);
     s.client.register_vendor(&id, &s.vendor);
 
@@ -63,14 +66,15 @@ fn happy_path_purchase_splits_correctly() {
     // Purchase of $42.00.
     s.client.purchase(&id, &s.buyer, &s.vendor, &420_000_000);
 
-    assert_eq!(s.token.balance(&s.vendor), 378_000_000); // $37.80
+    assert_eq!(s.token.balance(&s.vendor), 369_600_000); // $36.96
     assert_eq!(s.token.balance(&s.operator), 33_600_000); // $3.36
     assert_eq!(s.token.balance(&s.community_fund), 8_400_000); // $0.84
+    assert_eq!(s.token.balance(&s.platform), 8_400_000); // $0.84 platform fee
     assert_eq!(s.token.balance(&s.buyer), 580_000_000); // $58.00 left
 
     // Config is readable back.
     let config = s.client.get_marketplace(&id);
-    assert_eq!(config.vendor_bps, 9_000);
+    assert_eq!(config.vendor_bps, 8_800);
     assert_eq!(config.operator, s.operator);
 }
 
@@ -79,7 +83,7 @@ fn purchase_rejects_unregistered_vendor() {
     let s = setup();
     let id = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &200);
+        .create_marketplace(&s.operator, &s.community_fund, &8_800, &800, &200);
     s.token_admin.mint(&s.buyer, &1_000_000_000);
 
     // Vendor never registered.
@@ -96,17 +100,23 @@ fn purchase_rejects_unregistered_vendor() {
 fn create_marketplace_validates_bps_sum() {
     let s = setup();
 
-    // 9_000 + 900 + 200 = 10_100 → rejected.
+    // 8_800 + 900 + 200 = 9_900 → rejected.
     let too_high = s
         .client
-        .try_create_marketplace(&s.operator, &s.community_fund, &9_000, &900, &200);
+        .try_create_marketplace(&s.operator, &s.community_fund, &8_800, &900, &200);
     assert_eq!(too_high, Err(Ok(Error::InvalidSplit)));
 
-    // 9_000 + 800 + 100 = 9_900 → rejected.
+    // 8_800 + 800 + 100 = 9_700 → rejected.
     let too_low = s
         .client
-        .try_create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &100);
+        .try_create_marketplace(&s.operator, &s.community_fund, &8_800, &800, &100);
     assert_eq!(too_low, Err(Ok(Error::InvalidSplit)));
+
+    // 100% for the marketplace leaves nothing for the platform fee → rejected.
+    let whole = s
+        .client
+        .try_create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &200);
+    assert_eq!(whole, Err(Ok(Error::InvalidSplit)));
 
     // Overflow attempt must not wrap around into a valid sum.
     let overflow = s.client.try_create_marketplace(
@@ -118,10 +128,10 @@ fn create_marketplace_validates_bps_sum() {
     );
     assert_eq!(overflow, Err(Ok(Error::InvalidSplit)));
 
-    // Exact 10_000 is accepted.
+    // Exact 9_800 (+ the 2% platform fee) is accepted.
     let ok = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &200);
+        .create_marketplace(&s.operator, &s.community_fund, &8_800, &800, &200);
     assert_eq!(ok, 0);
 }
 
@@ -129,19 +139,21 @@ fn create_marketplace_validates_bps_sum() {
 fn rounding_remainder_goes_to_community_fund() {
     let s = setup();
 
-    // Thirds that can never divide evenly.
+    // Thirds of the 98% that can never divide evenly.
     let id = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &3_333, &3_333, &3_334);
+        .create_marketplace(&s.operator, &s.community_fund, &3_267, &3_267, &3_266);
     s.client.register_vendor(&id, &s.vendor);
 
-    // 101 stroops: 101*3333/10000 = 33 (rounded down) for vendor and
-    // operator; community gets 101 - 33 - 33 = 35, absorbing the dust.
+    // 101 stroops: 101*3267/10000 = 32 (rounded down) for vendor and
+    // operator, 101*200/10000 = 2 for the platform; community gets
+    // 101 - 32 - 32 - 2 = 35, absorbing all the dust.
     s.token_admin.mint(&s.buyer, &101);
     s.client.purchase(&id, &s.buyer, &s.vendor, &101);
 
-    assert_eq!(s.token.balance(&s.vendor), 33);
-    assert_eq!(s.token.balance(&s.operator), 33);
+    assert_eq!(s.token.balance(&s.vendor), 32);
+    assert_eq!(s.token.balance(&s.operator), 32);
+    assert_eq!(s.token.balance(&s.platform), 2);
     assert_eq!(s.token.balance(&s.community_fund), 35);
 
     // Conservation: everything the buyer spent arrived somewhere.
@@ -149,6 +161,7 @@ fn rounding_remainder_goes_to_community_fund() {
     assert_eq!(
         s.token.balance(&s.vendor)
             + s.token.balance(&s.operator)
+            + s.token.balance(&s.platform)
             + s.token.balance(&s.community_fund),
         101
     );
@@ -159,7 +172,7 @@ fn purchase_rejects_zero_and_negative_amounts() {
     let s = setup();
     let id = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &200);
+        .create_marketplace(&s.operator, &s.community_fund, &8_800, &800, &200);
     s.client.register_vendor(&id, &s.vendor);
     s.token_admin.mint(&s.buyer, &1_000);
 
@@ -188,8 +201,9 @@ fn initialize_only_once() {
     let s = setup();
     let admin = Address::generate(&s.env);
     let token = Address::generate(&s.env);
+    let platform = Address::generate(&s.env);
     assert_eq!(
-        s.client.try_initialize(&admin, &token),
+        s.client.try_initialize(&admin, &token, &platform),
         Err(Ok(Error::AlreadyInitialized))
     );
 }
@@ -208,10 +222,10 @@ fn marketplace_ids_increment() {
     let s = setup();
     let a = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &9_000, &800, &200);
+        .create_marketplace(&s.operator, &s.community_fund, &8_800, &800, &200);
     let b = s
         .client
-        .create_marketplace(&s.operator, &s.community_fund, &10_000, &0, &0);
+        .create_marketplace(&s.operator, &s.community_fund, &9_800, &0, &0);
     assert_eq!(a, 0);
     assert_eq!(b, 1);
 }
@@ -249,8 +263,10 @@ mod rewards {
         a: Address,
         b: Address,
         c: Address,
-        /// Rewards marketplace, 90% vendor / 5% operator / 5% community.
+        /// Rewards marketplace, 88% vendor / 5% operator / 5% community
+        /// (+ 2% platform fee).
         id: u64,
+        platform: Address,
     }
 
     fn setup<'a>() -> R<'a> {
@@ -266,12 +282,13 @@ mod rewards {
         let contract = env.register_contract(None, MarketplaceContract);
         let client = MarketplaceContractClient::new(&env, &contract);
         let admin = Address::generate(&env);
-        client.initialize(&admin, &sac.address());
+        let platform = Address::generate(&env);
+        client.initialize(&admin, &sac.address(), &platform);
 
         let operator = Address::generate(&env);
         let vendor = Address::generate(&env);
         let buyer = Address::generate(&env);
-        let id = client.create_rewards_marketplace(&operator, &9_000, &500, &500);
+        let id = client.create_rewards_marketplace(&operator, &8_800, &500, &500);
         client.register_vendor(&id, &vendor);
         token_admin.mint(&buyer, &1_000_000_000_000);
 
@@ -289,6 +306,7 @@ mod rewards {
             vendor,
             buyer,
             id,
+            platform,
         }
     }
 
@@ -313,12 +331,13 @@ mod rewards {
         let r = setup();
         let pid = open_abc(&r);
 
-        // $100.00 → 90 / 5 / 5.
+        // $100.00 → 88 / 5 / 5 + 2 platform.
         let booked = r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000);
         assert_eq!(booked, Some(pid));
 
-        assert_eq!(r.token.balance(&r.vendor), 900_000_000);
+        assert_eq!(r.token.balance(&r.vendor), 880_000_000);
         assert_eq!(r.token.balance(&r.operator), 50_000_000);
+        assert_eq!(r.token.balance(&r.platform), 20_000_000);
         // Community share sits in the contract, not in any operator/admin account.
         assert_eq!(r.token.balance(&r.contract), 50_000_000);
         assert_eq!(r.client.get_period(&r.id, &pid).total_contributed, 50_000_000);
@@ -335,7 +354,7 @@ mod rewards {
         r.client.purchase(&r.id, &r.buyer, &r.vendor, &1_000_000_000); // +50_000_000
         advance(&r, 60);
         r.client.purchase(&r.id, &r.buyer, &r.vendor, &200_000_000); // +10_000_000
-        r.client.purchase(&r.id, &r.buyer, &r.vendor, &101); // 90, 5, community 6 (dust)
+        r.client.purchase(&r.id, &r.buyer, &r.vendor, &101); // 88, 5, platform 2, community 6 (dust)
 
         let period = r.client.get_period(&r.id, &pid);
         assert_eq!(period.total_contributed, 60_000_006);
@@ -582,7 +601,7 @@ mod rewards {
         let r = setup();
         let op2 = Address::generate(&r.env);
         let vendor2 = Address::generate(&r.env);
-        let id2 = r.client.create_rewards_marketplace(&op2, &8_000, &1_000, &1_000);
+        let id2 = r.client.create_rewards_marketplace(&op2, &7_800, &1_000, &1_000);
         r.client.register_vendor(&id2, &vendor2);
 
         let p1 = open_abc(&r);
@@ -671,7 +690,7 @@ mod rewards {
             &vec![&r.env, 3_333u32, 3_333, 3_334],
             &(T0 + HOUR),
         );
-        // community = 200 - 180 - 10 = 10 stroops.
+        // community = 200 - 176 - 10 - 4 (platform) = 10 stroops.
         r.client.purchase(&r.id, &r.buyer, &r.vendor, &200);
         advance(&r, HOUR);
         r.client.close_period(&r.id, &pid);
@@ -693,8 +712,9 @@ mod rewards {
     #[test]
     fn rounding_holds_for_awkward_totals() {
         // Property-style sweep: for many totals and a 7-way uneven split the
-        // entitlements sum exactly to the total and each is within 1 stroop of
-        // its exact proportional share.
+        // entitlements sum exactly to the total and each is at most 1 stroop
+        // away from its exact proportional share (a member can get exactly +1
+        // when its share divides evenly and it also receives leftover dust).
         let shares: [u32; 7] = [1, 1_999, 2_500, 1_234, 3_000, 766, 500];
         for total in [1i128, 6, 7, 13, 9_999, 10_001, 123_456_789, 999_999_999_999] {
             let r = setup();
@@ -707,11 +727,11 @@ mod rewards {
                 svec.push_back(*s);
             }
             let pid = r.client.open_period(&r.id, &bvec, &svec, &(T0 + HOUR));
-            // Mint and buy so the community share is exactly `total`
-            // (community bps = 5% → buy 20x total).
+            // Buy ~20x so the community share lands near `total`; the exact
+            // period total (5% + rounding dust) is read back from the chain.
             r.token_admin.mint(&r.buyer, &(total * 20));
             r.client.purchase(&r.id, &r.buyer, &r.vendor, &(total * 20));
-            assert_eq!(r.client.get_period(&r.id, &pid).total_contributed, total);
+            let total = r.client.get_period(&r.id, &pid).total_contributed;
             advance(&r, HOUR);
             r.client.close_period(&r.id, &pid);
 
@@ -721,7 +741,7 @@ mod rewards {
             for e in ents.iter() {
                 let exact = total * e.share_bps as i128;
                 let diff = e.amount * 10_000 - exact;
-                assert!(diff > -10_000 && diff < 10_000, "within one stroop");
+                assert!(diff > -10_000 && diff <= 10_000, "at most one stroop off");
             }
         }
     }
@@ -793,7 +813,7 @@ mod rewards {
         let fund = Address::generate(e);
         let classic = r
             .client
-            .create_marketplace(&r.operator, &fund, &9_000, &500, &500);
+            .create_marketplace(&r.operator, &fund, &8_800, &500, &500);
         assert_eq!(
             r.client.try_open_period(&classic, &one(), &full(), &end),
             Err(Ok(Error::RewardsNotEnabled))
@@ -808,17 +828,17 @@ mod rewards {
         );
         // Rewards marketplace with a 0% community share / a bad split.
         assert_eq!(
-            r.client.try_create_rewards_marketplace(&r.operator, &9_000, &1_000, &0),
+            r.client.try_create_rewards_marketplace(&r.operator, &8_800, &1_000, &0),
             Err(Ok(Error::InvalidSplit))
         );
         assert_eq!(
-            r.client.try_create_rewards_marketplace(&r.operator, &9_000, &1_000, &1),
+            r.client.try_create_rewards_marketplace(&r.operator, &8_800, &1_000, &1),
             Err(Ok(Error::InvalidSplit))
         );
         // Classic marketplace pointing its fund at the contract (would strand funds).
         assert_eq!(
             r.client
-                .try_create_marketplace(&r.operator, &r.contract, &9_000, &500, &500),
+                .try_create_marketplace(&r.operator, &r.contract, &8_800, &500, &500),
             Err(Ok(Error::InvalidAddress))
         );
         // Unknown period ids.
@@ -917,7 +937,7 @@ mod rewards {
             .is_err());
         assert!(r
             .client
-            .try_create_rewards_marketplace(&r.operator, &9_000, &500, &500)
+            .try_create_rewards_marketplace(&r.operator, &8_800, &500, &500)
             .is_err());
         assert!(r.client.try_register_vendor(&r.id, &r.buyer).is_err());
 
@@ -970,10 +990,72 @@ mod rewards {
         let fund = Address::generate(&r.env);
         let id = r
             .client
-            .create_marketplace(&r.operator, &fund, &9_000, &800, &200);
+            .create_marketplace(&r.operator, &fund, &8_800, &800, &200);
         r.client.register_vendor(&id, &r.vendor);
         assert_eq!(r.client.purchase(&id, &r.buyer, &r.vendor, &420_000_000), None);
         assert_eq!(r.token.balance(&fund), 8_400_000);
         assert_eq!(r.token.balance(&r.contract), 0);
+    }
+}
+
+// ─── Platform fee ───────────────────────────────────────────────────────────
+
+mod platform_fee {
+    use super::super::*;
+    use soroban_sdk::{testutils::Address as _, token::{Client as TokenClient, StellarAssetClient}, Address, Env};
+
+    #[test]
+    fn fee_is_fixed_two_percent_paid_to_the_platform() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+        let token = TokenClient::new(&env, &sac.address());
+        let contract = env.register_contract(None, MarketplaceContract);
+        let client = MarketplaceContractClient::new(&env, &contract);
+        let platform = Address::generate(&env);
+        client.initialize(&Address::generate(&env), &sac.address(), &platform);
+
+        let view = client.get_platform();
+        assert_eq!(view.recipient, platform);
+        assert_eq!(view.fee_bps, 200);
+
+        // 93% vendor / 5% operator / 0% community + 2% platform.
+        let (operator, fund, vendor, buyer) = (
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+            Address::generate(&env),
+        );
+        let id = client.create_marketplace(&operator, &fund, &9_300, &500, &0);
+        client.register_vendor(&id, &vendor);
+        StellarAssetClient::new(&env, &sac.address()).mint(&buyer, &1_000_000_000);
+        client.purchase(&id, &buyer, &vendor, &1_000_000_000); // $100
+
+        assert_eq!(token.balance(&vendor), 930_000_000); // $93
+        assert_eq!(token.balance(&operator), 50_000_000); // $5
+        assert_eq!(token.balance(&platform), 20_000_000); // $2
+        assert_eq!(token.balance(&fund), 0);
+        assert_eq!(token.balance(&contract), 0); // nothing held for classic sales
+    }
+
+    #[test]
+    fn platform_recipient_cannot_be_the_contract_or_changed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract = env.register_contract(None, MarketplaceContract);
+        let client = MarketplaceContractClient::new(&env, &contract);
+        let token = Address::generate(&env);
+        assert_eq!(
+            client.try_initialize(&Address::generate(&env), &token, &contract),
+            Err(Ok(Error::InvalidAddress))
+        );
+        let platform = Address::generate(&env);
+        client.initialize(&Address::generate(&env), &token, &platform);
+        // initialize is the only setter and it runs once.
+        assert_eq!(
+            client.try_initialize(&Address::generate(&env), &token, &Address::generate(&env)),
+            Err(Ok(Error::AlreadyInitialized))
+        );
+        assert_eq!(client.get_platform().recipient, platform);
     }
 }

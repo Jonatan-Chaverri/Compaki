@@ -9,16 +9,16 @@
 // writes its Sale row + stock decrement right away, so a failure mid-order can
 // be retried without re-charging settled items.
 
-import { prisma, type SplitSnapshot } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import { boundOnChainId } from "@/lib/rewards";
+import { splitSnapshot } from "@/lib/splits";
 import {
   getUsdBalance,
   mintDemoUsd,
   preparePurchase,
   purchasePeriodOf,
   stellarExpertTxUrl,
-  stroopsToUsd,
   usdToStroops,
 } from "@/lib/stellar";
 import type { xdr } from "@stellar/stellar-sdk";
@@ -138,19 +138,16 @@ export async function recordSale(params: {
   const { order, item, shipping } = params;
   const marketplace = order.marketplace;
   const { lineUsd, amountStroops } = lineAmount(item);
-  // Mirrors the contract's math (shares round down, remainder → community).
-  const vendorStroops = (amountStroops * BigInt(marketplace.splitVendorBps)) / 10_000n;
-  const operatorStroops = (amountStroops * BigInt(marketplace.splitOperatorBps)) / 10_000n;
-  const communityStroops = amountStroops - vendorStroops - operatorStroops;
-  const snapshot: SplitSnapshot = {
-    vendorBps: marketplace.splitVendorBps,
-    operatorBps: marketplace.splitOperatorBps,
-    communityBps: marketplace.splitCommunityBps,
-    vendorAmountUsd: stroopsToUsd(vendorStroops),
-    operatorAmountUsd: stroopsToUsd(operatorStroops),
-    communityAmountUsd: stroopsToUsd(communityStroops),
-    rewardsPeriodId: params.rewardsPeriodId,
-  };
+  // Mirrors the contract's math (see src/lib/splits.ts).
+  const snapshot = splitSnapshot(
+    amountStroops,
+    {
+      vendorBps: marketplace.splitVendorBps,
+      operatorBps: marketplace.splitOperatorBps,
+      communityBps: marketplace.splitCommunityBps,
+    },
+    params.rewardsPeriodId,
+  );
   await prisma.$transaction([
     prisma.sale.create({
       data: {

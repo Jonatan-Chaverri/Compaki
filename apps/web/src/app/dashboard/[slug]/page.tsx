@@ -30,6 +30,7 @@ interface DashboardPayload {
     vendorRevenue: number;
     operatorRevenue: number;
     communityRevenue: number;
+    platformRevenue: number;
   };
   sales: SaleFeedRow[];
   vendors: VendorRow[];

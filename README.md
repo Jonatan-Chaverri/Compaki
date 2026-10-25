@@ -79,8 +79,8 @@ they name.
 
 | Function | Auth | Purpose |
 | --- | --- | --- |
-| `initialize(admin, token)` | admin | One-time: payment token. The admin has **no** privileged functions. |
-| `create_marketplace(operator, fund, v, o, c)` | operator | Classic marketplace (unchanged behaviour). |
+| `initialize(admin, token, platform)` | admin | One-time: payment token and the platform-fee recipient. The admin has **no** privileged functions. |
+| `create_marketplace(operator, fund, v, o, c)` | operator | Classic marketplace; `v + o + c` must be 9,800 bps. |
 | `create_rewards_marketplace(operator, v, o, c)` | operator | Rewards marketplace; `community_fund` = the contract. |
 | `register_vendor(id, vendor)` | operator | Unchanged. |
 | `purchase(id, buyer, vendor, amount) -> Option<u32>` | buyer | Atomic split; returns the period the community share was booked to. |
@@ -88,6 +88,14 @@ they name.
 | `close_period(id, period) -> i128` | none | After `end_ts`; fixes entitlements. |
 | `claim(id, period, member) -> i128` | member | Pays the member's entitlement once. |
 | `rewards_status`, `get_period`, `get_entitlement(s)`, `get_marketplace` | none | Views (`rewards_status` also returns ledger time). |
+
+**Compaki platform fee.** Every sale pays a fixed 2% (`PLATFORM_FEE_BPS = 200`,
+a constant) straight from the buyer to the platform account set at
+`initialize`; a marketplace's vendor / operator / community shares cover the
+other 98% (e.g. 93 / 5 / 0 by default in the launch wizard). Like every other
+leg it is a direct transfer inside `purchase` — the contract never holds it —
+and no one can change the rate or the recipient on a deployment
+(`get_platform` shows both).
 
 There is **no** withdraw, sweep, admin-transfer or upgrade function. The only
 path out of the treasury is `claim`.
@@ -109,6 +117,7 @@ Errors are explicit (`NoActivePeriod`, `PeriodActive`, `PeriodNotEnded`,
 ```text
 buyer ──purchase──▶ contract ──┬─▶ vendor      (vendor_bps)
                                ├─▶ operator    (operator_bps)
+                               ├─▶ Compaki     (fixed 2% platform fee)
                                └─▶ contract treasury (community_bps + rounding dust)
                                      booked to Period(marketplace, current)
 ledger time ≥ end_ts ──close_period (anyone)──▶ Entitlement(member) = fixed amounts
@@ -355,6 +364,13 @@ npm run deploy:testnet -- --contract-only  # new contract, keep issuer/token/acc
 npm run demo:rewards                       # on-chain proof of the whole flow (no DB)
 npm run demo:purchase                      # classic marketplace proof (unchanged)
 ```
+
+On current testnet, uploading new contract code and the first call into it
+(`initialize`) can cost more than a transaction's own fee field allows (a
+uint32, ~429 XLM): in October 2026 they cost ~781 and ~2,569 XLM. The deploy
+script then pays through a fee-bump transaction, whose fee field is 64-bit.
+The issuer's Friendbot balance (10,000 XLM) covers it. After that,
+calls are cheap again (a purchase ~0.002 XLM, creating a marketplace ~3 XLM).
 
 ### Migrating an existing deployment
 

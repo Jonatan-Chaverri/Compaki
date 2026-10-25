@@ -58,7 +58,7 @@ model Marketplace {
   slug                 String   @unique
   description          String   @default("")
   category             String   @default("Other")
-  // Revenue split in basis points; must sum to 10_000.
+  // Revenue split in basis points; must sum to 9_800 (Compaki keeps a fixed 2%).
   splitVendorBps       Int      @default(9000)
   splitOperatorBps     Int      @default(1000)
   splitCommunityBps    Int      @default(0)

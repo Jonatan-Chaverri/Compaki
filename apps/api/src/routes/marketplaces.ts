@@ -13,6 +13,7 @@ import { prisma, parseSplitSnapshot } from "@/lib/db";
 import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails } from "@/lib/community";
 import { boundOnChainId, loadRewardsView, PERIOD_HISTORY_LIMIT } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
+import { MARKETPLACE_SHARE_BPS, PLATFORM_FEE_BPS } from "@/lib/splits";
 import { getSessionUser } from "@/lib/session";
 import { ownWalletPending, personalWallet } from "@/lib/wallets";
 import {
@@ -73,11 +74,11 @@ function parseInput(body: unknown): LaunchInput | string {
   const communityBps = Number(b.communityBps);
   if (
     ![vendorBps, operatorBps, communityBps].every(
-      (v) => Number.isInteger(v) && v >= 0 && v <= 10_000,
+      (v) => Number.isInteger(v) && v >= 0 && v <= MARKETPLACE_SHARE_BPS,
     ) ||
-    vendorBps + operatorBps + communityBps !== 10_000
+    vendorBps + operatorBps + communityBps !== MARKETPLACE_SHARE_BPS
   ) {
-    return "Revenue split must sum to 100%";
+    return "Sellers, marketplace and community must add up to 98% (Compaki keeps a fixed 2%)";
   }
 
   const rewardsEnabled = b.rewardsEnabled === true;
@@ -529,7 +530,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       return parseSplitSnapshot(raw);
     } catch {
       // malformed snapshot — count everything as vendor share
-      return { vendorAmountUsd: amountUsd, operatorAmountUsd: 0, communityAmountUsd: 0 };
+      return { vendorAmountUsd: amountUsd, operatorAmountUsd: 0, communityAmountUsd: 0, platformAmountUsd: 0 };
     }
   };
   const splitsPerSale = sales.map((s) => parseSplitOrFallback(s.splitSnapshot, s.amountUsd));
@@ -547,6 +548,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       vendorBps: marketplace.splitVendorBps,
       operatorBps: marketplace.splitOperatorBps,
       communityBps: marketplace.splitCommunityBps,
+      platformBps: PLATFORM_FEE_BPS,
     },
     operatorAccount: marketplace.operator.stellarPublicKey,
     // Rewards marketplaces hold the community share in the contract; the
@@ -560,6 +562,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       vendorRevenue: sum((s) => s.vendorAmountUsd),
       operatorRevenue: sum((s) => s.operatorAmountUsd),
       communityRevenue: sum((s) => s.communityAmountUsd),
+      platformRevenue: sum((s) => s.platformAmountUsd ?? 0),
     },
     sales: sales.map((s) => ({
       id: s.id,

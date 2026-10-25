@@ -3,7 +3,8 @@
  * Uses the same src/lib/stellar functions as the API:
  *
  *   1. provisions operator / vendor / buyer / 3 member custodial accounts,
- *   2. creates a rewards marketplace (90% vendor / 5% operator / 5% community)
+ *   2. creates a rewards marketplace (88% vendor / 5% operator / 5% community,
+ *      + Compaki's fixed 2% platform fee)
  *      and registers the vendor,
  *   3. shows a purchase is REJECTED while no period is open,
  *   4. opens a period (members 50% / 30% / 20%) ending in DEMO_PERIOD_SECONDS,
@@ -84,10 +85,10 @@ async function main(): Promise<void> {
   const operatorSecret = decryptSecret(operator.secretEncrypted);
   const buyerSecret = decryptSecret(buyer.secretEncrypted);
 
-  console.log("2. Creating a rewards marketplace (90/5/5) + registering the vendor...");
+  console.log("2. Creating a rewards marketplace (88/5/5 + 2% Compaki) + registering the vendor...");
   const created = await createRewardsMarketplace({
     operatorSecret,
-    vendorBps: 9_000,
+    vendorBps: 8_800,
     operatorBps: 500,
     communityBps: 500,
   });
@@ -194,7 +195,7 @@ async function main(): Promise<void> {
   ]);
 
   console.log("────────────────────────────────────────────────────────");
-  console.log(`vendor    ${usd(vendorBal)}  (expected $54.45)`);
+  console.log(`vendor    ${usd(vendorBal)}  (expected $53.24)`);
   console.log(`operator  ${usd(operatorBal)}  (expected $3.025)`);
   console.log(`member A  ${usd(aBal)}  (expected $1.5125)`);
   console.log(`member B  ${usd(bBal)}  (expected $0.9075)`);
