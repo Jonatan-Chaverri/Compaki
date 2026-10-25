@@ -1185,6 +1185,9 @@
     "launchFixedSplits": "Los porcentajes de cada venta se fijan al lanzar el marketplace. Para cambiarlos, deberás crear uno nuevo.",
     "launchFixedRewards": "Los porcentajes de cada venta y el tipo de fondo comunitario se fijan al lanzar el marketplace. El reparto entre vendedores y compradores y la frecuencia sí se pueden cambiar: las nuevas reglas aplican desde el siguiente período, al hacerse cada distribución.",
     "launchFixedFundraise": "Los porcentajes de cada venta, las cuentas destinatarias y sus partes se fijan al lanzar el marketplace. La meta puedes cambiarla cada vez que se paga una ronda (con 0 detienes la recaudación).",
-    "purposeStepTitle": "Tu comunidad, tu impacto."
+    "purposeStepTitle": "Tu comunidad, tu impacto.",
+    "marketplaceCommunityImpact": "El {percent, number}% de cada venta apoya a esta comunidad.",
+    "marketplaceCommunityImpactHint": "Conoce adónde van los aportes y quién se beneficia.",
+    "viewCommunityBenefitsShort": "Ver beneficios para la comunidad"
   }
 }

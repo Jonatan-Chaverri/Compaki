@@ -1185,6 +1185,9 @@
     "launchFixedSplits": "Sales percentages are fixed once you launch. To change them, you’ll need a new marketplace.",
     "launchFixedRewards": "Sales percentages and the type of community fund are fixed once you launch. The sellers/buyers split and how often rewards are shared can change: new rules apply from the next period, when each distribution runs.",
     "launchFixedFundraise": "Sales percentages, the recipient wallets and their shares are fixed once you launch. You can set a new target each time a round is paid out (0 stops fundraising).",
-    "purposeStepTitle": "Your community. Your impact."
+    "purposeStepTitle": "Your community. Your impact.",
+    "marketplaceCommunityImpact": "{percent, number}% of every sale supports this community.",
+    "marketplaceCommunityImpactHint": "See where contributions go and who benefits.",
+    "viewCommunityBenefitsShort": "View community benefits"
   }
 }
