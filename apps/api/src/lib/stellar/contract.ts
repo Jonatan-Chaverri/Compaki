@@ -206,9 +206,28 @@ async function invokeContract(
 ): Promise<InvokeResult> {
   return withTimeoutRetry(`invoke ${method}`, async () => {
     const prepared = await prepareInvocation(method, args, signer.publicKey());
+    // The server signs only as the source account. If the call also needs
+    // another address's authorization (e.g. the operator's), it would fail
+    // on-chain after paying the fee, so refuse it here instead.
+    const others = authorizersOf(prepared).filter((a) => a !== signer.publicKey());
+    if (others.length > 0) throw new ContractError(method, null, "Unauthorized");
     prepared.sign(signer);
     return sendAndConfirm(prepared, method);
   });
+}
+
+/** Addresses whose own signature (not the source account's) a prepared call needs. */
+function authorizersOf(tx: Transaction): string[] {
+  return tx.operations.flatMap((op) =>
+    op.type === "invokeHostFunction"
+      ? (op.auth ?? []).flatMap((entry) => {
+          const credentials = entry.credentials();
+          return credentials.switch() === xdr.SorobanCredentialsType.sorobanCredentialsAddress()
+            ? [Address.fromScAddress(credentials.address().address()).toString()]
+            : [];
+        })
+      : [],
+  );
 }
 
 /** The signed envelope from the browser isn't the transaction we prepared. */
@@ -383,14 +402,27 @@ export async function createRewardsMarketplace(params: {
   return { marketplaceId: scValToNative(returnValue) as bigint, txHash };
 }
 
-/** What a fundraiser does after a round reaches its target (contract `GoalPolicy`). */
-export type GoalPolicy = "stop" | "new-round" | "direct";
+/** What follows a released fundraising round by default (contract `GoalPolicy`). */
+export type GoalPolicy = "stop" | "new-round";
 
 const GOAL_POLICY_VARIANT: Record<GoalPolicy, string> = {
   stop: "Stop",
   "new-round": "NewRound",
-  direct: "Direct",
 };
+
+/** `Option<T>`: None is Void, Some(x) is x itself. */
+function scOption(value: xdr.ScVal | null): xdr.ScVal {
+  return value ?? xdr.ScVal.scvVoid();
+}
+
+function scSymbolMap(entries: Record<string, xdr.ScVal>): xdr.ScVal {
+  // contracttype structs are maps with their field names sorted.
+  return xdr.ScVal.scvMap(
+    Object.keys(entries)
+      .sort()
+      .map((key) => new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(key), val: entries[key] })),
+  );
+}
 
 /** A unit enum variant is encoded as a vector holding its name. */
 function scGoalPolicy(policy: GoalPolicy): xdr.ScVal {
@@ -516,7 +548,7 @@ export interface PurchaseReceipt {
   platformStroops: bigint;
   /** Rewards marketplaces: the period the purchase was booked to. */
   period: number | null;
-  /** Fundraising marketplaces: the round the community share was added to. */
+  /** Fundraising marketplaces: the round the community share was added to (null once stopped). */
   round: number | null;
 }
 
@@ -563,11 +595,13 @@ export async function getMarketplace(
 // ── Community Rewards ──────────────────────────────────────────────────────
 
 export interface RewardsStatusOnChain {
-  startTs: number;
+  currentPeriod: number;
+  periodStart: number;
+  /** The current period can be distributed from this ledger time on. */
+  periodEnd: number;
   periodSeconds: number;
   vendorPoolBps: number;
   buyerPoolBps: number;
-  currentPeriod: number;
   totalContributedStroops: bigint;
   totalClaimedStroops: bigint;
   /** Ledger timestamp (seconds) the view was evaluated at. */
@@ -575,20 +609,58 @@ export interface RewardsStatusOnChain {
 }
 
 export interface PeriodTotalsOnChain {
+  startTs: number;
+  /** 0 until distributed. */
+  endTs: number;
+  vendorPoolBps: number;
   vendorPoolStroops: bigint;
   buyerPoolStroops: bigint;
   vendorVolumeStroops: bigint;
   buyerVolumeStroops: bigint;
   totalClaimedStroops: bigint;
+  distributed: boolean;
 }
 
 export interface RewardOnChain {
   vendorVolumeStroops: bigint;
   buyerVolumeStroops: bigint;
-  /** Final once the period ended; a running estimate before that. */
+  /** Final once the period is distributed; a running estimate before that. */
   amountStroops: bigint;
   periodEnded: boolean;
   claimed: boolean;
+}
+
+/** Rules for the next rewards period (contract `RewardsRules`). */
+export interface RewardsRules {
+  vendorPoolBps: number;
+  buyerPoolBps: number;
+  periodSeconds: number;
+}
+
+/**
+ * Ends the current rewards period once its length has passed and starts the
+ * next one. Without `next` anyone may submit it (the API uses the issuer as
+ * fee payer); with `next` the signer must be the marketplace operator.
+ */
+export async function distributeRewards(params: {
+  signerSecret: string;
+  marketplaceId: bigint;
+  next: RewardsRules | null;
+}): Promise<{ poolStroops: bigint; txHash: string }> {
+  const signer = Keypair.fromSecret(params.signerSecret);
+  const next = params.next
+    ? scSymbolMap({
+        vendor_pool_bps: scU32(params.next.vendorPoolBps),
+        buyer_pool_bps: scU32(params.next.buyerPoolBps),
+        period_seconds: scU64(BigInt(params.next.periodSeconds)),
+      })
+    : null;
+  const { txHash, returnValue } = await invokeContract(
+    "distribute",
+    [scU64(params.marketplaceId), scOption(next)],
+    signer,
+  );
+  return { poolStroops: i128Of(returnValue), txHash };
 }
 
 /** Claims a participant's reward, signed by the participant's own key. */
@@ -631,21 +703,23 @@ export function i128Of(returnValue: xdr.ScVal | undefined): bigint {
 
 export async function getRewardsStatus(marketplaceId: bigint): Promise<RewardsStatusOnChain> {
   const raw = (await simulateContract("rewards_status", [scU64(marketplaceId)])) as {
-    start_ts: bigint;
+    current_period: number;
+    period_start: bigint;
+    period_end: bigint;
     period_seconds: bigint;
     vendor_pool_bps: number;
     buyer_pool_bps: number;
-    current_period: number;
     total_contributed: bigint;
     total_claimed: bigint;
     now: bigint;
   };
   return {
-    startTs: Number(raw.start_ts),
+    currentPeriod: Number(raw.current_period),
+    periodStart: Number(raw.period_start),
+    periodEnd: Number(raw.period_end),
     periodSeconds: Number(raw.period_seconds),
     vendorPoolBps: Number(raw.vendor_pool_bps),
     buyerPoolBps: Number(raw.buyer_pool_bps),
-    currentPeriod: Number(raw.current_period),
     totalContributedStroops: BigInt(raw.total_contributed),
     totalClaimedStroops: BigInt(raw.total_claimed),
     ledgerTime: Number(raw.now),
@@ -657,13 +731,21 @@ export async function getPeriodTotals(
   periodId: number,
 ): Promise<PeriodTotalsOnChain> {
   const raw = (await simulateContract("get_period", [scU64(marketplaceId), scU32(periodId)])) as {
+    start_ts: bigint;
+    end_ts: bigint;
+    vendor_pool_bps: number;
     vendor_pool: bigint;
     buyer_pool: bigint;
     vendor_volume: bigint;
     buyer_volume: bigint;
     total_claimed: bigint;
+    distributed: boolean;
   };
   return {
+    startTs: Number(raw.start_ts),
+    endTs: Number(raw.end_ts),
+    vendorPoolBps: Number(raw.vendor_pool_bps),
+    distributed: raw.distributed,
     vendorPoolStroops: BigInt(raw.vendor_pool),
     buyerPoolStroops: BigInt(raw.buyer_pool),
     vendorVolumeStroops: BigInt(raw.vendor_volume),
@@ -710,6 +792,8 @@ export interface FundraiseOnChain {
   totalRaisedStroops: bigint;
   totalReleasedStroops: bigint;
   goalReached: boolean;
+  /** False once fundraising stopped. */
+  collecting: boolean;
 }
 
 export async function getFundraise(marketplaceId: bigint): Promise<FundraiseOnChain> {
@@ -723,6 +807,7 @@ export async function getFundraise(marketplaceId: bigint): Promise<FundraiseOnCh
     total_raised: bigint;
     total_released: bigint;
     goal_reached: boolean;
+    collecting: boolean;
   };
   return {
     targetStroops: BigInt(raw.target),
@@ -734,25 +819,36 @@ export async function getFundraise(marketplaceId: bigint): Promise<FundraiseOnCh
     totalRaisedStroops: BigInt(raw.total_raised),
     totalReleasedStroops: BigInt(raw.total_released),
     goalReached: raw.goal_reached,
+    collecting: raw.collecting,
   };
 }
 
 /**
- * Releases a round that reached its target. The contract requires no
- * authorization, so any funded account may submit it; the API pays the fee
- * with the demo-asset issuer account.
+ * Releases a round that reached its target. Without `nextTargetStroops` the
+ * contract applies the marketplace's default (same target again, or stop)
+ * and anyone may submit it — the API pays the fee with the demo-asset issuer
+ * account. With a next target (0 = stop) the signer must be the operator.
  */
 export async function releaseFundraise(params: {
   signerSecret: string;
   marketplaceId: bigint;
+  nextTargetStroops?: bigint | null;
 }): Promise<{ amountStroops: bigint; txHash: string }> {
   const signer = Keypair.fromSecret(params.signerSecret);
+  const next = params.nextTargetStroops === undefined || params.nextTargetStroops === null
+    ? null
+    : scI128(params.nextTargetStroops);
   const { txHash, returnValue } = await invokeContract(
     "release_fundraise",
-    [scU64(params.marketplaceId)],
+    [scU64(params.marketplaceId), scOption(next)],
     signer,
   );
   return { amountStroops: i128Of(returnValue), txHash };
+}
+
+/** Code version of the deployed contract (bumped on every upgrade). */
+export async function getContractVersion(): Promise<number> {
+  return Number(await simulateContract("version", []));
 }
 
 /**

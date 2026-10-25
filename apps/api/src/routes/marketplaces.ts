@@ -63,7 +63,7 @@ const DAY = 24 * 60 * 60;
 export const REWARDS_PERIODS = [30 * DAY, 90 * DAY, 180 * DAY, 365 * DAY];
 /** Testnet-only short period, so a demo can show a whole period and its claims. */
 export const DEMO_REWARDS_PERIOD = 10 * 60;
-const GOAL_POLICIES: GoalPolicy[] = ["stop", "new-round", "direct"];
+const GOAL_POLICIES: GoalPolicy[] = ["stop", "new-round"];
 const MAX_RECIPIENTS = 20; // mirrors the contract's MAX_RECIPIENTS
 
 /** Display name of where the community share goes. */
@@ -502,7 +502,7 @@ marketplaces.post("/", async (c) => {
               targetStroops: usdToStroops(marketplace.communityGoalUsd),
               recipients: recipients.map((r) => r.address),
               sharesBps: recipients.map((r) => r.shareBps),
-              policy: marketplace.fundraisePolicy as GoalPolicy,
+              policy: marketplace.fundraisePolicy === "stop" ? "stop" : "new-round",
             });
           } else {
             if (!fundUser?.stellarPublicKey) {
@@ -525,7 +525,7 @@ marketplaces.post("/", async (c) => {
         let rewardsStartAt = marketplace.rewardsStartAt;
         if (mode === "rewards" && !rewardsStartAt && contractMarketplaceId) {
           const status = await getRewardsStatus(BigInt(contractMarketplaceId));
-          rewardsStartAt = new Date(status.startTs * 1000);
+          rewardsStartAt = new Date(status.periodStart * 1000);
         }
         marketplace = await prisma.marketplace.update({
           where: { id: marketplace.id },

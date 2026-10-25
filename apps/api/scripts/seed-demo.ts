@@ -206,7 +206,7 @@ async function main(): Promise<void> {
         communityMode: "rewards",
         rewardsPeriodSeconds: status.periodSeconds,
         rewardsVendorPoolBps: status.vendorPoolBps,
-        rewardsStartAt: new Date(status.startTs * 1000),
+        rewardsStartAt: new Date(status.periodStart * 1000),
       },
     });
     console.log(`  create_rewards_marketplace tx ${result.txHash.slice(0, 8)}…`);

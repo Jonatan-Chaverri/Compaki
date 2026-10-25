@@ -1309,6 +1309,30 @@
                     },
                     {
                       "key": {
+                        "symbol": "distributed"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "end_ts"
+                      },
+                      "val": {
+                        "u64": 1702592000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "start_ts"
+                      },
+                      "val": {
+                        "u64": 1700000000
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "total_claimed"
                       },
                       "val": {
@@ -1327,6 +1351,14 @@
                           "hi": 0,
                           "lo": 50000000
                         }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "vendor_pool_bps"
+                      },
+                      "val": {
+                        "u32": 10000
                       }
                     },
                     {
@@ -1416,6 +1448,30 @@
                     },
                     {
                       "key": {
+                        "symbol": "distributed"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "end_ts"
+                      },
+                      "val": {
+                        "u64": 1705184000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "start_ts"
+                      },
+                      "val": {
+                        "u64": 1702592000
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "total_claimed"
                       },
                       "val": {
@@ -1434,6 +1490,14 @@
                           "hi": 0,
                           "lo": 0
                         }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "vendor_pool_bps"
+                      },
+                      "val": {
+                        "u32": 0
                       }
                     },
                     {
@@ -1495,6 +1559,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "current_period"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "period_seconds"
                       },
                       "val": {
@@ -1503,10 +1575,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "start_ts"
+                        "symbol": "period_start"
                       },
                       "val": {
-                        "u64": 1700000000
+                        "u64": 1702592000
                       }
                     },
                     {
@@ -1587,6 +1659,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "current_period"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "period_seconds"
                       },
                       "val": {
@@ -1595,10 +1675,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "start_ts"
+                        "symbol": "period_start"
                       },
                       "val": {
-                        "u64": 1702592000
+                        "u64": 1705184000
                       }
                     },
                     {
@@ -2695,7 +2775,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -3362,6 +3442,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "current_period"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -3370,7 +3458,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1700000000
@@ -4115,11 +4203,55 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
               },
               {
-                "symbol": "rewards_status"
+                "symbol": "distribute"
               }
             ],
             "data": {
-              "u64": 0
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "distrib"
+              },
+              {
+                "u64": 0
+              },
+              {
+                "u32": 0
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 50000000
+                  }
+                },
+                {
+                  "u32": 10000
+                },
+                {
+                  "u64": 2592000
+                }
+              ]
             }
           }
         }
@@ -4138,82 +4270,14 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "rewards_status"
+                "symbol": "distribute"
               }
             ],
             "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "buyer_pool_bps"
-                  },
-                  "val": {
-                    "u32": 0
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "current_period"
-                  },
-                  "val": {
-                    "u32": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "now"
-                  },
-                  "val": {
-                    "u64": 1702592000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "period_seconds"
-                  },
-                  "val": {
-                    "u64": 2592000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "start_ts"
-                  },
-                  "val": {
-                    "u64": 1700000000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_claimed"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 0
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_contributed"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 50000000
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "vendor_pool_bps"
-                  },
-                  "val": {
-                    "u32": 10000
-                  }
-                }
-              ]
+              "i128": {
+                "hi": 0,
+                "lo": 50000000
+              }
             }
           }
         }
@@ -4566,6 +4630,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "current_period"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -4574,7 +4646,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1702592000
@@ -5319,11 +5391,55 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
               },
               {
-                "symbol": "rewards_status"
+                "symbol": "distribute"
               }
             ],
             "data": {
-              "u64": 1
+              "vec": [
+                {
+                  "u64": 1
+                },
+                "void"
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "distrib"
+              },
+              {
+                "u64": 1
+              },
+              {
+                "u32": 0
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 50000000
+                  }
+                },
+                {
+                  "u32": 0
+                },
+                {
+                  "u64": 2592000
+                }
+              ]
             }
           }
         }
@@ -5342,82 +5458,14 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "rewards_status"
+                "symbol": "distribute"
               }
             ],
             "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "buyer_pool_bps"
-                  },
-                  "val": {
-                    "u32": 10000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "current_period"
-                  },
-                  "val": {
-                    "u32": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "now"
-                  },
-                  "val": {
-                    "u64": 1705184000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "period_seconds"
-                  },
-                  "val": {
-                    "u64": 2592000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "start_ts"
-                  },
-                  "val": {
-                    "u64": 1702592000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_claimed"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 0
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "total_contributed"
-                  },
-                  "val": {
-                    "i128": {
-                      "hi": 0,
-                      "lo": 50000000
-                    }
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "vendor_pool_bps"
-                  },
-                  "val": {
-                    "u32": 0
-                  }
-                }
-              ]
+              "i128": {
+                "hi": 0,
+                "lo": 50000000
+              }
             }
           }
         }

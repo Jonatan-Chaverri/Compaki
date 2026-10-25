@@ -11,7 +11,7 @@
 
 import { prisma } from "@/lib/db";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
-import { releaseIfReached } from "@/lib/fundraise";
+import { releaseIfReachedById } from "@/lib/fundraise";
 import { boundOnChainId } from "@/lib/rewards";
 import { splitSnapshot } from "@/lib/splits";
 import {
@@ -175,7 +175,7 @@ export async function recordSale(params: {
   // A fundraising round that this sale pushed past its target is released
   // right away (permissionless on-chain; the API just pays the fee).
   if (params.receipt.round !== null) {
-    void releaseIfReached(marketplace).catch((error) =>
+    void releaseIfReachedById(marketplace.id).catch((error) =>
       console.error("[fundraise] automatic release failed:", error),
     );
   }

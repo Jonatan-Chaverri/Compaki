@@ -198,7 +198,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Direct"
+                      "symbol": "NewRound"
                     }
                   ]
                 }
@@ -561,6 +561,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "collecting"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "goal_reached"
                       },
                       "val": {
@@ -574,7 +582,7 @@
                       "val": {
                         "vec": [
                           {
-                            "symbol": "Direct"
+                            "symbol": "NewRound"
                           }
                         ]
                       }
@@ -1323,7 +1331,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -1923,7 +1931,7 @@
                 {
                   "vec": [
                     {
-                      "symbol": "Direct"
+                      "symbol": "NewRound"
                     }
                   ]
                 }
@@ -2017,6 +2025,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "goal_reached"
                   },
                   "val": {
@@ -2030,7 +2046,7 @@
                   "val": {
                     "vec": [
                       {
-                        "symbol": "Direct"
+                        "symbol": "NewRound"
                       }
                     ]
                   }
@@ -2269,6 +2285,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "goal_reached"
                   },
                   "val": {
@@ -2282,7 +2306,7 @@
                   "val": {
                     "vec": [
                       {
-                        "symbol": "Direct"
+                        "symbol": "NewRound"
                       }
                     ]
                   }

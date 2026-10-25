@@ -483,8 +483,6 @@
     [],
     [],
     [],
-    [],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON",
@@ -916,6 +914,14 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "collecting"
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "goal_reached"
@@ -2144,7 +2150,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -2836,6 +2842,14 @@
             ],
             "data": {
               "map": [
+                {
+                  "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
                 {
                   "key": {
                     "symbol": "goal_reached"
@@ -3651,7 +3665,12 @@
               }
             ],
             "data": {
-              "u64": 0
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
             }
           }
         }
@@ -3737,7 +3756,8 @@
                   "vec": [
                     {
                       "u64": 0
-                    }
+                    },
+                    "void"
                   ]
                 }
               ]
@@ -4353,7 +4373,12 @@
               }
             ],
             "data": {
-              "u64": 0
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
             }
           }
         }
@@ -4563,10 +4588,20 @@
               }
             ],
             "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 100000000
-              }
+              "vec": [
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 100000000
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
+                }
+              ]
             }
           }
         }
@@ -4611,14 +4646,14 @@
                 "symbol": "fn_call"
               },
               {
-                "bytes": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1"
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
               },
               {
-                "symbol": "balance"
+                "symbol": "get_fundraise"
               }
             ],
             "data": {
-              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
+              "u64": 0
             }
           }
         }
@@ -4628,7 +4663,7 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -4637,118 +4672,122 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "balance"
+                "symbol": "get_fundraise"
               }
             ],
             "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 70000000
-              }
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1"
-              },
-              {
-                "symbol": "balance"
-              }
-            ],
-            "data": {
-              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "balance"
-              }
-            ],
-            "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 30000000
-              }
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1"
-              },
-              {
-                "symbol": "balance"
-              }
-            ],
-            "data": {
-              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "48f1b6b8bc0d60f7140dd49b6120fbaf3cdbab2adaeea631313d9f0bae9532f1",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "balance"
-              }
-            ],
-            "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 0
-              }
+              "map": [
+                {
+                  "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "goal_reached"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "policy"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "symbol": "Stop"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "raised"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 0
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "recipients"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
+                      },
+                      {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "round"
+                  },
+                  "val": {
+                    "u32": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "shares_bps"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "u32": 7000
+                      },
+                      {
+                        "u32": 3000
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "target"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_raised"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_released"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000000
+                    }
+                  }
+                }
+              ]
             }
           }
         }
@@ -5423,7 +5462,12 @@
               }
             ],
             "data": {
-              "u64": 0
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
             }
           }
         }
@@ -5509,7 +5553,8 @@
                   "vec": [
                     {
                       "u64": 0
-                    }
+                    },
+                    "void"
                   ]
                 }
               ]

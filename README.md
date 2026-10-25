@@ -10,12 +10,21 @@ a marketplace, onboards vendors and sells products. Each payment is split
 automatically between the **vendor**, the **marketplace operator** and a
 **community fund**.
 
-**Community Rewards** (added for the Stellar ideathon, Scale track) turns that
-community fund into a protected on-chain treasury. A fixed share of every sale
-is held by the Soroban contract, booked to a time-boxed **period**, and paid out
-to registered members according to percentages that are fixed before the period
-starts. Neither the operator nor Compaki can withdraw that money or change a
-running period's rules.
+The community share can work in three ways, chosen at launch:
+
+- **Classic:** it goes straight to a community fund account with every sale.
+- **Community Rewards:** the Soroban contract holds it and, every period
+  (monthly, quarterly, every 6 months or yearly), shares it between that
+  period's **sellers and buyers**, in proportion to what each one sold and
+  bought. Each period ends with a distribution that the API triggers the
+  moment it is due; at that point the operator can change the next period's
+  sellers/buyers split and frequency.
+- **Fundraising:** the contract holds it until a target is reached, then pays
+  it to public recipient wallets at fixed shares. Then a new round starts
+  (same target, or a new one the operator picks; 0 stops fundraising).
+
+Nobody, including the operator or Compaki, can withdraw the saved funds or
+change a running period's or round's rules.
 
 > **Testnet only.** All money is a self-issued demo asset on Stellar testnet
 > (`CPKUSD` on fresh deployments; older deployments used the code `USDC` with
@@ -37,80 +46,88 @@ running period's rules.
 
 ## How Community Rewards works
 
-1. **Opt-in at launch.** When an operator launches a marketplace with Community
-   Rewards on, it is registered with `create_rewards_marketplace`. The mode is
-   fixed on-chain and can't be switched later. Classic marketplaces keep
-   working exactly as before: their community share goes straight to a fund
-   account.
-2. **Open a period.** The operator commits the rules: up to **20 members**,
-   each with a share in basis points (`10_000 = 100%`, must sum to exactly
-   10 000, no duplicates, no zero shares, the operator can't list itself), plus
-   an end time in **ledger time**. A new period can only be opened once the
-   previous one has ended.
-3. **Sales fund it.** Each purchase transfers the vendor share to the vendor
-   and the operator share to the operator. The community share goes to the
-   **contract itself**, booked to `(marketplace, period)`. All of this happens
-   in one atomic invocation.
-4. **Close.** Once the ledger passes the end time, **anyone** can close the
-   period. Closing computes every member's final entitlement once, so the
-   operator can't hold rewards hostage by never closing.
-5. **Claim.** Each member claims their own entitlement once, with their own
-   authorization, and it is paid only to their address.
+1. **Choose at launch.** In the wizard the operator picks where the community
+   share goes. A rewards marketplace is registered with
+   `create_rewards_marketplace(operator, v, o, c, period_seconds,
+   vendor_pool_bps)`: the first period starts right away and lasts at least
+   `period_seconds`; `vendor_pool_bps` of each period's pool goes to sellers
+   and the rest to buyers. The mode itself can't be switched later.
+2. **Sales fund the current period.** Each purchase transfers the vendor and
+   operator shares and Compaki's 2% directly, and the community share to the
+   **contract itself**, all in one atomic invocation. The contract books it
+   to the current period and adds the sale amount to the vendor's volume and
+   to the buyer's volume for that period.
+3. **Distribution.** Once the period's length has passed, `distribute` ends
+   it: its pools are frozen and claimable, and the next period starts at that
+   moment. The API's scheduler (`src/lib/distribution.ts`, every 30 s)
+   submits it as soon as it is due, so it happens on time without anyone
+   pressing a button. **Anyone** may distribute without changes, so the
+   operator can't hold rewards back; passing new rules
+   (`RewardsRules { vendor_pool_bps, buyer_pool_bps, period_seconds }`)
+   requires the **operator's** signature. In the dashboard the operator
+   schedules those rules ahead of time and the scheduler passes them in that
+   same call. The running period never changes.
+4. **Claim.** Every seller and buyer of a distributed period claims
+   `vendor_pool × their sales / all sales + buyer_pool × their purchases /
+   all purchases`, once, with their own signature, paid only to their own
+   address.
 
-**No active period?** A purchase on a rewards marketplace is **rejected
-atomically** (`NoActivePeriod`): no money moves, and the API answers 409 with a
-clear message. There is no fallback that silently sends the community share to
-an operator-controlled account. The trade-off is that sales pause between
-periods, and operators should open the next period as soon as one ends.
+**Rounding.** Each part rounds down, so a period never pays out more than its
+pools; the dust (under one stroop per participant) stays in the contract.
+Property tests check this, and that selling to yourself to win a bigger share
+always loses money (at least the operator and platform shares of the fake
+sales).
 
-**Rounding.** Each member gets `floor(total × share / 10_000)`. The few
-leftover stroops (always fewer than the number of members) go one each to the
-first members in list order. Entitlements always sum to exactly the period
-total, so nothing is over-paid and no dust is stranded. A property test checks
-this over many totals and uneven splits.
+**Fundraising.** `create_fundraise_marketplace(…, target, recipients,
+shares_bps, policy)` keeps the community share until a round raises
+`target`. `release_fundraise(id, next_target)` then pays everything raised to
+the recipients at their fixed shares. With `next_target = None` (anyone may
+call; the API does it right after the sale that reaches the target) the
+policy decides what follows: `NewRound` (same target again) or `Stop`. With
+`Some(t)` (operator only; scheduled in the dashboard) the next round's target
+is `t`, and `0` stops fundraising. Once stopped, sellers keep the community
+share of later sales.
 
 ## Contract architecture
 
 One deployment (`contracts/marketplace`) serves every marketplace, keyed by
-`marketplace_id`. Funds of all rewards marketplaces sit in the contract's
-single token balance. Accounting is kept per marketplace and per period, and
-claims can only debit the entitlement of the `(marketplace, period, member)`
-they name.
+`marketplace_id`. Funds of all rewards and fundraising marketplaces sit in the
+contract's single token balance; accounting is kept per marketplace, period
+and participant.
 
 | Function | Auth | Purpose |
 | --- | --- | --- |
-| `initialize(admin, token, platform)` | admin | One-time: payment token and the platform-fee recipient. The admin has **no** privileged functions. |
+| `initialize(admin, token, platform)` | admin | One-time: payment token, platform-fee recipient and the admin allowed to `upgrade`. |
 | `create_marketplace(operator, fund, v, o, c)` | operator | Classic marketplace; `v + o + c` must be 9,800 bps. |
-| `create_rewards_marketplace(operator, v, o, c)` | operator | Rewards marketplace; `community_fund` = the contract. |
+| `create_rewards_marketplace(operator, v, o, c, period_seconds, vendor_pool_bps)` | operator | Rewards marketplace; first period starts now. |
+| `create_fundraise_marketplace(operator, v, o, c, target, recipients, shares_bps, policy)` | operator | Fundraising marketplace; up to 20 recipients. |
 | `register_vendor(id, vendor)` | operator | Unchanged. |
-| `purchase(id, buyer, vendor, amount) -> Option<u32>` | buyer | Atomic split; returns the period the community share was booked to. |
-| `open_period(id, members, shares_bps, end_ts) -> u32` | operator | Commits rules; only after the previous period ended. |
-| `close_period(id, period) -> i128` | none | After `end_ts`; fixes entitlements. |
-| `claim(id, period, member) -> i128` | member | Pays the member's entitlement once. |
-| `rewards_status`, `get_period`, `get_entitlement(s)`, `get_marketplace` | none | Views (`rewards_status` also returns ledger time). |
+| `purchase(id, buyer, vendor, amount) -> PurchaseReceipt` | buyer | Atomic split; returns what was paid, and the period or round. |
+| `distribute(id, next: Option<RewardsRules>) -> i128` | none, or operator with `next` | Ends a period whose length has passed; optionally sets the next period's rules. |
+| `claim(id, period, member) -> i128` | member | Pays a participant's reward for a distributed period, once. |
+| `release_fundraise(id, next_target: Option<i128>) -> i128` | none, or operator with a target | Pays out a round that reached its target. |
+| `upgrade(new_wasm_hash)` | admin | Replaces the code, keeping the address and all data. |
+| `rewards_status`, `get_period`, `get_reward`, `get_fundraise`, `get_marketplace`, `get_platform`, `version`, `get_admin` | none | Views. |
 
 **Compaki platform fee.** Every sale pays a fixed 2% (`PLATFORM_FEE_BPS = 200`,
 a constant) straight from the buyer to the platform account set at
 `initialize`; a marketplace's vendor / operator / community shares cover the
 other 98% (e.g. 93 / 5 / 0 by default in the launch wizard). Like every other
-leg it is a direct transfer inside `purchase` — the contract never holds it —
-and no one can change the rate or the recipient on a deployment
-(`get_platform` shows both).
+leg it is a direct transfer inside `purchase`.
 
-There is **no** withdraw, sweep, admin-transfer or upgrade function. The only
-path out of the treasury is `claim`.
+There is **no** withdraw or sweep function. The only paths out of the
+treasury are `claim` (to a participant) and `release_fundraise` (to the fixed
+recipients). The code is **upgradeable** by the admin (see
+[Guarantees](#guarantees-and-limitations)).
 
 Storage (`DataKey`): `Config(id)`, `Vendor(id, addr)`, `Rewards(id)`
-(period count + lifetime contributed/claimed), `Period(id, p)` (members,
-shares, start/end, totals, closed), `Entitlement(id, p, member)` (written at
-close). Every entry a call touches has its TTL extended to about 30 days.
-Archived persistent entries can be restored on Soroban, never deleted.
-Arithmetic uses checked operations, and `overflow-checks` stays on in release.
-Events: `market`, `vendor`, `purchase`, `contrib`, `p_open`, `p_close`, `claim`.
-
-Errors are explicit (`NoActivePeriod`, `PeriodActive`, `PeriodNotEnded`,
-`PeriodNotClosed`, `NotBeneficiary`, `AlreadyClaimed`, `InvalidBeneficiaries`,
-…); the full list is `Error` in `contracts/marketplace/src/lib.rs`.
+(current period, its start, length, pool split, lifetime totals),
+`Period(id, p)` (start, end, split, pools, volumes, claimed, distributed),
+`Participation(id, p, addr)` (sold, bought, claimed), `Fundraise(id)`. Every
+entry a call touches has its TTL extended to about 30 days; archived entries
+are restored automatically when used. Arithmetic is checked, and
+`overflow-checks` stays on in release. Events: `market`, `rewards`,
+`fundrais`, `vendor`, `purchase`, `distrib`, `claim`, `release`, `upgrade`.
 
 ## From purchase to claim
 
@@ -119,41 +136,47 @@ buyer ──purchase──▶ contract ──┬─▶ vendor      (vendor_bps)
                                ├─▶ operator    (operator_bps)
                                ├─▶ Compaki     (fixed 2% platform fee)
                                └─▶ contract treasury (community_bps + rounding dust)
-                                     booked to Period(marketplace, current)
-ledger time ≥ end_ts ──close_period (anyone)──▶ Entitlement(member) = fixed amounts
-member ──claim (member auth)──▶ contract ──▶ member address   (once)
+                                     booked to the current period, with the
+                                     vendor's sales and the buyer's purchases
+period length passed ──distribute (API scheduler; anyone)──▶ period claimable,
+                                     next period starts (operator may set its rules)
+seller/buyer ──claim (own auth)──▶ contract ──▶ their address   (once)
 ```
 
 On the app side:
 
-- **Checkout** (`POST /api/orders/:id/pay`) still settles **one `purchase`
-  transaction per cart item**. Each item's split is atomic, but the cart as a
-  whole is not. A failure midway leaves earlier items settled, and retrying
-  resumes from the first unsettled item.
-- **Operator:** Dashboard → *Community rewards* shows the treasury, the current
-  period with a countdown, members, shares, projected and final rewards, claim
-  status, the open-period form, the close button, period history with explorer
-  links, and a *Try to break the rules* panel.
-- **Members:** `/rewards` (*My rewards* in the account menu) lists their
-  periods across marketplaces, with on-chain amounts and a *Claim* button that
-  shows pending, confirmed (with explorer link) and error states.
+- **Checkout** (`POST /api/orders/:id/pay`) settles **one `purchase`
+  transaction per cart item**, recorded from the contract's receipt. Each
+  item's split is atomic, but the cart as a whole is not; a retry resumes from
+  the first unsettled item.
+- **Operator:** Dashboard → *Community rewards* / *Fundraising* shows the fund,
+  the running period (rules, countdown, pools), each period's sellers and
+  buyers with their estimated or final rewards, the next period's rules form
+  (or the next round's target), a *Distribute now* fallback, and a *How is the
+  fund protected?* panel.
+- **Sellers and buyers:** `/rewards` lists the periods they took part in, with
+  on-chain amounts and a *Collect reward* button.
+- **Public:** `/m/:slug/community` shows the same, plus the recipients and
+  payouts of a fundraiser.
 
-**On-chain vs. Postgres.** Treasury totals, periods, members, shares,
-entitlements and claim status are **always read from the contract**
-(`src/lib/rewards.ts`). Postgres stores only auxiliary data: transaction
-hashes for explorer links (`RewardsPeriod`, `RewardClaim`), member names, and
-which sale fed which period (`Sale.splitSnapshot.rewardsPeriodId`). No balance
-or claim right is derived from the database.
+**On-chain vs. Postgres.** Rules, pools, totals, recipients and each person's
+reward are read from the contract (`src/lib/rewards.ts`,
+`src/lib/fundraise.ts`). Postgres stores auxiliary data: who sold and bought
+in each period (`Sale.splitSnapshot`), names, transaction hashes
+(`RewardClaim`, `RewardsDistribution`, `FundraiseRelease`) and the operator's
+**pending** next-period rules / next target until they are passed on-chain.
 
 API (`apps/api/src/routes/rewards.ts`):
 
 | Endpoint | Who |
 | --- | --- |
 | `GET /api/rewards/marketplace/:slug` | public (on-chain view + tx links) |
-| `POST /api/rewards/marketplace/:slug/periods` | operator: `{ durationMinutes, beneficiaries: [{ email \| address, shareBps }] }` |
-| `POST /api/rewards/marketplace/:slug/periods/:id/close` | operator or a member of that period |
-| `POST /api/rewards/marketplace/:slug/periods/:id/claim` | the signed-in member (claims for themself only) |
-| `POST /api/rewards/marketplace/:slug/guarantees` | operator: `{ kind: "change-rules" \| "withdraw" }` |
+| `PUT /api/rewards/marketplace/:slug/next-rules` | operator: `{ vendorPoolBps, periodSeconds }` or `{ clear: true }` |
+| `POST /api/rewards/marketplace/:slug/distribute` | any signed-in user (fallback; the scheduler does it on time) |
+| `POST /api/rewards/marketplace/:slug/periods/:id/claim` | the signed-in seller or buyer (for themself only) |
+| `PUT /api/rewards/marketplace/:slug/fundraise/next-target` | operator: `{ targetUsd }` (0 = stop, `null` = default) |
+| `POST /api/rewards/marketplace/:slug/fundraise/release` | any signed-in user (fallback) |
+| `POST /api/rewards/marketplace/:slug/guarantees` | operator: `{ kind: "claim-for-someone" \| "withdraw" }` |
 | `GET /api/rewards/me` | signed-in user's periods |
 
 The guarantee checks simulate the forbidden action against the live contracts
@@ -245,18 +268,23 @@ against your app id.
 
 **Enforced on-chain by the contract:**
 
-- The community share of a rewards marketplace leaves the buyer and enters the
-  contract in the same atomic invocation as the vendor and operator legs.
-- Each contribution is booked to exactly one `(marketplace, period)`. Other
-  marketplaces' and other periods' funds can't be claimed.
-- A period's members and shares can't change once it is opened. A new period
-  can't be opened while one is running, and closed periods can't be re-closed
-  or re-allocated.
-- Periods close only after their ledger end time. Claims require a closed
-  period, a registered member, the **member's** authorization, and no previous
-  claim. Payouts go only to the member's own address.
-- Total claims can never exceed what was contributed (by construction, plus an
-  explicit check).
+- The community share of a rewards or fundraising marketplace leaves the
+  buyer and enters the contract in the same atomic invocation as the vendor,
+  operator and platform legs.
+- Each contribution is booked to exactly one `(marketplace, period)` or
+  fundraising round. Other marketplaces' and other periods' funds can't be
+  claimed.
+- A running period's split and length can't change. New rules apply only to
+  the next period, only via `distribute` and only with the operator's
+  signature; without changes, anyone can distribute once the period's length
+  has passed, so rewards can't be held back.
+- Claims require a distributed period, a sale or purchase by that address in
+  it, the **participant's** own authorization, and no previous claim. Payouts
+  go only to the participant's address and can never exceed the period's
+  pools (rounding down, plus an explicit check).
+- Fundraising recipients and shares are fixed at creation. A round is paid
+  out only once it reaches its target, only to those recipients; only the
+  operator can choose a different next target.
 - No admin, operator or Compaki function can move treasury funds. The token
   contract also refuses transfers out of the contract that the contract
   itself didn't authorize (tested in Rust and on testnet).
@@ -271,33 +299,39 @@ against your app id.
   - **Custodial accounts** (operators, pre-Cavos and demo accounts): the key is
     held by the Compaki backend (AES-256-GCM, `WALLET_ENCRYPTION_KEY`), so
     `require_auth()` proves "the backend signed for this user". The backend
-    holds every operator key and can do anything an operator can (open periods,
-    register vendors) — but it still **cannot** withdraw the treasury or change
-    running periods: the contract forbids that for everyone.
+    holds every operator key and can do anything an operator can (register
+    vendors, set the next period's rules) — but it still **cannot** withdraw
+    the treasury or change a running period: the contract forbids that for
+    everyone.
   Compaki is therefore **not** fully non-custodial.
 - **Signing requests are kept in memory** (single API instance): an API restart
   drops pending signatures and the user retries the action.
-- **Who the members are** is the operator's choice. The contract stops the
-  operator from listing its own address but can't detect other addresses the
-  operator controls. The guarantee is that the rules are public and frozen
-  before the money arrives, not identity verification.
-- **Liveness:** sales pause when no period is open, and unclaimed rewards stay
-  claimable indefinitely (there is deliberately no sweep).
+- **Who takes part** comes from real sales: any address that sells or buys
+  in a period shares its pool. Self-dealing never pays (the operator and
+  platform shares are lost), but the contract can't tell people apart.
+- **Liveness:** distribution needs a transaction; the API's scheduler sends it
+  on time, and anyone else can too. Unclaimed rewards stay claimable
+  indefinitely (there is deliberately no sweep).
 - **Token issuer powers** are outside the contract. The demo issuer is created
   with no clawback or revocation flags, but with real USDC the issuer (Circle)
   could freeze or claw back balances.
-- **No upgrades.** The contract is immutable by design: an upgrade function
-  would let its admin replace the rules. Shipping a contract change means a
-  new deployment plus `marketplaces:rebind`. Funds left in an old deployment
-  stay claimable there via `stellar contract invoke`, but the API only talks
-  to the configured contract.
+- **Upgrades.** The contract is upgradeable: `upgrade(new_wasm_hash)`
+  replaces its code while keeping its address and all stored data
+  (`npm run deploy:testnet -- --upgrade`). Only the admin set at `initialize`
+  (the deploy's issuer account) can do it, and every upgrade is a public
+  `upgrade` event on Stellar. This is a trust trade-off: new code could change
+  the rules above, so the guarantees hold for the code version that is
+  deployed (`version()`), and whoever holds the admin key must be trusted not
+  to replace it with a malicious version. On testnet the API also holds that
+  key (it is the demo-asset issuer). New code must read the stored data as
+  the old code wrote it.
 - Checkout is per item (see above). The API's timeout retry can resubmit a
   transaction whose confirmation timed out; that was pre-existing behaviour and
   is safe for `claim` (`AlreadyClaimed`), but it is not idempotent for
   `purchase`.
-- `/api/rewards/me` scans rewards marketplaces' recent periods
-  (12 per marketplace, 25 marketplaces). That's fine for a demo; production
-  would index the contract's `p_open` events.
+- `/api/rewards/me` finds the user's periods from their recorded sales and
+  reads each reward from the contract (12 periods per marketplace). That's
+  fine for a demo; production would index the contract's events.
 
 **Security fixes made in this release:**
 
@@ -336,10 +370,10 @@ npm run dev            # http://localhost:3000 (proxies /api → API_URL, defaul
 ```
 
 The seed creates **Café de Altura** as a Community Rewards marketplace with
-operator `maria@cafedealtura.example`, two vendors, members
-`escuela@cafedealtura.example` (50%), `brigada@cafedealtura.example` (30%) and
-`lucia@example.com` (20%), a 10-minute period (`SEED_PERIOD_MINUTES`), and 5
-real purchases. All seeded users get `DEMO_SEED_PASSWORD`.
+operator `maria@cafedealtura.example`, two vendors, three buyers
+(`lucia@`, `marco@`, `emma@example.com`), 10-minute periods whose pool goes
+60% to sellers and 40% to buyers (`SEED_PERIOD_SECONDS`), and 5 real
+purchases. All seeded users get `DEMO_SEED_PASSWORD`.
 
 Environment variables used by this release:
 
@@ -349,9 +383,9 @@ Environment variables used by this release:
 | `DEMO_USDC_CODE` / `_ISSUER_*` / `_SAC_ADDRESS` | API | Demo asset (historical names; the asset is not USDC). |
 | `WALLET_ENCRYPTION_KEY`, `SESSION_SECRET` | API | Custodial key encryption; session HMAC (falls back to the wallet key). |
 | `ENABLE_DEMO_IMPERSONATION` | API | `true` to allow the local demo switcher (ignored in production). |
-| `DEMO_SEED_PASSWORD`, `SEED_PERIOD_MINUTES` | seed | Demo logins; seeded period length. |
+| `DEMO_SEED_PASSWORD`, `SEED_PERIOD_SECONDS` | seed | Demo logins; seeded period length (default 600). |
+| `COMMUNITY_SCHEDULER`, `COMMUNITY_TICK_SECONDS` | API | `off` disables automatic distributions and payouts (run it on one API instance); how often it checks (default 30). |
 | `DEMO_ASSET_CODE`, `DEPLOY_ENV_FILE` | deploy | Asset code for fresh deploys (default `CPKUSD`); alternative env file. |
-| `DEMO_PERIOD_SECONDS` | `demo:rewards` | Period length for the CLI proof (default 45). |
 | `NEXT_PUBLIC_CAVOS_APP_ID`, `NEXT_PUBLIC_CAVOS_ENV` | web | Cavos app id (public) and environment (`development` default). |
 | `CAVOS_APP_ID` | API | Optional: also require Cavos email tokens to be issued for this app. |
 
@@ -360,6 +394,7 @@ Environment variables used by this release:
 ```bash
 cd apps/api
 npm run deploy:testnet                     # full: new issuer, CPKUSD token, contract
+npm run deploy:testnet -- --upgrade        # new code for the deployed contract (same address)
 npm run deploy:testnet -- --contract-only  # new contract, keep issuer/token/accounts
 npm run demo:rewards                       # on-chain proof of the whole flow (no DB)
 npm run demo:purchase                      # classic marketplace proof (unchanged)
@@ -372,81 +407,104 @@ script then pays through a fee-bump transaction, whose fee field is 64-bit.
 The issuer's Friendbot balance (10,000 XLM) covers it. After that,
 calls are cheap again (a purchase ~0.002 XLM, creating a marketplace ~3 XLM).
 
+### Shipping a contract change
+
+Contracts deployed from this version on are upgraded in place:
+
+```bash
+cd apps/api
+npm run deploy:testnet -- --upgrade        # builds, uploads, upgrade(hash) with the admin key
+```
+
+The address, marketplaces, periods and funds stay; nothing needs rebinding.
+Bump `CONTRACT_VERSION` with each change so `version()` shows which code is
+live.
+
 ### Migrating an existing deployment
 
-Contract WASM changes never reach a deployed contract, and the pre-ideathon
-contract has no rewards functions, so existing installs need a new contract
-and a rebind. On-chain marketplace ids are only valid inside one deployment.
+Contracts deployed before `upgrade` existed need a new contract and a rebind
+once. On-chain marketplace ids are only valid inside one deployment.
 `Marketplace.contractId` records which deployment a row belongs to, and the
 API **refuses** (fails safe) any marketplace whose `contractId` isn't the
 configured `MARKETPLACE_CONTRACT_ID`.
 
 ```bash
 cd apps/api
-npm run prisma:migrate:deploy                       # additive; existing rows get contractId = NULL
+npm run prisma:migrate:deploy
 npm run deploy:testnet -- --contract-only           # rewrites MARKETPLACE_CONTRACT_ID only
 npm run marketplaces:rebind -- --dry-run
-npm run marketplaces:rebind -- --rewards cafe-de-altura   # re-registers marketplaces + vendors
-# No redeploy? Bind existing rows to the current contract instead:
-npm run marketplaces:rebind -- --adopt
+npm run marketplaces:rebind                          # re-registers marketplaces + vendors
 ```
 
-Until `rebind`/`--adopt` runs, every marketplace answers "not ready for
-purchases", so run the migration, deploy and rebind together. Sale history,
-receipts and balances already paid out are untouched. Old community-fund
-accounts keep their funds.
+Ship the API code, the migration and `MARKETPLACE_CONTRACT_ID` together:
+until they match, marketplaces answer "not ready for purchases". Sale
+history and receipts are untouched; funds left in an older contract stay
+claimable there with `stellar contract invoke`.
 
 ## Tests
 
 ```bash
-cd contracts && cargo test                         # 26 tests (9 pre-existing + 17 rewards)
-cd apps/api && npm run typecheck && npm run build
-cd apps/web && npm run typecheck && npm run lint && npm run build
+cd contracts && cargo build --target wasm32v1-none --release && cargo test   # 38 tests
+cd apps/api && npm run typecheck && npm run test:community && npm run build
+cd apps/web && npm run typecheck && npm run lint && node --test tests/*.test.mjs && npm run build
 ```
 
-The rewards tests cover: the 3-way split into the treasury; accumulation;
-close; fixed-share allocation; claims; double claim; claim before close;
-premature close; changing committed shares; admin and operator withdrawal
-attempts (including a direct token transfer out of the contract); isolation
-between marketplaces and between periods; rounding (exact cases plus a sweep);
-invalid configurations; and the exact `require_auth` set of every entry point.
-Happy paths assert `env.auths()`. Negative auth tests run in strict mode
-(`set_auths(&[])` / targeted `mock_auths`) rather than `mock_all_auths`, with
-positive controls. Nine mutations of the contract's guards (removing auth,
-time, double-claim, duplicate, rounding checks…) were each caught by the
-suite.
+The contract tests cover the split and platform fee; rewards booked by sales
+and purchases; distribution timing; new rules for the next period (validated,
+operator-only) while the distributed period keeps its own; claims (before
+distribution, twice, by non-participants); periods isolated from each other
+and marketplaces from each other; rounding; self-dealing never paying;
+fundraising rounds, payouts above target, a new target or a stop chosen by the
+operator; withdrawal attempts (including a direct token transfer out of the
+contract); only the admin upgrading, and a real upgrade keeping the stored
+data; and the exact `require_auth` set of every entry point. Happy paths
+assert `env.auths()`; negative auth tests run in strict mode (`set_auths(&[])`
+/ targeted `mock_auths`) with positive controls. Mutating each guard of the
+contract (auth checks, timing, validation, rounding, policy defaults…) makes
+the suite fail; the two survivors are redundant checks with no observable
+effect.
 
 ## Example transactions
 
 From `npm run demo:rewards` on testnet, contract
-[`CC46HNM74RDUX3ZEPA5VISKDJK5H5EIDETDXZDBE24FQ6S2BPIHUB3RI`](https://stellar.expert/explorer/testnet/contract/CC46HNM74RDUX3ZEPA5VISKDJK5H5EIDETDXZDBE24FQ6S2BPIHUB3RI)
-(90/5/5 split; members 50/30/20; purchases of $42.00 and $18.50):
+[`CBGWV2H546XCQ22BRFMZNAOUWLZOBPHK4KOCR4OVVBIJC7OJIFEIS3QI`](https://stellar.expert/explorer/testnet/contract/CBGWV2H546XCQ22BRFMZNAOUWLZOBPHK4KOCR4OVVBIJC7OJIFEIS3QI)
+(88/5/5 split + 2% Compaki; one-minute periods, pool 60% sellers / 40% buyers;
+then a fundraiser with a $5 target paid 70/30):
 
 | Step | Transaction |
 | --- | --- |
-| create_rewards_marketplace | [bdef43b0e9…](https://stellar.expert/explorer/testnet/tx/bdef43b0e952ed635c4a363ca5b3c869570f7c8ba20c780c448e59fa0e13ed5c) |
-| register_vendor | [58de406537…](https://stellar.expert/explorer/testnet/tx/58de4065374f96ee32a40f69cc4ce72b90afdb9864003d67c254530ef5480f53) |
-| open_period (period 0) | [fef4ab5696…](https://stellar.expert/explorer/testnet/tx/fef4ab569625644be9220dd58ef7f560841a13a906d230803abc9b0a989d6af0) |
-| purchase $42.00 → period 0 | [fd284a2437…](https://stellar.expert/explorer/testnet/tx/fd284a2437718a30cef5fc45a0f574b86a78ac37ae1723052813686ac2edeec7) |
-| purchase $18.50 → period 0 | [1fbd374f76…](https://stellar.expert/explorer/testnet/tx/1fbd374f76534a5e4d78afd6b9ad5d720250e77e0fbacbc9848be9aa5a027991) |
-| close_period (total $3.025) | [c7df8ef711…](https://stellar.expert/explorer/testnet/tx/c7df8ef711a9d9cc22b2e2c81b3326067d3e7994c4ad053714b6261d9c33ef20) |
-| claim member A (50% → $1.5125) | [ac91d054db…](https://stellar.expert/explorer/testnet/tx/ac91d054db15f2689168e2111b81432fb8e25b06842f28623d0797a6c511e021) |
-| claim member B (30% → $0.9075) | [b596d13f6e…](https://stellar.expert/explorer/testnet/tx/b596d13f6e81c84f97709388f81595de620894bf2896dc04af07061dee9adcca) |
-| claim member C (20% → $0.605) | [142fe40acc…](https://stellar.expert/explorer/testnet/tx/142fe40acccbab40b029d877c0d3f6159030144e26c2b162f0bf7985b73a66aa) |
+| create_rewards_marketplace (id 0) | [2b03f5d1f1…](https://stellar.expert/explorer/testnet/tx/2b03f5d1f1a2c27f4817f8790e7342bcf76fdc54c2e611e065363205cff432e4) |
+| register_vendor | [91a7dbd889…](https://stellar.expert/explorer/testnet/tx/91a7dbd8894857c104fe735a88645f91565b6e18c438d11196be978c0c8b2f2c) |
+| register_vendor | [c1f42834f0…](https://stellar.expert/explorer/testnet/tx/c1f42834f0e74859d78a9ffa641ef9dc037fe1e5fc0672aeb2db197a5cebfb7d) |
+| purchase $40.00 → period 1 | [7ceaf16544…](https://stellar.expert/explorer/testnet/tx/7ceaf16544cb2afea0d55ba98074df339619a3ce9da6d8a972974873badce75b) |
+| purchase $60.00 → period 1 | [6a6edac53d…](https://stellar.expert/explorer/testnet/tx/6a6edac53d05b307157010ceebde2ef0be8c78df71d7177c7fd0b859edd00703) |
+| distribute period 1 ($5.00; next: 30% sellers / 70% buyers) | [24ec179c49…](https://stellar.expert/explorer/testnet/tx/24ec179c491a83e71642309619ab8aadf7d8adb9a45dd801c2cc410b4c8248db) |
+| claim vendor 1 → $1.20 | [58426ecc72…](https://stellar.expert/explorer/testnet/tx/58426ecc72d574f176cc3863342feece7e28aefba3bc787d0ced28bc0cc4f31d) |
+| claim vendor 2 → $1.80 | [e7a5ad2e42…](https://stellar.expert/explorer/testnet/tx/e7a5ad2e428f6fac24ba57f788f144b02a8b68a0152a234ec744935b7d71c33b) |
+| claim buyer A → $0.80 | [cb1394dff4…](https://stellar.expert/explorer/testnet/tx/cb1394dff4d6e00eef5c0c38dc6269fa09618ed8c6e38a6a49b44851ea09fc00) |
+| claim buyer B → $1.20 | [13309dc4c5…](https://stellar.expert/explorer/testnet/tx/13309dc4c5ef385235a940cf43d9807046a93408920054bd514693344e664085) |
+| purchase $10.00 → period 2: sellers $0.15 / buyers $0.35 | [df1c696898…](https://stellar.expert/explorer/testnet/tx/df1c6968989c47ecd6c3ef7ccc5f25a67dac217409bf99c277c3e73a6d832c4c) |
+| create_fundraise_marketplace (id 1) | [cc196b403e…](https://stellar.expert/explorer/testnet/tx/cc196b403e17eac15d29fb05c3f4ef4e0790516739a8dd2d1b3807b85d01546d) |
+| register_vendor | [36fab77091…](https://stellar.expert/explorer/testnet/tx/36fab7709153e9e9233ce5875463d02394fd72b610cf61953648a854caf5db60) |
+| purchase $60.00 → raised $3.00 | [085942b8c7…](https://stellar.expert/explorer/testnet/tx/085942b8c7488c6b4cd1ec614786c7605423ac6aeff65089a47753e852fc3db1) |
+| purchase $40.00 → raised $5.00 | [13ee71c5dc…](https://stellar.expert/explorer/testnet/tx/13ee71c5dcdfd4977b2714ee4267c1120feec613b138584217e0a2d268eeadb0) |
+| release_fundraise ($5.00 → 70% / 30%; next target $8) | [fe28ae07f8…](https://stellar.expert/explorer/testnet/tx/fe28ae07f87b4e07e27a82d93bfa1981e9b433dc64e88414d063b5c9c50ae09b) |
 
 | Rejected action | Contract answer |
 | --- | --- |
-| purchase before any period | `NoActivePeriod` |
-| close before end | `PeriodNotEnded` |
-| claim before close | `PeriodNotClosed` |
-| operator redirects the running period (operator auth accepted) | `PeriodActive` |
-| operator withdraws the treasury via the token (own-funds control accepted) | `Unauthorized` |
-| second claim by member A | `AlreadyClaimed` |
+| claim before the distribution | `PeriodNotEnded` |
+| operator claim-for-someone (control: operator claiming for its own address: authorization accepted) | `Unauthorized` |
+| operator withdraw (control: operator moving its own tokens: accepted) | `Unauthorized` |
+| new rules for the next period without the operator | `Unauthorized` |
+| second claim by buyer A | `AlreadyClaimed` |
+| claim by someone who didn't sell or buy | `NothingToClaim` |
+| release below the target | `GoalNotReached` |
+| a stranger choosing the next target | `Unauthorized` |
 
-That contract is a reference deployment made with a fresh `CPKUSD` asset. The
-pre-ideathon contract
-[`CCCXYF55…QH2U`](https://stellar.expert/explorer/testnet/contract/CCCXYF55U6M44A6RK2WFUXEZDNPMCUI7YDR3YPBBEGWGEO4OSIGZQH2U)
-has no Community Rewards; see [Migrating](#migrating-an-existing-deployment).
+The same contract was then upgraded in place with
+`npm run deploy:testnet -- --upgrade` to code `0a886a08f2ab2c36…` (`version()` =
+4). Its address, both marketplaces, the distributed period, the
+new 30/70 split and the fundraiser's round 2 target were all still there.
 
 ## Before and during the ideathon
 

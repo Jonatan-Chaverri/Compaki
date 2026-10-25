@@ -315,6 +315,16 @@ mod community {
         c.env.ledger().set_timestamp(now + seconds);
     }
 
+    /// Lets the current period run its length, then distributes it unchanged.
+    pub fn end_period(c: &C, id: u64) -> i128 {
+        advance(c, PERIOD);
+        c.client.distribute(&id, &None)
+    }
+
+    pub fn rules(vendor: u32, buyer: u32, seconds: u64) -> Option<RewardsRules> {
+        Some(RewardsRules { vendor_pool_bps: vendor, buyer_pool_bps: buyer, period_seconds: seconds })
+    }
+
     mod rewards {
         use super::*;
 
@@ -335,21 +345,13 @@ mod community {
                 }
             );
             assert_eq!(c.token.balance(&c.contract), 5 * USD);
-            assert_eq!(
-                c.client.get_period(&id, &0),
-                PeriodTotals {
-                    vendor_pool: 3 * USD,
-                    buyer_pool: 2 * USD,
-                    vendor_volume: 100 * USD,
-                    buyer_volume: 100 * USD,
-                    total_claimed: 0,
-                }
-            );
+            let totals = c.client.get_period(&id, &0);
+            assert_eq!((totals.vendor_pool, totals.buyer_pool), (3 * USD, 2 * USD));
+            assert_eq!((totals.vendor_volume, totals.buyer_volume), (100 * USD, 100 * USD));
+            assert_eq!((totals.start_ts, totals.end_ts, totals.distributed), (T0, 0, false));
             let status = c.client.rewards_status(&id);
-            assert_eq!(status.start_ts, T0);
-            assert_eq!(status.period_seconds, PERIOD);
+            assert_eq!((status.current_period, status.period_start, status.period_end), (0, T0, T0 + PERIOD));
             assert_eq!((status.vendor_pool_bps, status.buyer_pool_bps), (6_000, 4_000));
-            assert_eq!(status.current_period, 0);
             assert_eq!(status.total_contributed, 5 * USD);
         }
 
@@ -360,7 +362,7 @@ mod community {
             // $400 of sales → $20 community: $12 for vendors, $8 for buyers.
             c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
             c.client.purchase(&id, &c.b2, &c.v2, &(300 * USD));
-            advance(&c, PERIOD);
+            assert_eq!(end_period(&c, id), 20 * USD);
 
             let before = [&c.v1, &c.v2, &c.b1, &c.b2].map(|a| c.token.balance(a));
             assert_eq!(c.client.claim(&id, &0, &c.v1), 3 * USD); // 12 × 100/400
@@ -378,6 +380,113 @@ mod community {
         }
 
         #[test]
+        fn distribution_waits_for_the_period_length() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            advance(&c, PERIOD - 1);
+            assert_eq!(c.client.try_distribute(&id, &None), Err(Ok(Error::PeriodNotEnded)));
+            // Until distributed, sales still land in the running period.
+            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(0));
+            advance(&c, 1);
+            assert_eq!(c.client.distribute(&id, &None), 10 * USD);
+            let totals = c.client.get_period(&id, &0);
+            assert_eq!((totals.end_ts, totals.distributed), (T0 + PERIOD, true));
+            // The next period started at the distribution, with the same rules.
+            let status = c.client.rewards_status(&id);
+            assert_eq!((status.current_period, status.period_start), (1, T0 + PERIOD));
+            assert_eq!((status.period_seconds, status.vendor_pool_bps), (PERIOD, 6_000));
+            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(1));
+            assert_eq!(c.client.try_distribute(&id, &None), Err(Ok(Error::PeriodNotEnded)));
+            // A period without sales distributes too (an empty pool).
+            advance(&c, PERIOD);
+            c.client.distribute(&id, &None);
+            advance(&c, PERIOD);
+            assert_eq!(c.client.distribute(&id, &None), 0);
+            assert_eq!(c.client.rewards_status(&id).current_period, 3);
+        }
+
+        #[test]
+        fn operator_sets_the_next_periods_rules_at_distribution() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            advance(&c, PERIOD);
+            c.client.distribute(&id, &rules(2_000, 8_000, 180 * DAY));
+            let status = c.client.rewards_status(&id);
+            assert_eq!((status.vendor_pool_bps, status.buyer_pool_bps), (2_000, 8_000));
+            assert_eq!((status.period_seconds, status.period_end), (180 * DAY, T0 + PERIOD + 180 * DAY));
+
+            // The distributed period kept its own rules: 60% / 40%.
+            assert_eq!(c.client.get_period(&id, &0).vendor_pool_bps, 6_000);
+            assert_eq!(c.client.get_reward(&id, &0, &c.v1).amount, 3 * USD);
+            // The new period uses the new ones: 20% / 80% of $5.
+            c.client.purchase(&id, &c.b2, &c.v2, &(100 * USD));
+            let totals = c.client.get_period(&id, &1);
+            assert_eq!((totals.vendor_pool_bps, totals.vendor_pool, totals.buyer_pool), (2_000, USD, 4 * USD));
+            // …and its new length.
+            advance(&c, PERIOD);
+            assert_eq!(c.client.try_distribute(&id, &None), Err(Ok(Error::PeriodNotEnded)));
+            advance(&c, 150 * DAY);
+            assert_eq!(c.client.distribute(&id, &None), 5 * USD);
+        }
+
+        #[test]
+        fn next_rules_are_validated_and_need_the_operator() {
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            advance(&c, PERIOD);
+            let bad = Err(Ok(Error::InvalidRewardsConfig));
+            assert_eq!(c.client.try_distribute(&id, &rules(6_000, 3_000, PERIOD)), bad);
+            assert_eq!(c.client.try_distribute(&id, &rules(10_001, 0, PERIOD)), bad);
+            assert_eq!(c.client.try_distribute(&id, &rules(5_000, 5_000, MIN_PERIOD_SECONDS - 1)), bad);
+            assert_eq!(c.client.try_distribute(&id, &rules(5_000, 5_000, MAX_PERIOD_SECONDS + 1)), bad);
+
+            // Strict auth: without the operator, new rules are refused…
+            let e = &c.env;
+            e.set_auths(&[]);
+            assert!(c.client.try_distribute(&id, &rules(5_000, 5_000, PERIOD)).is_err());
+            // …and a stranger's signature doesn't count.
+            let stranger = Address::generate(e);
+            e.mock_auths(&[MockAuth {
+                address: &stranger,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "distribute",
+                    args: (id, rules(5_000, 5_000, PERIOD)).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert!(c.client.try_distribute(&id, &rules(5_000, 5_000, PERIOD)).is_err());
+            assert_eq!(c.client.rewards_status(&id).current_period, 0);
+
+            // Without changes, anyone can distribute: no signature at all.
+            e.set_auths(&[]);
+            c.client.distribute(&id, &None);
+            assert_eq!(e.auths(), std::vec![]);
+            assert_eq!(c.client.rewards_status(&id).vendor_pool_bps, 6_000);
+
+            // With changes, exactly the operator signs.
+            e.mock_all_auths();
+            advance(&c, PERIOD);
+            c.client.distribute(&id, &rules(5_000, 5_000, 90 * DAY));
+            assert_eq!(
+                e.auths(),
+                std::vec![(
+                    c.operator.clone(),
+                    AuthorizedInvocation {
+                        function: AuthorizedFunction::Contract((
+                            c.contract.clone(),
+                            Symbol::new(e, "distribute"),
+                            (id, rules(5_000, 5_000, 90 * DAY)).into_val(e),
+                        )),
+                        sub_invocations: std::vec![],
+                    }
+                )]
+            );
+        }
+
+        #[test]
         fn claim_rules() {
             let c = setup();
             let id = rewards_marketplace(&c);
@@ -390,8 +499,11 @@ mod community {
             assert_eq!(c.client.try_claim(&id, &0, &c.b1), Err(Ok(Error::PeriodNotEnded)));
             assert_eq!(c.client.try_claim(&id, &1, &c.b1), Err(Ok(Error::PeriodNotFound)));
             assert_eq!(c.client.try_get_reward(&id, &1, &c.b1), Err(Ok(Error::PeriodNotFound)));
-
+            // The length passing isn't enough: the period must be distributed.
             advance(&c, PERIOD);
+            assert_eq!(c.client.try_claim(&id, &0, &c.b1), Err(Ok(Error::PeriodNotEnded)));
+
+            c.client.distribute(&id, &None);
             assert!(c.client.get_reward(&id, &0, &c.b1).period_ended);
             assert_eq!(c.client.claim(&id, &0, &c.b1), 2 * USD);
             assert!(c.client.get_reward(&id, &0, &c.b1).claimed);
@@ -400,31 +512,23 @@ mod community {
             assert_eq!(c.client.try_claim(&id, &0, &c.b2), Err(Ok(Error::NothingToClaim)));
             // A period without any sale has nothing for anyone.
             assert_eq!(c.client.try_claim(&id, &1, &c.b1), Err(Ok(Error::PeriodNotEnded)));
-            advance(&c, PERIOD);
+            end_period(&c, id);
             assert_eq!(c.client.try_claim(&id, &1, &c.b1), Err(Ok(Error::NothingToClaim)));
         }
 
         #[test]
-        fn periods_follow_automatically() {
+        fn each_period_is_shared_among_its_own_participants() {
             let c = setup();
             let id = rewards_marketplace(&c);
-            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(0));
-            advance(&c, PERIOD - 1);
-            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(0));
-            advance(&c, 1);
-            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).period, Some(1));
-            // Months without sales leave no gap to fill: sales just land in
-            // whichever period is current.
-            advance(&c, 5 * PERIOD);
-            assert_eq!(c.client.purchase(&id, &c.b2, &c.v2, &(100 * USD)).period, Some(6));
-            assert_eq!(c.client.rewards_status(&id).current_period, 6);
-
-            // Each period is shared only among its own participants.
+            c.client.purchase(&id, &c.b1, &c.v1, &(200 * USD));
+            end_period(&c, id);
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            c.client.purchase(&id, &c.b2, &c.v2, &(100 * USD));
+            end_period(&c, id);
             assert_eq!(c.client.get_reward(&id, &0, &c.b1).amount, 4 * USD);
             assert_eq!(c.client.get_reward(&id, &1, &c.b1).amount, 2 * USD);
-            assert_eq!(c.client.get_reward(&id, &6, &c.b1).amount, 0);
-            assert_eq!(c.client.get_reward(&id, &6, &c.b2).amount, 2 * USD);
-            assert_eq!(c.client.get_period(&id, &3).vendor_volume, 0);
+            assert_eq!(c.client.get_reward(&id, &1, &c.b2).amount, 2 * USD);
+            assert_eq!(c.client.get_reward(&id, &0, &c.b2).amount, 0);
         }
 
         #[test]
@@ -434,26 +538,24 @@ mod community {
             c.client.purchase(&id, &c.v1, &c.v1, &(100 * USD));
             let view = c.client.get_reward(&id, &0, &c.v1);
             assert_eq!((view.vendor_volume, view.buyer_volume), (100 * USD, 100 * USD));
-            advance(&c, PERIOD);
+            end_period(&c, id);
             assert_eq!(c.client.claim(&id, &0, &c.v1), 5 * USD);
         }
 
         /// Selling to yourself to win a bigger share of other people's pool
         /// always loses money: the operator and platform shares of the fake
-        /// sales are gone for good, and what comes back is at most what the
-        /// fake sales put in plus the share taken from others, which is
+        /// sales are gone for good, and the share taken from others is
         /// exactly cancelled by the share of its own contribution given away.
         #[test]
         fn wash_trading_never_pays() {
             let c = setup();
             for wash in [1, 50, 100, 1_000, 5_000] {
                 let start = c.token.balance(&c.v1);
-                let id2 = rewards_marketplace(&c);
-                c.client.purchase(&id2, &c.b1, &c.v2, &(100 * USD));
-                c.client.purchase(&id2, &c.v1, &c.v1, &(wash * USD));
-                advance(&c, PERIOD);
-                let period = c.client.rewards_status(&id2).current_period - 1;
-                c.client.claim(&id2, &period, &c.v1);
+                let id = rewards_marketplace(&c);
+                c.client.purchase(&id, &c.b1, &c.v2, &(100 * USD));
+                c.client.purchase(&id, &c.v1, &c.v1, &(wash * USD));
+                end_period(&c, id);
+                c.client.claim(&id, &0, &c.v1);
                 let net = c.token.balance(&c.v1) - start;
                 // Loses at least the 5% operator + 2% platform shares.
                 assert!(net <= -(wash * USD * 7 / 100), "wash {wash}: net {net}");
@@ -475,7 +577,7 @@ mod community {
                 c.client.purchase(&id, b, vendor, &(97 + 13 * i as i128));
             }
             let totals = c.client.get_period(&id, &0);
-            advance(&c, PERIOD);
+            end_period(&c, id);
             let mut paid = 0;
             for who in buyers.iter().chain([&c.v1, &c.v2]) {
                 if let Ok(Ok(amount)) = c.client.try_claim(&id, &0, who) {
@@ -497,10 +599,9 @@ mod community {
                     .create_rewards_marketplace(&c.operator, &8_800, &500, &500, &PERIOD, &vendor_pool);
                 c.client.register_vendor(&id, &c.v1);
                 c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
-                advance(&c, PERIOD);
-                let k = c.client.rewards_status(&id).current_period - 1;
-                assert_eq!(c.client.get_reward(&id, &k, &c.v1).amount, vendor_gets);
-                assert_eq!(c.client.get_reward(&id, &k, &c.b1).amount, buyer_gets);
+                end_period(&c, id);
+                assert_eq!(c.client.get_reward(&id, &0, &c.v1).amount, vendor_gets);
+                assert_eq!(c.client.get_reward(&id, &0, &c.b1).amount, buyer_gets);
             }
         }
 
@@ -534,7 +635,7 @@ mod community {
             let c = setup();
             let id = rewards_marketplace(&c);
             c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
-            advance(&c, PERIOD);
+            end_period(&c, id);
             let treasury = c.token.balance(&c.contract);
             assert_eq!(treasury, 5 * USD);
 
@@ -590,10 +691,12 @@ mod community {
             c.client.purchase(&a, &c.b1, &c.v1, &(100 * USD));
             c.client.purchase(&b, &c.b2, &c.v2, &(300 * USD));
             advance(&c, PERIOD);
+            c.client.distribute(&a, &None);
+            assert_eq!(c.client.try_claim(&b, &0, &c.b2), Err(Ok(Error::PeriodNotEnded)));
+            c.client.distribute(&b, &None);
             assert_eq!(c.client.try_claim(&a, &0, &c.b2), Err(Ok(Error::NothingToClaim)));
             assert_eq!(c.client.claim(&a, &0, &c.b1), 2 * USD);
             assert_eq!(c.client.claim(&b, &0, &c.b2), 6 * USD);
-            assert_eq!(c.client.get_period(&a, &0).buyer_pool, 2 * USD);
         }
 
         #[test]
@@ -614,7 +717,7 @@ mod community {
             assert_eq!(auths[0].0, c.b1);
 
             // claim: exactly the participant.
-            advance(&c, PERIOD);
+            end_period(&c, id);
             c.client.claim(&id, &0, &c.v1);
             assert_eq!(
                 e.auths(),
@@ -641,7 +744,7 @@ mod community {
                 .is_err());
             assert!(c.client.try_register_vendor(&id, &c.b2).is_err());
 
-            // b1 claiming with its own signature works; it can't pay someone else.
+            // b1 claiming with its own signature works.
             e.mock_auths(&[MockAuth {
                 address: &c.b1,
                 invoke: &MockAuthInvoke {
@@ -665,6 +768,7 @@ mod community {
             assert_eq!(c.token.balance(&fund), 8_400_000);
             assert_eq!(c.token.balance(&c.contract), 0);
             assert_eq!(c.client.try_rewards_status(&id), Err(Ok(Error::RewardsNotEnabled)));
+            assert_eq!(c.client.try_distribute(&id, &None), Err(Ok(Error::RewardsNotEnabled)));
             assert_eq!(c.client.try_get_fundraise(&id), Err(Ok(Error::FundraiseNotEnabled)));
         }
     }
@@ -697,16 +801,18 @@ mod community {
             F { c, id, r1, r2 }
         }
 
-        /// Two $100 sales raise the $10 target; then anyone releases it.
-        fn reach_and_release(f: &F) {
+        /// Two $100 sales raise the $10 target.
+        fn reach_target(f: &F) {
             let c = &f.c;
             assert_eq!(c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD)).round, Some(0));
-            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            assert_eq!(c.client.try_release_fundraise(&f.id, &None), Err(Ok(Error::GoalNotReached)));
             c.client.purchase(&f.id, &c.b2, &c.v1, &(100 * USD));
-            assert_eq!(c.client.release_fundraise(&f.id), 10 * USD);
-            assert_eq!(c.token.balance(&f.r1), 7 * USD);
-            assert_eq!(c.token.balance(&f.r2), 3 * USD);
-            assert_eq!(c.token.balance(&c.contract), 0);
+        }
+
+        fn assert_paid_out(f: &F, r1: i128, r2: i128) {
+            assert_eq!(f.c.token.balance(&f.r1), r1);
+            assert_eq!(f.c.token.balance(&f.r2), r2);
+            assert_eq!(f.c.token.balance(&f.c.contract), 0);
         }
 
         #[test]
@@ -715,19 +821,18 @@ mod community {
             let c = &f.c;
             c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
             let state = c.client.get_fundraise(&f.id);
-            assert_eq!((state.raised, state.round, state.goal_reached), (5 * USD, 0, false));
+            assert_eq!((state.raised, state.round, state.goal_reached, state.collecting), (5 * USD, 0, false, true));
             assert_eq!(c.token.balance(&c.contract), 5 * USD);
             c.client.purchase(&f.id, &c.b2, &c.v1, &(100 * USD));
 
-            // Permissionless: no signature at all is needed.
+            // Permissionless with the default next step: no signature at all.
             c.env.set_auths(&[]);
-            assert_eq!(c.client.release_fundraise(&f.id), 10 * USD);
+            assert_eq!(c.client.release_fundraise(&f.id, &None), 10 * USD);
             assert_eq!(c.env.auths(), std::vec![]);
             let state = c.client.get_fundraise(&f.id);
             assert_eq!((state.raised, state.round, state.goal_reached), (0, 1, true));
             assert_eq!((state.total_raised, state.total_released), (10 * USD, 10 * USD));
-            assert_eq!(c.token.balance(&f.r1), 7 * USD);
-            assert_eq!(c.token.balance(&f.r2), 3 * USD);
+            assert_paid_out(&f, 7 * USD, 3 * USD);
         }
 
         #[test]
@@ -735,49 +840,101 @@ mod community {
             let f = fundraiser(GoalPolicy::NewRound);
             let c = &f.c;
             c.client.purchase(&f.id, &c.b1, &c.v1, &(300 * USD)); // $15 raised
-            assert_eq!(c.client.release_fundraise(&f.id), 15 * USD);
-            assert_eq!(c.token.balance(&f.r1), 10 * USD + 5_000_000); // $10.50
-            assert_eq!(c.token.balance(&f.r2), 4 * USD + 5_000_000); // $4.50
+            assert_eq!(c.client.release_fundraise(&f.id, &None), 15 * USD);
+            assert_paid_out(&f, 10 * USD + 5_000_000, 4 * USD + 5_000_000); // $10.50 / $4.50
         }
 
         #[test]
         fn stop_gives_later_community_shares_to_the_vendor() {
             let f = fundraiser(GoalPolicy::Stop);
             let c = &f.c;
-            reach_and_release(&f);
+            reach_target(&f);
+            c.client.release_fundraise(&f.id, &None);
+            assert!(!c.client.get_fundraise(&f.id).collecting);
             let vendor_before = c.token.balance(&c.v1);
             let receipt = c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
             assert_eq!(receipt.vendor_amount, 93 * USD);
             assert_eq!((receipt.community_amount, receipt.round), (0, None));
             assert_eq!(c.token.balance(&c.v1) - vendor_before, 93 * USD);
             assert_eq!(c.token.balance(&c.contract), 0);
-            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            assert_eq!(c.client.try_release_fundraise(&f.id, &None), Err(Ok(Error::GoalNotReached)));
         }
 
         #[test]
         fn new_round_raises_again_toward_the_same_target() {
             let f = fundraiser(GoalPolicy::NewRound);
             let c = &f.c;
-            reach_and_release(&f);
+            reach_target(&f);
+            c.client.release_fundraise(&f.id, &None);
             assert_eq!(c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD)).round, Some(1));
-            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            assert_eq!(c.client.try_release_fundraise(&f.id, &None), Err(Ok(Error::GoalNotReached)));
             c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
-            assert_eq!(c.client.release_fundraise(&f.id), 10 * USD);
-            assert_eq!(c.token.balance(&f.r1), 14 * USD);
+            assert_eq!(c.client.release_fundraise(&f.id, &None), 10 * USD);
+            assert_paid_out(&f, 14 * USD, 6 * USD);
             assert_eq!(c.client.get_fundraise(&f.id).round, 2);
         }
 
         #[test]
-        fn direct_pays_recipients_with_every_later_sale() {
-            let f = fundraiser(GoalPolicy::Direct);
+        fn operator_picks_the_next_target_or_stops() {
+            let f = fundraiser(GoalPolicy::NewRound);
             let c = &f.c;
-            reach_and_release(&f);
-            let receipt = c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
-            assert_eq!((receipt.community_amount, receipt.round), (5 * USD, None));
-            assert_eq!(c.token.balance(&f.r1), 7 * USD + 35_000_000);
-            assert_eq!(c.token.balance(&f.r2), 3 * USD + 15_000_000);
-            assert_eq!(c.token.balance(&c.contract), 0);
-            assert_eq!(c.client.get_fundraise(&f.id).total_released, 15 * USD);
+            reach_target(&f);
+            // A new $20 target for round 2.
+            c.client.release_fundraise(&f.id, &Some(20 * USD));
+            assert_eq!(
+                c.env.auths(),
+                std::vec![(
+                    c.operator.clone(),
+                    AuthorizedInvocation {
+                        function: AuthorizedFunction::Contract((
+                            c.contract.clone(),
+                            Symbol::new(&c.env, "release_fundraise"),
+                            (f.id, Some(20 * USD)).into_val(&c.env),
+                        )),
+                        sub_invocations: std::vec![],
+                    }
+                )]
+            );
+            let state = c.client.get_fundraise(&f.id);
+            assert_eq!((state.target, state.round, state.collecting), (20 * USD, 1, true));
+            for _ in 0..3 {
+                c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            }
+            assert_eq!(c.client.try_release_fundraise(&f.id, &None), Err(Ok(Error::GoalNotReached)));
+            c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            // A next target of 0 stops fundraising, even with NewRound.
+            assert_eq!(c.client.release_fundraise(&f.id, &Some(0)), 20 * USD);
+            assert!(!c.client.get_fundraise(&f.id).collecting);
+            assert_eq!(c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD)).community_amount, 0);
+            assert_paid_out(&f, 21 * USD, 9 * USD);
+        }
+
+        #[test]
+        fn next_target_needs_the_operator_and_cant_be_negative() {
+            let f = fundraiser(GoalPolicy::Stop);
+            let c = &f.c;
+            reach_target(&f);
+            assert_eq!(c.client.try_release_fundraise(&f.id, &Some(-1)), Err(Ok(Error::InvalidGoal)));
+            let e = &c.env;
+            e.set_auths(&[]);
+            assert!(c.client.try_release_fundraise(&f.id, &Some(5 * USD)).is_err());
+            let stranger = Address::generate(e);
+            e.mock_auths(&[MockAuth {
+                address: &stranger,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "release_fundraise",
+                    args: (f.id, Some(5 * USD)).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert!(c.client.try_release_fundraise(&f.id, &Some(5 * USD)).is_err());
+            assert_eq!(c.client.get_fundraise(&f.id).raised, 10 * USD);
+            // The operator can revive a Stop fundraiser with a new target.
+            e.mock_all_auths();
+            c.client.release_fundraise(&f.id, &Some(5 * USD));
+            let state = c.client.get_fundraise(&f.id);
+            assert_eq!((state.target, state.collecting), (5 * USD, true));
         }
 
         #[test]
@@ -798,7 +955,7 @@ mod community {
             c.client.purchase(&id, &c.b1, &c.v1, &101); // 101 - 88 - 5 - 2 = 6 raised
             c.client.purchase(&id, &c.b1, &c.v1, &(7 * USD + 3));
             let raised = c.client.get_fundraise(&id).raised;
-            assert_eq!(c.client.release_fundraise(&id), raised);
+            assert_eq!(c.client.release_fundraise(&id, &None), raised);
             let paid: i128 = rs.iter().map(|r| c.token.balance(r)).sum();
             assert_eq!(paid, raised);
             assert_eq!(c.token.balance(&c.contract), 0);
@@ -861,24 +1018,85 @@ mod community {
                 }]);
                 assert!(c.token.try_transfer(&c.contract, thief, &held).is_err());
             }
-            // Below target, nothing can be released, not even to the recipients.
-            assert_eq!(c.client.try_release_fundraise(&f.id), Err(Ok(Error::GoalNotReached)));
+            // Below target, nothing can be released, not even by the operator.
+            c.env.mock_all_auths();
+            assert_eq!(c.client.try_release_fundraise(&f.id, &None), Err(Ok(Error::GoalNotReached)));
+            assert_eq!(c.client.try_release_fundraise(&f.id, &Some(USD)), Err(Ok(Error::GoalNotReached)));
             assert_eq!(c.token.balance(&c.contract), held);
             // Rewards entry points don't apply to a fundraiser and vice versa.
-            c.env.mock_all_auths();
             assert_eq!(c.client.try_claim(&f.id, &0, &c.b1), Err(Ok(Error::RewardsNotEnabled)));
+            assert_eq!(c.client.try_distribute(&f.id, &None), Err(Ok(Error::RewardsNotEnabled)));
             let rewards = rewards_marketplace(c);
-            assert_eq!(c.client.try_release_fundraise(&rewards), Err(Ok(Error::FundraiseNotEnabled)));
+            assert_eq!(c.client.try_release_fundraise(&rewards, &None), Err(Ok(Error::FundraiseNotEnabled)));
         }
 
         #[test]
         fn rules_are_public() {
-            let f = fundraiser(GoalPolicy::Direct);
+            let f = fundraiser(GoalPolicy::NewRound);
             let state = f.c.client.get_fundraise(&f.id);
             assert_eq!(state.target, 10 * USD);
             assert_eq!(state.recipients, vec![&f.c.env, f.r1.clone(), f.r2.clone()]);
             assert_eq!(state.shares_bps, vec![&f.c.env, 7_000u32, 3_000]);
-            assert_eq!(state.policy, GoalPolicy::Direct);
+            assert_eq!(state.policy, GoalPolicy::NewRound);
+        }
+    }
+
+    mod upgrade {
+        use super::*;
+
+        /// Calls keep the (small) instance alive but never extend the code,
+        /// whose rent would otherwise land on a buyer's transaction.
+        #[test]
+        fn calls_extend_the_instance_but_not_the_code() {
+            use soroban_sdk::testutils::Deployer as _;
+            let c = setup();
+            let id = rewards_marketplace(&c);
+            let e = &c.env;
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+            // The instance was below the threshold at registration and got
+            // the full extension; the code kept its initial, shorter TTL.
+            assert_eq!(e.deployer().get_contract_instance_ttl(&c.contract), 30 * 17_280);
+            assert!(e.deployer().get_contract_code_ttl(&c.contract) < 25 * 17_280);
+        }
+
+        #[test]
+        fn only_the_admin_can_upgrade() {
+            let c = setup();
+            let e = &c.env;
+            assert_eq!(c.client.version(), CONTRACT_VERSION);
+            assert_eq!(c.client.get_admin(), c.admin);
+            let hash = BytesN::from_array(e, &[7; 32]);
+            for who in [&c.operator, &c.b1] {
+                e.mock_auths(&[MockAuth {
+                    address: who,
+                    invoke: &MockAuthInvoke {
+                        contract: &c.contract,
+                        fn_name: "upgrade",
+                        args: (hash.clone(),).into_val(e),
+                        sub_invokes: &[],
+                    },
+                }]);
+                assert!(c.client.try_upgrade(&hash).is_err());
+            }
+            e.set_auths(&[]);
+            assert!(c.client.try_upgrade(&hash).is_err());
+
+            // With the admin's signature the code is replaced, keeping the
+            // address and the stored marketplaces. Uses the release build of
+            // this contract when it exists (cargo build --target wasm32v1-none --release).
+            let wasm_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/wasm32v1-none/release/compaki_marketplace.wasm");
+            let Ok(bytes) = std::fs::read(wasm_path) else {
+                std::println!("skipping the upgrade itself: build the wasm first");
+                return;
+            };
+            e.mock_all_auths();
+            let id = rewards_marketplace(&c);
+            let uploaded = e.deployer().upload_contract_wasm(soroban_sdk::Bytes::from_slice(e, &bytes));
+            c.client.upgrade(&uploaded);
+            assert_eq!(e.auths()[0].0, c.admin);
+            assert_eq!(c.client.version(), CONTRACT_VERSION);
+            assert_eq!(c.client.get_marketplace(&id).operator, c.operator);
+            assert_eq!(c.client.rewards_status(&id).vendor_pool_bps, 6_000);
         }
     }
 }

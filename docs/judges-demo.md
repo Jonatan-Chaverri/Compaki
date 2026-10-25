@@ -1,93 +1,93 @@
 # Community Rewards — judges' demo (about 5 minutes)
 
 Everything runs on **Stellar testnet** with a self-issued demo asset (`CPKUSD`,
-not Circle USDC). Every on-chain step has a "view transaction ↗" link to
-stellar.expert.
+not Circle USDC). Every on-chain step has a "verify ↗" link to stellar.expert.
 
 **Prep** (see the README for full setup):
 
 ```bash
 cd apps/api
-DEMO_SEED_PASSWORD='choose-a-demo-password' SEED_PERIOD_MINUTES=4 npm run demo:seed
+DEMO_SEED_PASSWORD='choose-a-demo-password' SEED_PERIOD_SECONDS=600 npm run demo:seed
 npm run dev    # and in apps/web: npm run dev
 ```
 
+`SEED_PERIOD_SECONDS=600` gives the marketplace 10-minute periods so a whole
+period fits in the demo (the wizard offers monthly to yearly, plus this
+testnet-only option).
+
 Keep two browser windows open: **operator** (`maria@cafedealtura.example`) and
-**member** (`escuela@cafedealtura.example`). Both use `DEMO_SEED_PASSWORD`.
+**buyer** (`marco@example.com`). Both use `DEMO_SEED_PASSWORD`.
 
-## 1. Select the marketplace
+## 1. Show the rules
 
-Open `http://localhost:3000/m/cafe-de-altura`. The banner reads *"5% of every
-sale funds Community Rewards treasury (on-chain)"*. Signed in as María, open
-the account menu → dashboard → **Community rewards** tab.
+Open `http://localhost:3000/m/cafe-de-altura/community`, or, signed in as
+María, the dashboard → **Community rewards** tab. Point at:
 
-## 2. Show the rewards configuration
+- **In the rewards fund / Total contributed / Claimed**, read live from the
+  contract (link at the top).
+- The rules: shared every 10 minutes, **60% to sellers by sales, 40% to
+  buyers by purchases**, and the current period's countdown.
+- The current period's sellers and buyers with their estimated rewards (from
+  the five seeded sales).
 
-On the Community rewards tab, point at:
+## 2. Make a purchase
 
-- **Held in treasury / Contributed / Claimed**, read live from the contract
-  (link at the top).
-- **Period #0**: status *Active* with a ledger-time countdown, and members
-  50% / 30% / 20% with their projected rewards. The *opened ↗* link is the
-  `open_period` transaction that froze these shares.
+In the buyer window, add a product to the cart and pay. Each cart item
+settles as its own atomic `purchase` transaction (vendor 83% / marketplace
+10% / community 5% / Compaki 2%).
 
-## 3. Make a purchase
+- The receipt shows *"Community Rewards fund · period 1"* with a link to the
+  transaction; on stellar.expert it shows four transfers, one of them **to
+  the contract address**.
+- The dashboard refreshes every 10 s: the period's pools grow, and Marco
+  appears as a buyer.
 
-In another window (any signed-in buyer, e.g. `marco@example.com`), add a
-product to the cart and pay. Checkout settles each cart item as its own
-atomic `purchase` transaction (vendor 85% / operator 10% / community 5%).
+## 3. Change the next period's rules
 
-## 4. Verify the community contribution
+Still on the rewards tab, in **Next period's rules**, choose for example
+*every 6 months* and 30% sellers / 70% buyers → **Schedule these rules**. The
+running period keeps 60/40; the change is passed to the contract at the next
+distribution, signed by the operator.
 
-- The receipt shows *"Community Rewards treasury · period #0"* with a link to
-  the purchase transaction.
-- Back on the dashboard (it auto-refreshes every 10 s), **Collected** for the
-  period and **Held in treasury** have both increased. Expand *contributing
-  sales* to see each purchase tx.
-- On stellar.expert the purchase transaction shows three transfers, one of
-  them **to the contract address**, plus a `contrib` event.
+## 4. Distribution
 
-## 5. Close the period
+When the countdown reaches zero, the API distributes the period within about
+30 seconds by itself (or click **Distribute now**). The period becomes
+*Distributed · rewards can be claimed* with a *Verify distribution ↗* link,
+the next period starts with the new rules, and its card shows the new split.
 
-When the countdown hits zero the status becomes *Ended — ready to close*.
+## 5. Claim a reward
 
-- Optional: buy again now and checkout is refused with *"Community Rewards
-  period isn't open…"*. No money moves; the contract rejected it with
-  `NoActivePeriod`.
-- Click **Close period & fix rewards**. After about 5–10 s you get "confirmed
-  on-chain" with a tx link, and each member row shows its final **Reward**
-  (they sum exactly to the period total).
+In the buyer window, open the account menu → **My rewards** (`/rewards`) →
+**Collect reward**. The banner moves from pending to "$X received" with a tx
+link, and the operator's tab shows Marco as *claimed ↗*. Claiming again is
+refused (`AlreadyClaimed`).
 
-## 6. Claim a reward
+## 6. Show that withdrawals and claims for others fail
 
-In the member window, open account menu → **My rewards** (`/rewards`) →
-**Claim**. The banner moves from pending to "$X received: confirmed on-chain"
-with a tx link. The operator's tab now shows that member as *claimed ↗*.
-Clicking Claim again (or calling the API) returns *already claimed*
-(`AlreadyClaimed`).
+Open **How is the community fund protected?** on the rewards tab:
 
-## 7. Show that unauthorized withdrawals and rule changes fail
-
-Re-open a period first (form on the rewards tab → *Reuse members of period #0*
-→ 2 minutes → **Commit rules & open period**), then use **Try to break the
-rules**:
-
-- **Redirect the running period to another address** is rejected with
-  `PeriodActive`. The control shows the operator's signature *was* accepted;
-  the contract's own rule said no.
-- **Withdraw the treasury to your account** is rejected with `Unauthorized`.
+- **Withdraw the fund to your account** is rejected with `Unauthorized`.
   Even with the operator's signature, the token contract refuses to move
   funds out of the Compaki contract. The control (the operator moving its
   *own* tokens through the same harness) is accepted.
+- **Claim a buyer's reward for them** is rejected with `Unauthorized`: only
+  the participant's own signature can claim.
 
 These checks are evaluated against the live testnet contracts with enforced
 authorization and are never submitted.
 
-**CLI alternative.** `npm run demo:rewards` runs the whole story on-chain
-(including every rejection) in about 2 minutes and prints a table of
-transactions.
+**CLI alternative.** `npm run demo:rewards` runs the whole story on-chain —
+rewards (with new rules at the distribution) and a fundraiser (with a new
+target chosen at the payout), including every rejection — in about 2 minutes
+and prints a table of transactions.
 
-**Be upfront with judges:** accounts are custodial, so the backend signs for
-users. The contract guarantees the distribution rules and that nobody can drain
-the treasury, but payouts land in custodial accounts. See *Guarantees and
-limitations* in the README.
+**Be upfront with judges:**
+
+- Operator and older accounts are custodial, so the backend signs for them;
+  people who sign in with email or their own Stellar wallet sign their
+  purchases and claims themselves.
+- The contract is **upgradeable** by Compaki's admin key (same address, data
+  kept). The guarantees hold for the deployed code version; trusting the
+  admin key is part of the model. See *Guarantees and limitations* in the
+  README.

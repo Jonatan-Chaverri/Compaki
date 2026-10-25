@@ -6,7 +6,7 @@ import type { UiTranslator } from "@/i18n/types";
 
 export type CommunityMode = "classic" | "rewards" | "fundraise";
 export type PeriodStatus = "current" | "ended";
-export type GoalPolicy = "stop" | "new-round" | "direct";
+export type GoalPolicy = "stop" | "new-round";
 
 export interface ParticipantView {
   address: string;
@@ -21,14 +21,17 @@ export interface ParticipantView {
 export interface PeriodView {
   periodId: number;
   startTs: number;
+  /** When it was distributed; for the current period, when it becomes due. */
   endTs: number;
   status: PeriodStatus;
+  vendorPoolBps: number;
   vendorPoolUsd: number;
   buyerPoolUsd: number;
   salesUsd: number;
   claimedUsd: number;
   salesCount: number;
   participants: ParticipantView[];
+  distributionTxHash: string | null;
 }
 
 export interface RewardsView {
@@ -41,8 +44,13 @@ export interface RewardsView {
   periodSeconds: number | null;
   vendorPoolBps: number | null;
   buyerPoolBps: number | null;
-  startTs: number | null;
   currentPeriod: number | null;
+  periodStart: number | null;
+  /** The running period can be distributed from this time on. */
+  periodEnd: number | null;
+  distributionDue: boolean;
+  /** Rules the operator scheduled for the next period (null = keep the current ones). */
+  nextRules: { vendorPoolBps: number; periodSeconds: number } | null;
   ledgerTime: number | null;
   treasury: { contributedUsd: number; claimedUsd: number; heldUsd: number } | null;
   periods: PeriodView[];
@@ -63,6 +71,8 @@ export interface FundraiseView {
   totalReleasedUsd: number;
   goalReached: boolean;
   collecting: boolean;
+  /** Target the operator scheduled for the next round (0 = stop; null = the policy's default). */
+  nextTargetUsd: number | null;
   releasable: boolean;
   recipients: { address: string; label: string; name: string | null; shareBps: number }[];
   releases: { round: number; amountUsd: number; txHash: string; verifyUrl: string; createdAt: string }[];
@@ -93,10 +103,6 @@ export function getPolicyText(t: UiTranslator): Record<GoalPolicy, { label: stri
   "new-round": {
     label: t("policyNewRoundLabel"),
     detail: t("policyNewRoundDetail"),
-  },
-  direct: {
-    label: t("policyDirectLabel"),
-    detail: t("policyDirectDetail"),
   },
 }; }
 

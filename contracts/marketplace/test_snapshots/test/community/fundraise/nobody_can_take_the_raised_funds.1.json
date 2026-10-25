@@ -361,6 +361,8 @@
     [],
     [],
     [],
+    [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
@@ -855,6 +857,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "collecting"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "goal_reached"
                       },
                       "val": {
@@ -1003,6 +1013,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "current_period"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "period_seconds"
                       },
                       "val": {
@@ -1011,7 +1029,7 @@
                     },
                     {
                       "key": {
-                        "symbol": "start_ts"
+                        "symbol": "period_start"
                       },
                       "val": {
                         "u64": 1700000000
@@ -2226,7 +2244,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -2918,6 +2936,14 @@
             ],
             "data": {
               "map": [
+                {
+                  "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
                 {
                   "key": {
                     "symbol": "goal_reached"
@@ -4023,7 +4049,12 @@
               }
             ],
             "data": {
-              "u64": 0
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
             }
           }
         }
@@ -4109,6 +4140,138 @@
                   "vec": [
                     {
                       "u64": 0
+                    },
+                    "void"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
+              },
+              {
+                "symbol": "release_fundraise"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 0
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 10000000
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "release_fundraise"
+              }
+            ],
+            "data": {
+              "error": {
+                "contract": 15
+              }
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 15
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 15
+                }
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "contract try_call failed"
+                },
+                {
+                  "symbol": "release_fundraise"
+                },
+                {
+                  "vec": [
+                    {
+                      "u64": 0
+                    },
+                    {
+                      "i128": {
+                        "hi": 0,
+                        "lo": 10000000
+                      }
                     }
                   ]
                 }
@@ -4317,6 +4480,127 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
               },
               {
+                "symbol": "distribute"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "distribute"
+              }
+            ],
+            "data": {
+              "error": {
+                "contract": 7
+              }
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 7
+                }
+              }
+            ],
+            "data": {
+              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
+            }
+          }
+        }
+      },
+      "failed_call": true
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "error"
+              },
+              {
+                "error": {
+                  "contract": 7
+                }
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "contract try_call failed"
+                },
+                {
+                  "symbol": "distribute"
+                },
+                {
+                  "vec": [
+                    {
+                      "u64": 0
+                    },
+                    "void"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
+              },
+              {
                 "symbol": "create_rewards_marketplace"
               }
             ],
@@ -4430,6 +4714,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "current_period"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -4438,7 +4730,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1700000000
@@ -4677,7 +4969,12 @@
               }
             ],
             "data": {
-              "u64": 1
+              "vec": [
+                {
+                  "u64": 1
+                },
+                "void"
+              ]
             }
           }
         }
@@ -4763,7 +5060,8 @@
                   "vec": [
                     {
                       "u64": 1
-                    }
+                    },
+                    "void"
                   ]
                 }
               ]

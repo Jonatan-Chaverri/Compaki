@@ -886,6 +886,30 @@
                     },
                     {
                       "key": {
+                        "symbol": "distributed"
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "end_ts"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "start_ts"
+                      },
+                      "val": {
+                        "u64": 1700000000
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "total_claimed"
                       },
                       "val": {
@@ -904,6 +928,14 @@
                           "hi": 0,
                           "lo": 30000000
                         }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "vendor_pool_bps"
+                      },
+                      "val": {
+                        "u32": 6000
                       }
                     },
                     {
@@ -965,6 +997,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "current_period"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "period_seconds"
                       },
                       "val": {
@@ -973,7 +1013,7 @@
                     },
                     {
                       "key": {
-                        "symbol": "start_ts"
+                        "symbol": "period_start"
                       },
                       "val": {
                         "u64": 1700000000
@@ -2007,7 +2047,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -2674,6 +2714,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "current_period"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -2682,7 +2730,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1700000000
@@ -3615,6 +3663,30 @@
                 },
                 {
                   "key": {
+                    "symbol": "distributed"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "end_ts"
+                  },
+                  "val": {
+                    "u64": 0
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "start_ts"
+                  },
+                  "val": {
+                    "u64": 1700000000
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "total_claimed"
                   },
                   "val": {
@@ -3633,6 +3705,14 @@
                       "hi": 0,
                       "lo": 30000000
                     }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "vendor_pool_bps"
+                  },
+                  "val": {
+                    "u32": 6000
                   }
                 },
                 {
@@ -3722,6 +3802,14 @@
                 },
                 {
                   "key": {
+                    "symbol": "period_end"
+                  },
+                  "val": {
+                    "u64": 1702592000
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -3730,7 +3818,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1700000000

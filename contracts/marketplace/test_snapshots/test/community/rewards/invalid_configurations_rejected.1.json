@@ -636,6 +636,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "current_period"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "period_seconds"
                       },
                       "val": {
@@ -644,7 +652,7 @@
                     },
                     {
                       "key": {
-                        "symbol": "start_ts"
+                        "symbol": "period_start"
                       },
                       "val": {
                         "u64": 1700000000
@@ -728,6 +736,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "current_period"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "period_seconds"
                       },
                       "val": {
@@ -736,7 +752,7 @@
                     },
                     {
                       "key": {
-                        "symbol": "start_ts"
+                        "symbol": "period_start"
                       },
                       "val": {
                         "u64": 1700000000
@@ -1383,7 +1399,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -2795,6 +2811,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "current_period"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -2803,7 +2827,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1700000000
@@ -2997,6 +3021,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "current_period"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "period_seconds"
                   },
                   "val": {
@@ -3005,7 +3037,7 @@
                 },
                 {
                   "key": {
-                    "symbol": "start_ts"
+                    "symbol": "period_start"
                   },
                   "val": {
                     "u64": 1700000000

@@ -15,14 +15,21 @@
  * issuer — still not Circle USDC.
  *
  * Run: npm run deploy:testnet                      (everything, new asset)
+ *      npm run deploy:testnet -- --upgrade         (new code, same contract)
  *      npm run deploy:testnet -- --contract-only   (new contract only)
+ *
+ * --upgrade builds and uploads the current contract code and calls the
+ * deployed contract's `upgrade` with the admin key (the issuer in the env
+ * file): same address, all marketplaces, periods and funds kept, nothing to
+ * rebind. This is how contract changes ship. The new code must read the
+ * stored data as the old code wrote it.
  *
  * --contract-only keeps the issuer + token from the existing env file, so
  * every existing custodial account and trustline keeps working, deploys a
- * NEW marketplace contract and rewrites only MARKETPLACE_CONTRACT_ID. Contract
- * WASM changes never reach an already-deployed contract (it has no upgrade
- * function, by design), so this is how a contract change ships. Existing
- * marketplaces must then be re-registered: npm run marketplaces:rebind.
+ * NEW marketplace contract and rewrites only MARKETPLACE_CONTRACT_ID. Only
+ * needed for a contract without `upgrade` (or an incompatible storage
+ * change); existing marketplaces must then be re-registered:
+ * npm run marketplaces:rebind.
  *
  * DEPLOY_ENV_FILE=path writes to another env file instead of .env.local.
  */
@@ -61,6 +68,7 @@ const ENV_LOCAL = process.env.DEPLOY_ENV_FILE
   ? path.resolve(process.env.DEPLOY_ENV_FILE)
   : path.join(ROOT, ".env.local");
 const CONTRACT_ONLY = process.argv.includes("--contract-only");
+const UPGRADE = process.argv.includes("--upgrade");
 const FRIENDBOT = "https://friendbot.stellar.org";
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const PASSPHRASE = "Test SDF Network ; September 2015";
@@ -233,7 +241,52 @@ async function createPlatformAccount(assetCode: string, issuerPublic: string): P
 }
 
 /** Builds, uploads, deploys and initializes the marketplace contract. */
-async function deployMarketplaceContract(issuer: Keypair, sacAddress: string, platformPublic: string): Promise<string> {
+/**
+ * Extends the code (and instance, once deployed) to ~30 days right away.
+ * The contract never extends its own code in user calls (its rent would land
+ * on a buyer), so it is paid here when the code ships; afterwards the API
+ * scheduler keeps it alive.
+ */
+async function extendCodeTtl(wasmHash: Buffer, contractId?: string): Promise<void> {
+  const keys = [xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: wasmHash }))];
+  if (contractId) {
+    keys.push(
+      xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: new Address(contractId).toScAddress(),
+          key: xdr.ScVal.scvLedgerKeyContractInstance(),
+          durability: xdr.ContractDataDurability.persistent(),
+        }),
+      ),
+    );
+  }
+  // No authorization is needed, so a fresh Friendbot account pays the rent.
+  const signer = Keypair.random();
+  await friendbot(signer.publicKey());
+  await waitForAccountOnRpc(signer.publicKey());
+  const account = await server.getAccount(signer.publicKey());
+  const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: PASSPHRASE })
+    .addOperation(Operation.extendFootprintTtl({ extendTo: 30 * 17_280 }))
+    .setSorobanData(new SorobanDataBuilder().setReadOnly(keys).build())
+    .setTimeout(120)
+    .build();
+  const prepared = await prepareSigned(tx, signer, "code TTL extension");
+  const sent = await server.sendTransaction(prepared);
+  if (sent.status === "ERROR") throw new Error(`code TTL extension: ${JSON.stringify(sent.errorResult)}`);
+  for (let i = 0; i < 30; i++) {
+    const result = await server.getTransaction(sent.hash);
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+      console.log("    code kept alive for 30 days");
+      return;
+    }
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) throw new Error(`code TTL extension ${sent.hash} failed`);
+    await sleep(1_500);
+  }
+  throw new Error(`code TTL extension ${sent.hash} confirmation timeout`);
+}
+
+/** Builds the contract and uploads its wasm; returns the code hash. */
+async function buildAndUploadWasm(signer: Keypair): Promise<Buffer> {
   console.log("Building marketplace contract (cargo → wasm)...");
   // wasm32v1-none emits pure WASM-1.0 (MVP) bytecode. The default
   // wasm32-unknown-unknown target on rustc ≥1.82 emits reference-types,
@@ -246,15 +299,20 @@ async function deployMarketplaceContract(issuer: Keypair, sacAddress: string, pl
     throw new Error(`wasm not found at ${WASM_PATH}`);
   }
 
-  console.log("Uploading + deploying marketplace contract...");
+  console.log("Uploading the contract code...");
   const wasm = readFileSync(WASM_PATH);
   const uploadResult = await submitSoroban(
     Operation.uploadContractWasm({ wasm }),
-    issuer,
+    signer,
     "wasm upload",
   );
   if (!uploadResult) throw new Error("wasm upload returned no hash");
-  const wasmHash = scValToNative(uploadResult) as Buffer;
+  return scValToNative(uploadResult) as Buffer;
+}
+
+async function deployMarketplaceContract(issuer: Keypair, sacAddress: string, platformPublic: string): Promise<string> {
+  const wasmHash = await buildAndUploadWasm(issuer);
+  console.log("Deploying the marketplace contract...");
 
   const createResult = await submitSoroban(
     Operation.createCustomContract({
@@ -281,7 +339,29 @@ async function deployMarketplaceContract(issuer: Keypair, sacAddress: string, pl
     issuer,
     "initialize",
   );
+  await extendCodeTtl(wasmHash, contractId);
   return contractId;
+}
+
+/** --upgrade: new code for the deployed contract, same address and data. */
+async function upgradeContract(): Promise<void> {
+  console.log("── Compaki testnet contract upgrade ─────────────────────");
+  const adminSecret = existingEnvValue("DEMO_USDC_ISSUER_SECRET");
+  const contractId = existingEnvValue("MARKETPLACE_CONTRACT_ID");
+  if (!adminSecret || !contractId) {
+    throw new Error(`${ENV_LOCAL} has no DEMO_USDC_ISSUER_SECRET / MARKETPLACE_CONTRACT_ID`);
+  }
+  const admin = Keypair.fromSecret(adminSecret);
+  console.log(`    contract ${contractId}, admin ${admin.publicKey()}`);
+  const wasmHash = await buildAndUploadWasm(admin);
+  console.log("Calling upgrade (admin-signed)...");
+  const contract = new Contract(contractId);
+  await submitSoroban(contract.call("upgrade", nativeToScVal(wasmHash, { type: "bytes" })), admin, "upgrade");
+  await extendCodeTtl(wasmHash, contractId);
+  const version = await submitSoroban(contract.call("version"), admin, "version");
+  console.log("────────────────────────────────────────────────────────");
+  console.log(`✔ Upgraded in place to code ${wasmHash.toString("hex").slice(0, 16)}… (version ${version ? scValToNative(version) : "?"})`);
+  console.log(`✔ Contract: https://stellar.expert/explorer/testnet/contract/${contractId}`);
 }
 
 /** --contract-only: new contract, same issuer + token, one env line changed. */
@@ -324,6 +404,7 @@ async function deployContractOnly(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (UPGRADE) return upgradeContract();
   if (CONTRACT_ONLY) return deployContractOnly();
   console.log("── Compaki testnet deploy ──────────────────────────────");
   const assetCode = process.env.DEMO_ASSET_CODE ?? "CPKUSD";

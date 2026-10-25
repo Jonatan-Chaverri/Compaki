@@ -62,9 +62,22 @@ export function RewardsRules({ rewards, ledger }: { rewards: RewardsView; ledger
       <div>
         <dt className="text-xs text-slate-500">{t("currentPeriod")}</dt>
         <dd className="mt-1 font-medium">
-          {current ? t("periodValueEndsInValue", { value1: current.periodId + 1, value2: formatCountdown(current.endTs - ledger) }) : "—"}
+          {current
+            ? ledger >= current.endTs
+              ? t("periodValueDistributing", { value1: current.periodId + 1 })
+              : t("periodValueEndsInValue", { value1: current.periodId + 1, value2: formatCountdown(current.endTs - ledger) })
+            : "—"}
         </dd>
       </div>
+      {rewards.nextRules && (
+        <div className="sm:col-span-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+          {t("nextPeriodPending", {
+            sellers: rewards.nextRules.vendorPoolBps / 100,
+            buyers: 100 - rewards.nextRules.vendorPoolBps / 100,
+            frequency: frequencyLabel(rewards.nextRules.periodSeconds, t),
+          })}
+        </div>
+      )}
     </dl>
   );
 }
@@ -75,8 +88,9 @@ export function RewardsPeriodCard({ period, ledger }: { period: PeriodView; ledg
   const t = useTranslations("ui");
   const STATUS_STYLE = getStatusStyle(t);
 
-  // The ledger clock may pass the end between refreshes.
-  const status = period.status === "current" && ledger >= period.endTs ? "ended" : period.status;
+  // Rewards open once the period is distributed (right after its end).
+  const status = period.status;
+  const distributing = status === "current" && ledger >= period.endTs;
   const style = STATUS_STYLE[status];
   const pool = period.vendorPoolUsd + period.buyerPoolUsd;
   return (
@@ -89,7 +103,19 @@ export function RewardsPeriodCard({ period, ledger }: { period: PeriodView; ledg
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {date(period.startTs, locale)} → {date(period.endTs, locale)}
-            {status === "current" && t("endsInValue2", { value1: formatCountdown(period.endTs - ledger) })}
+            {status === "current" &&
+              (distributing ? ` · ${t("beingDistributed")}` : t("endsInValue2", { value1: formatCountdown(period.endTs - ledger) }))}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {t("periodSplit", { sellers: period.vendorPoolBps / 100, buyers: 100 - period.vendorPoolBps / 100 })}
+            {period.distributionTxHash && (
+              <>
+                {" · "}
+                <a href={txUrl(period.distributionTxHash)} target="_blank" rel="noopener noreferrer" className="underline">
+                  {t("periodDistributedLink")}
+                </a>
+              </>
+            )}
           </p>
         </div>
         <div className="text-right">
@@ -189,10 +215,13 @@ export function FundraiseProgress({
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
           {fundraise.collecting
             ? t("theContractHoldsWhatIsRaisedOnceTheTargetIsReached")
-            : fundraise.policy === "direct"
-              ? t("theTargetWasPaidOutEverySaleNowSendsItsCommunity")
-              : t("theTargetWasPaidOutAndFundraisingHasEndedSellersKeep")}
-          {policy && fundraise.collecting && t("afterAPayoutValue", { value1: policy.label.toLowerCase() })}
+            : t("theTargetWasPaidOutAndFundraisingHasEndedSellersKeep")}
+          {fundraise.collecting &&
+            (fundraise.nextTargetUsd === null
+              ? policy && t("afterAPayoutValue", { value1: policy.label.toLowerCase() })
+              : fundraise.nextTargetUsd === 0
+                ? ` ${t("nextRoundStop")}`
+                : ` ${t("nextRoundPending", { amount: formatAmount(fundraise.nextTargetUsd, locale) })}`)}
         </p>
         {fundraise.releasable && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">

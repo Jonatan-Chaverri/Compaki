@@ -74,15 +74,18 @@ export interface ParticipantView {
 export interface PeriodView {
   periodId: number;
   startTs: number;
+  /** When it was distributed; for the current period, when it becomes due. */
   endTs: number;
-  /** "current": still collecting; "ended": rewards can be claimed. */
+  /** "current": still collecting; "ended": distributed, rewards can be claimed. */
   status: "current" | "ended";
+  vendorPoolBps: number;
   vendorPoolUsd: number;
   buyerPoolUsd: number;
   salesUsd: number;
   claimedUsd: number;
   salesCount: number;
   participants: ParticipantView[];
+  distributionTxHash: string | null;
 }
 
 export interface RewardsView {
@@ -94,14 +97,30 @@ export interface RewardsView {
   /** Code of the self-issued testnet demo asset (never Circle USDC). */
   assetCode: string;
   communityBps: number;
+  /** The running period's rules (from the contract). */
   periodSeconds: number | null;
   vendorPoolBps: number | null;
   buyerPoolBps: number | null;
-  startTs: number | null;
   currentPeriod: number | null;
+  periodStart: number | null;
+  /** The running period can be distributed from this time on. */
+  periodEnd: number | null;
+  /** The running period is past its end and waiting to be distributed. */
+  distributionDue: boolean;
+  /** Rules the operator set for the next period (null = keep the current ones). */
+  nextRules: { vendorPoolBps: number; periodSeconds: number } | null;
   ledgerTime: number | null;
   treasury: { contributedUsd: number; claimedUsd: number; heldUsd: number } | null;
   periods: PeriodView[];
+}
+
+/** The operator's pending rules for the next period, if any. */
+export function nextRulesOf(m: {
+  rewardsNextVendorPoolBps: number | null;
+  rewardsNextPeriodSeconds: number | null;
+}): { vendorPoolBps: number; periodSeconds: number } | null {
+  if (m.rewardsNextVendorPoolBps === null || m.rewardsNextPeriodSeconds === null) return null;
+  return { vendorPoolBps: m.rewardsNextVendorPoolBps, periodSeconds: m.rewardsNextPeriodSeconds };
 }
 
 /** Mirrors the contract's floor division (reward_of). */
@@ -119,6 +138,8 @@ export async function loadRewardsView(marketplace: {
   splitCommunityBps: number;
   rewardsPeriodSeconds: number | null;
   rewardsVendorPoolBps: number | null;
+  rewardsNextVendorPoolBps: number | null;
+  rewardsNextPeriodSeconds: number | null;
   contractMarketplaceId: string | null;
   contractId: string | null;
 }): Promise<RewardsView> {
@@ -134,8 +155,11 @@ export async function loadRewardsView(marketplace: {
     vendorPoolBps: marketplace.rewardsVendorPoolBps,
     buyerPoolBps:
       marketplace.rewardsVendorPoolBps === null ? null : 10_000 - marketplace.rewardsVendorPoolBps,
-    startTs: null,
     currentPeriod: null,
+    periodStart: null,
+    periodEnd: null,
+    distributionDue: false,
+    nextRules: nextRulesOf(marketplace),
     ledgerTime: null,
     treasury: null,
     periods: [],
@@ -143,7 +167,7 @@ export async function loadRewardsView(marketplace: {
   const onChainId = boundOnChainId(marketplace);
   if (!base.enabled || onChainId === null) return base;
 
-  const [status, sales, claims] = await Promise.all([
+  const [status, sales, claims, distributions] = await Promise.all([
     getRewardsStatus(onChainId),
     prisma.sale.findMany({
       where: { product: { marketplaceId: marketplace.id } },
@@ -152,7 +176,9 @@ export async function loadRewardsView(marketplace: {
       take: 1_000,
     }),
     prisma.rewardClaim.findMany({ where: { marketplaceId: marketplace.id, contractId } }),
+    prisma.rewardsDistribution.findMany({ where: { marketplaceId: marketplace.id, contractId } }),
   ]);
+  const distributionTx = new Map(distributions.map((d) => [d.periodId, d.txHash]));
 
   // Who sold and bought in each period, by on-chain address.
   type Volume = { sold: bigint; bought: bigint };
@@ -191,7 +217,6 @@ export async function loadRewardsView(marketplace: {
   const periods: PeriodView[] = ids.map((k, i) => {
     const t = totals[i];
     const activity = byPeriod.get(k);
-    const startTs = status.startTs + k * status.periodSeconds;
     const participants: ParticipantView[] = [...(activity?.volumes ?? new Map<string, Volume>())]
       .map(([address, v]) => {
         const claim = claimOf.get(`${k}:${address}`);
@@ -211,15 +236,17 @@ export async function loadRewardsView(marketplace: {
       .sort((a, b) => b.estimatedUsd - a.estimatedUsd);
     return {
       periodId: k,
-      startTs,
-      endTs: startTs + status.periodSeconds,
-      status: k < status.currentPeriod ? "ended" : "current",
+      startTs: t.startTs,
+      endTs: t.distributed ? t.endTs : status.periodEnd,
+      status: t.distributed ? "ended" : "current",
+      vendorPoolBps: t.vendorPoolBps,
       vendorPoolUsd: stroopsToUsd(t.vendorPoolStroops),
       buyerPoolUsd: stroopsToUsd(t.buyerPoolStroops),
       salesUsd: stroopsToUsd(t.vendorVolumeStroops),
       claimedUsd: stroopsToUsd(t.totalClaimedStroops),
       salesCount: activity?.count ?? 0,
       participants,
+      distributionTxHash: distributionTx.get(k) ?? null,
     };
   });
 
@@ -229,8 +256,10 @@ export async function loadRewardsView(marketplace: {
     periodSeconds: status.periodSeconds,
     vendorPoolBps: status.vendorPoolBps,
     buyerPoolBps: status.buyerPoolBps,
-    startTs: status.startTs,
     currentPeriod: status.currentPeriod,
+    periodStart: status.periodStart,
+    periodEnd: status.periodEnd,
+    distributionDue: status.ledgerTime >= status.periodEnd,
     ledgerTime: status.ledgerTime,
     treasury: {
       contributedUsd: stroopsToUsd(status.totalContributedStroops),
@@ -251,7 +280,7 @@ export function describeContractError(
   if (!(error instanceof ContractError)) return null;
   const known: Record<string, [400 | 403 | 409, string]> = {
     PeriodNotFound: [409, "That rewards period hasn't started yet."],
-    PeriodNotEnded: [409, "This period hasn't ended on-chain yet; rewards can be claimed after it ends."],
+    PeriodNotEnded: [409, "This period hasn't been distributed yet; rewards can be claimed after the distribution."],
     AlreadyClaimed: [409, "This reward was already claimed."],
     NothingToClaim: [409, "There is nothing to claim for this period."],
     RewardsNotEnabled: [400, "Community Rewards is not enabled for this marketplace."],

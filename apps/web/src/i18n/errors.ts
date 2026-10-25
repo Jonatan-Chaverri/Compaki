@@ -27,5 +27,33 @@ export function localizedMessage(error: unknown, t: UiTranslator, fallback: stri
   if (/code.*(?:invalid|expired|incorrect)|(?:invalid|expired|incorrect).*code/i.test(message)) return t("codeInvalid");
   const stock = /^Only (\d+) units? of (.+) left in stock$/.exec(message);
   if (stock) return t("stockChanged", { count: Number(stock[1]), product: stock[2] });
+  // API messages that carry values (apps/api/src/routes/*).
+  const dynamic: [RegExp, (m: RegExpExecArray) => string][] = [
+    [/^At most (\d+) recipient wallets$/, (m) => t("apiAtMostRecipients", { count: Number(m[1]) })],
+    [/^Invalid Stellar address: (.*)$/, (m) => t("apiInvalidStellarAddress", { address: m[1] })],
+    [/^Recipient shares must add up to exactly 100% \(got ([\d.]+)%\)$/, (m) => t("rulesTotalError", { total: Number(m[1]) })],
+    [/^(.+)'s wallet doesn't exist on Stellar testnet\./, (m) => t("apiRecipientWalletMissing", { name: m[1] })],
+    [/^(.+)'s wallet doesn't accept (\S+) yet\./, (m) => t("apiRecipientNoTrustline", { name: m[1], code: m[2] })],
+    [/^(.+) is not ready for purchase yet$/, (m) => t("apiProductNotReady", { product: m[1] })],
+    [/^You already have \$(\d+) or more in demo money$/, (m) => t("apiFaucetMax", { amount: m[1] })],
+    [/^(Community purpose|Who benefits|Distribution explanation) must be text$/, (m) => t("apiFieldText", { field: fieldLabel(m[1], t) })],
+    [
+      /^(Community purpose|Who benefits|Distribution explanation) must be (\d+)–(\d+) characters$/,
+      (m) => t("apiFieldLength", { field: fieldLabel(m[1], t), min: Number(m[2]), max: Number(m[3]) }),
+    ],
+  ];
+  for (const [pattern, translate] of dynamic) {
+    const match = pattern.exec(message);
+    if (match) return translate(match);
+  }
   return fallback;
+}
+
+function fieldLabel(field: string, t: UiTranslator): string {
+  const keys: Record<string, string> = {
+    "Community purpose": "apiFieldPurpose",
+    "Who benefits": "apiFieldBeneficiaries",
+    "Distribution explanation": "apiFieldDistribution",
+  };
+  return t(keys[field] ?? "apiFieldPurpose");
 }

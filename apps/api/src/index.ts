@@ -4,6 +4,8 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 
+import { startCommunityScheduler } from "./lib/distribution";
+
 import { auth } from "./routes/auth";
 import { balance } from "./routes/balance";
 import { demo } from "./routes/demo";
@@ -40,3 +42,7 @@ const port = Number(process.env.PORT ?? 4000);
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`Compaki API listening on http://localhost:${info.port}`);
 });
+
+// Distributes rewards periods the moment they are due (and catches any
+// fundraising round left unreleased). See src/lib/distribution.ts.
+startCommunityScheduler();

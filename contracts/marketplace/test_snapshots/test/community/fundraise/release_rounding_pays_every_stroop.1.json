@@ -820,6 +820,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "collecting"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "goal_reached"
                       },
                       "val": {
@@ -2092,7 +2100,7 @@
             },
             "ext": "v0"
           },
-          518400
+          4095
         ]
       ]
     ]
@@ -2790,6 +2798,14 @@
             ],
             "data": {
               "map": [
+                {
+                  "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
                 {
                   "key": {
                     "symbol": "goal_reached"
@@ -4224,6 +4240,14 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "collecting"
+                  },
+                  "val": {
+                    "bool": true
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "goal_reached"
                   },
                   "val": {
@@ -4356,7 +4380,12 @@
               }
             ],
             "data": {
-              "u64": 0
+              "vec": [
+                {
+                  "u64": 0
+                },
+                "void"
+              ]
             }
           }
         }
@@ -4658,10 +4687,20 @@
               }
             ],
             "data": {
-              "i128": {
-                "hi": 0,
-                "lo": 3500007
-              }
+              "vec": [
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 3500007
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1
+                  }
+                }
+              ]
             }
           }
         }

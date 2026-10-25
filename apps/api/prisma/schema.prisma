@@ -78,19 +78,24 @@ model Marketplace {
   //   "rewards"   held by the contract and shared each period between that
   //               period's vendors and buyers, in proportion to their sales
   //               and purchases;
-  //   "fundraise" held by the contract until communityGoalUsd is reached,
-  //               then released to fundraiseRecipients.
+  //   "fundraise" held by the contract until the round's target is
+  //               reached, then released to fundraiseRecipients.
   communityMode        String   @default("classic")
-  // Rewards rules (mirrors of the on-chain config, for display).
+  // Rewards rules at launch (the contract holds the live ones).
   rewardsPeriodSeconds Int?
   // Part of each period's pool shared among vendors; buyers get the rest.
   rewardsVendorPoolBps Int?
-  // Ledger time the contract started counting periods from.
+  // Ledger time the first period started.
   rewardsStartAt       DateTime?
-  // Fundraising rules (mirrors of the on-chain config, for display).
-  // "stop" | "new-round" | "direct": what later sales do once the target is
-  // reached and released.
+  // Rules the operator set for the next period, passed to the contract at the
+  // next distribution and then cleared. Null = keep the current rules.
+  rewardsNextVendorPoolBps Int?
+  rewardsNextPeriodSeconds Int?
+  // "stop" | "new-round": what follows a released round by default.
   fundraisePolicy      String?
+  // Target the operator set for the next round, passed at the next release
+  // and then cleared (0 = stop). Null = the policy's default.
+  fundraiseNextTargetUsd Float?
   // [{ address, label, shareBps }], shares summing to 10_000.
   fundraiseRecipients  Json?
   // Public organizer-authored context, separate from immutable payment rules.
@@ -112,6 +117,7 @@ model Marketplace {
   vendors    VendorMembership[]
   orders     Order[]
   rewardClaims   RewardClaim[]
+  rewardsDistributions RewardsDistribution[]
   fundraiseReleases FundraiseRelease[]
 
   @@unique([contractId, contractMarketplaceId])
@@ -247,6 +253,22 @@ model RewardClaim {
   marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
 
   @@unique([marketplaceId, contractId, periodId, memberAddress])
+}
+
+// A confirmed rewards distribution (auxiliary, like RewardClaim).
+model RewardsDistribution {
+  id         String   @id @default(cuid())
+  contractId String
+  // Period that was distributed (0-based).
+  periodId   Int
+  amountUsd  Float
+  txHash     String   @unique
+  createdAt  DateTime @default(now())
+
+  marketplaceId String
+  marketplace   Marketplace @relation(fields: [marketplaceId], references: [id])
+
+  @@unique([marketplaceId, contractId, periodId])
 }
 
 // A confirmed fundraising release (auxiliary, like RewardClaim).

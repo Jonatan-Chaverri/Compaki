@@ -21,6 +21,7 @@ export function formatDateTime(iso: string, locale: string): string {
 export function communityFundLabel(name: string | null, t: UiTranslator): string {
   if (!name) return t("theCommunity");
   if (name === "Community Rewards treasury (on-chain)") return t("communityRewards2");
+  if (name === "Fundraising fund (on-chain)") return t("fundraisingFundOnChain");
   if (name.endsWith(" Community Fund")) return t("communityFundFor", { name: name.slice(0, -15) });
   return name;
 }

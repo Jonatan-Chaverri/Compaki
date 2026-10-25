@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
 import { FundraiseProgress, RewardsPeriodCard, RewardsRules } from "@/components/community-fund";
+import { NextRulesForm, NextTargetForm } from "@/components/next-period-forms";
 import { TxBanner, type TxState } from "@/components/tx-banner";
 import {
   formatAmount,
@@ -72,6 +73,19 @@ export function RewardsPanel({ slug }: { slug: string }) {
       clearInterval(tick);
     };
   }, [slug, version, t]);
+
+  const distribute = async () => {
+    setTx({ state: "pending", label: t("distributingRewards") });
+    try {
+      const res = await fetch(`/api/rewards/marketplace/${encodeURIComponent(slug)}/distribute`, { method: "POST" });
+      const result = (await res.json()) as { txHash?: string; error?: string };
+      if (!res.ok || !result.txHash) throw new Error(localizedMessage(result.error, t, t("distributionFailed")));
+      setTx({ state: "done", label: t("rewardsDistribution"), txHash: result.txHash });
+      setVersion((v) => v + 1);
+    } catch (err) {
+      setTx({ state: "error", message: localizedMessage(err, t, t("distributionFailed")) });
+    }
+  };
 
   const release = async () => {
     setTx({ state: "pending", label: t("payingOutTheFundraisingTarget") });
@@ -144,6 +158,22 @@ export function RewardsPanel({ slug }: { slug: string }) {
             <Stat label={t("claimedBySellersAndBuyers")} value={formatAmount(data.rewards.treasury?.claimedUsd ?? 0, locale)} />
           </div>
           <RewardsRules rewards={data.rewards} ledger={ledger} />
+          {(data.rewards.distributionDue || (data.rewards.periodEnd !== null && ledger >= data.rewards.periodEnd)) && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+              <span>{t("distributionDueNow")}</span>
+              <button
+                type="button"
+                onClick={() => void distribute()}
+                disabled={tx.state === "pending"}
+                className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700 disabled:opacity-40"
+              >
+                {t("distributeNow")}
+              </button>
+            </div>
+          )}
+          {data.canManage && (
+            <NextRulesForm slug={slug} rewards={data.rewards} onSaved={() => setVersion((v) => v + 1)} />
+          )}
           <div className="space-y-3">
             {data.rewards.periods.map((p) => (
               <RewardsPeriodCard key={p.periodId} period={p} ledger={ledger} />
@@ -153,11 +183,16 @@ export function RewardsPanel({ slug }: { slug: string }) {
       )}
 
       {data.fundraise && (
-        <FundraiseProgress
-          fundraise={data.fundraise}
-          onRelease={() => void release()}
-          releasing={tx.state === "pending"}
-        />
+        <>
+          <FundraiseProgress
+            fundraise={data.fundraise}
+            onRelease={() => void release()}
+            releasing={tx.state === "pending"}
+          />
+          {data.canManage && (
+            <NextTargetForm slug={slug} fundraise={data.fundraise} onSaved={() => setVersion((v) => v + 1)} />
+          )}
+        </>
       )}
 
       {data.canManage && <GuaranteeChecks slug={slug} mode={data.mode} />}
@@ -166,6 +201,7 @@ export function RewardsPanel({ slug }: { slug: string }) {
         <summary className="cursor-pointer">{t("howTheseNumbersAreVerified")}</summary>
         <p className="mt-2">
           {t("rulesPoolsTotalsAndRecipientsAreReadFromStellarOnEvery")}</p>
+        <p className="mt-2">{t("upgradeNotice")}</p>
       </details>
     </section>
   );

@@ -46,7 +46,7 @@ use soroban_sdk::{
 };
 
 /// Bumped on every code change; `version` lets anyone check an upgrade landed.
-pub const CONTRACT_VERSION: u32 = 3;
+pub const CONTRACT_VERSION: u32 = 5;
 pub const BPS_DENOM: u32 = 10_000;
 /// Compaki's platform fee on every sale (2%), paid to the platform recipient
 /// fixed at `initialize`. A constant: no one can change it on this deployment.
@@ -64,6 +64,10 @@ pub const MAX_PERIOD_SECONDS: u64 = 366 * 24 * 60 * 60;
 // Storage TTL management (ledgers close every ~5s). Every entry touched by a
 // call is bumped to ~30 days when it has less than ~25 days left. Archived
 // persistent entries are restored automatically when a transaction uses them.
+// The contract CODE is deliberately not bumped here: its rent is large (tens
+// of KB) and would land on whichever buyer's transaction crossed the
+// threshold. Compaki keeps the code alive instead (deploy/upgrade scripts and
+// the API scheduler extend it, paying the rent).
 const DAY_IN_LEDGERS: u32 = 17_280;
 const TTL_EXTEND_TO: u32 = 30 * DAY_IN_LEDGERS;
 const TTL_THRESHOLD: u32 = 25 * DAY_IN_LEDGERS;
@@ -296,9 +300,11 @@ pub struct PlatformConfig {
 }
 
 fn bump_instance(env: &Env) {
-    env.storage()
-        .instance()
-        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+    env.deployer().extend_ttl_for_contract_instance(
+        env.current_contract_address(),
+        TTL_THRESHOLD,
+        TTL_EXTEND_TO,
+    );
 }
 
 fn bump(env: &Env, key: &DataKey) {
@@ -486,8 +492,8 @@ pub struct MarketplaceContract;
 #[contractimpl]
 impl MarketplaceContract {
     /// One-time setup: stores the admin, the payment token (demo USD SAC) and
-    /// the platform fee recipient. The admin has no privileged functions; it
-    /// is recorded for provenance. None of these can be changed later.
+    /// the platform fee recipient. The admin's only privilege is `upgrade`.
+    /// None of these can be changed later.
     pub fn initialize(env: Env, admin: Address, token: Address, platform: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
@@ -536,10 +542,12 @@ impl MarketplaceContract {
     }
 
     /// Registers a Community Rewards marketplace: the community share of each
-    /// purchase is held by this contract and, per period of `period_seconds`
-    /// starting now, shared among that period's vendors (`vendor_pool_bps` of
-    /// the pool) and buyers (the rest), in proportion to what each one sold or
-    /// bought. `community_bps` must be > 0. Everything is fixed at creation.
+    /// purchase is held by this contract and, per period (the first one
+    /// starts now and lasts at least `period_seconds`), shared among that
+    /// period's vendors (`vendor_pool_bps` of the pool) and buyers (the rest),
+    /// in proportion to what each one sold or bought. `community_bps` must be
+    /// > 0. The pool split and length can change only for a next period, at
+    /// `distribute`.
     pub fn create_rewards_marketplace(
         env: Env,
         operator: Address,
@@ -553,9 +561,8 @@ impl MarketplaceContract {
         if community_bps == 0 {
             return Err(Error::InvalidSplit);
         }
-        if !(MIN_PERIOD_SECONDS..=MAX_PERIOD_SECONDS).contains(&period_seconds)
-            || vendor_pool_bps > BPS_DENOM
-        {
+        validate_period_seconds(period_seconds)?;
+        if vendor_pool_bps > BPS_DENOM {
             return Err(Error::InvalidRewardsConfig);
         }
 
@@ -570,7 +577,8 @@ impl MarketplaceContract {
             },
         );
         let state = RewardsState {
-            start_ts: env.ledger().timestamp(),
+            current_period: 0,
+            period_start: env.ledger().timestamp(),
             period_seconds,
             vendor_pool_bps,
             total_contributed: 0,
@@ -584,8 +592,8 @@ impl MarketplaceContract {
     /// Registers a fundraising marketplace: the community share of each
     /// purchase is held by this contract until the round reaches `target`,
     /// then `release_fundraise` pays it to `recipients` at `shares_bps`
-    /// (summing to 10_000). `policy` decides what later sales do. Everything
-    /// is fixed at creation and can never be edited.
+    /// (summing to 10_000). `policy` is what follows a release by default.
+    /// Recipients and shares are fixed at creation and can never be edited.
     #[allow(clippy::too_many_arguments)]
     pub fn create_fundraise_marketplace(
         env: Env,
@@ -627,6 +635,7 @@ impl MarketplaceContract {
             total_raised: 0,
             total_released: 0,
             goal_reached: false,
+            collecting: true,
         };
         save(&env, &DataKey::Fundraise(id), &state);
         env.events().publish((symbol_short!("fundrais"), id), state);
@@ -656,10 +665,9 @@ impl MarketplaceContract {
     /// Community share by mode:
     /// - classic: to the community fund account;
     /// - rewards: to this contract, booked to the current period together
-    ///   with the vendor's and buyer's volume;
-    /// - fundraising: to this contract for the current round; once a Stop
-    ///   fundraiser has reached its target it goes to the vendor instead, and
-    ///   once a Direct one has, straight to the recipients.
+    ///   with the vendor's and buyer's volume (until `distribute` closes it);
+    /// - fundraising: to this contract for the current round; once
+    ///   fundraising has stopped it goes to the vendor instead.
     pub fn purchase(
         env: Env,
         marketplace_id: u64,
@@ -698,11 +706,10 @@ impl MarketplaceContract {
         // the accounting update happen inside this single invocation.
         let mut period = None;
         let mut round = None;
-        let mut direct_to: Option<(Vec<Address>, Vec<i128>)> = None;
         if let Some(mut state) = load::<RewardsState>(&env, &DataKey::Rewards(marketplace_id)) {
-            let k = current_period(&state, env.ledger().timestamp());
-            let mut totals = load_period(&env, marketplace_id, k);
-            let vendor_part = bps_of(community_amount, state.vendor_pool_bps)?;
+            let k = state.current_period;
+            let mut totals = load_period(&env, marketplace_id, k, &state);
+            let vendor_part = bps_of(community_amount, totals.vendor_pool_bps)?;
             totals.vendor_pool += vendor_part;
             totals.buyer_pool += community_amount - vendor_part;
             totals.vendor_volume = totals.vendor_volume.checked_add(amount).ok_or(Error::Overflow)?;
@@ -728,7 +735,7 @@ impl MarketplaceContract {
             save(&env, &DataKey::Rewards(marketplace_id), &state);
             period = Some(k);
         } else if let Some(mut state) = load::<FundraiseState>(&env, &DataKey::Fundraise(marketplace_id)) {
-            if !state.goal_reached || state.policy == GoalPolicy::NewRound {
+            if state.collecting {
                 state.raised = state.raised.checked_add(community_amount).ok_or(Error::Overflow)?;
                 state.total_raised = state
                     .total_raised
@@ -736,16 +743,8 @@ impl MarketplaceContract {
                     .ok_or(Error::Overflow)?;
                 save(&env, &DataKey::Fundraise(marketplace_id), &state);
                 round = Some(state.round);
-            } else if state.policy == GoalPolicy::Direct {
-                let parts = split_by_shares(&env, community_amount, &state.shares_bps)?;
-                state.total_released = state
-                    .total_released
-                    .checked_add(community_amount)
-                    .ok_or(Error::Overflow)?;
-                save(&env, &DataKey::Fundraise(marketplace_id), &state);
-                direct_to = Some((state.recipients, parts));
             } else {
-                // Stop: the fundraiser is over; the vendor keeps that share.
+                // Fundraising stopped: the vendor keeps that share.
                 vendor_amount += community_amount;
                 community_amount = 0;
             }
@@ -757,14 +756,7 @@ impl MarketplaceContract {
         if operator_amount > 0 {
             client.transfer(&buyer, &config.operator, &operator_amount);
         }
-        if let Some((recipients, parts)) = direct_to {
-            for i in 0..recipients.len() {
-                let part = parts.get_unchecked(i);
-                if part > 0 {
-                    client.transfer(&buyer, &recipients.get_unchecked(i), &part);
-                }
-            }
-        } else if community_amount > 0 {
+        if community_amount > 0 {
             // For rewards / fundraising marketplaces community_fund is this contract.
             client.transfer(&buyer, &config.community_fund, &community_amount);
         }
@@ -794,19 +786,63 @@ impl MarketplaceContract {
         })
     }
 
-    /// Pays `member` their reward for an ended period: their share of the
-    /// vendor pool (by sales) plus their share of the buyer pool (by
+    /// Ends the current rewards period once its length has passed: its pools
+    /// become claimable and a new period starts now. Anyone may call it with
+    /// `next = None` (same rules for the next period), so nobody can hold the
+    /// rewards back; passing `Some(rules)` sets the next period's pool shares
+    /// and length and requires the operator's authorization. The API calls it
+    /// right when the period is due. Returns the distributed pool total.
+    pub fn distribute(env: Env, marketplace_id: u64, next: Option<RewardsRules>) -> Result<i128, Error> {
+        bump_instance(&env);
+        let config = load_config(&env, marketplace_id)?;
+        let mut state = load_rewards(&env, marketplace_id)?;
+        let now = env.ledger().timestamp();
+        if now < state.period_start.saturating_add(state.period_seconds) {
+            return Err(Error::PeriodNotEnded);
+        }
+        if let Some(rules) = &next {
+            config.operator.require_auth();
+            if rules.vendor_pool_bps.checked_add(rules.buyer_pool_bps) != Some(BPS_DENOM) {
+                return Err(Error::InvalidRewardsConfig);
+            }
+            validate_period_seconds(rules.period_seconds)?;
+        }
+
+        let k = state.current_period;
+        let mut totals = load_period(&env, marketplace_id, k, &state);
+        totals.end_ts = now;
+        totals.distributed = true;
+        save(&env, &DataKey::Period(marketplace_id, k), &totals);
+
+        state.current_period = k + 1;
+        state.period_start = now;
+        if let Some(rules) = next {
+            state.vendor_pool_bps = rules.vendor_pool_bps;
+            state.period_seconds = rules.period_seconds;
+        }
+        save(&env, &DataKey::Rewards(marketplace_id), &state);
+
+        let pool = totals.vendor_pool + totals.buyer_pool;
+        env.events().publish(
+            (symbol_short!("distrib"), marketplace_id, k),
+            (pool, state.vendor_pool_bps, state.period_seconds),
+        );
+        Ok(pool)
+    }
+
+    /// Pays `member` their reward for a distributed period: their share of
+    /// the vendor pool (by sales) plus their share of the buyer pool (by
     /// purchases). Requires the member's own authorization; the payout always
     /// goes to `member`, once.
     pub fn claim(env: Env, marketplace_id: u64, period: u32, member: Address) -> Result<i128, Error> {
         bump_instance(&env);
         member.require_auth();
         let mut state = load_rewards(&env, marketplace_id)?;
-        let now = env.ledger().timestamp();
-        if period > current_period(&state, now) {
+        if period > state.current_period {
             return Err(Error::PeriodNotFound);
         }
-        if now < period_end(&state, period) {
+        let mut totals = load_period(&env, marketplace_id, period, &state);
+        if !totals.distributed {
             return Err(Error::PeriodNotEnded);
         }
         let key = DataKey::Participation(marketplace_id, period, member.clone());
@@ -814,7 +850,6 @@ impl MarketplaceContract {
         if participation.claimed {
             return Err(Error::AlreadyClaimed);
         }
-        let mut totals = load_period(&env, marketplace_id, period);
         let amount = reward_of(&totals, &participation)?;
         if amount <= 0 {
             return Err(Error::NothingToClaim);
@@ -843,14 +878,32 @@ impl MarketplaceContract {
 
     /// Releases a fundraising round that reached its target: pays everything
     /// raised in it to the recipients at their fixed shares (rounding as in
-    /// `split_by_shares`) and starts the next round. Anyone may call it, so
-    /// the operator cannot hold the funds back.
-    pub fn release_fundraise(env: Env, marketplace_id: u64) -> Result<i128, Error> {
+    /// `split_by_shares`). What follows depends on `next_target`:
+    /// - `None` (anyone may call): the policy's default — a new round toward
+    ///   the same target (NewRound) or stop (Stop);
+    /// - `Some(t)` (operator only): a new round toward `t`, or stop if t == 0.
+    /// Once stopped, later sales give the community share to the vendor.
+    pub fn release_fundraise(env: Env, marketplace_id: u64, next_target: Option<i128>) -> Result<i128, Error> {
         bump_instance(&env);
+        let config = load_config(&env, marketplace_id)?;
         let mut state = load_fundraise(&env, marketplace_id)?;
-        if state.raised < state.target || state.raised <= 0 {
+        if !state.collecting || state.raised < state.target || state.raised <= 0 {
             return Err(Error::GoalNotReached);
         }
+        let next = match next_target {
+            Some(target) => {
+                config.operator.require_auth();
+                if target < 0 {
+                    return Err(Error::InvalidGoal);
+                }
+                target
+            }
+            None => match state.policy {
+                GoalPolicy::Stop => 0,
+                GoalPolicy::NewRound => state.target,
+            },
+        };
+
         let amount = state.raised;
         let parts = split_by_shares(&env, amount, &state.shares_bps)?;
         let released_round = state.round;
@@ -858,6 +911,11 @@ impl MarketplaceContract {
         state.round += 1;
         state.total_released = state.total_released.checked_add(amount).ok_or(Error::Overflow)?;
         state.goal_reached = true;
+        if next == 0 {
+            state.collecting = false;
+        } else {
+            state.target = next;
+        }
         save(&env, &DataKey::Fundraise(marketplace_id), &state);
 
         let client = token_client(&env)?;
@@ -871,9 +929,36 @@ impl MarketplaceContract {
 
         env.events().publish(
             (symbol_short!("release"), marketplace_id, released_round),
-            amount,
+            (amount, next),
         );
         Ok(amount)
+    }
+
+    /// Replaces this contract's code with an uploaded wasm (by hash), keeping
+    /// its address and all stored data. Only the admin set at `initialize`.
+    /// New code must read the stored types as they are (add fields as new
+    /// storage keys rather than changing existing structs).
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        bump_instance(&env);
+        env.events().publish((symbol_short!("upgrade"),), new_wasm_hash.clone());
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    /// The code version (CONTRACT_VERSION), to confirm an upgrade.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
+    }
+
+    /// The admin allowed to `upgrade`.
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
+        env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)
     }
 
     /// The platform fee: its recipient and rate (fixed for this deployment).
@@ -895,43 +980,42 @@ impl MarketplaceContract {
     /// plus the ledger time the view was evaluated at.
     pub fn rewards_status(env: Env, marketplace_id: u64) -> Result<RewardsStatus, Error> {
         let state = load_rewards(&env, marketplace_id)?;
-        let now = env.ledger().timestamp();
         Ok(RewardsStatus {
-            start_ts: state.start_ts,
+            current_period: state.current_period,
+            period_start: state.period_start,
+            period_end: state.period_start.saturating_add(state.period_seconds),
             period_seconds: state.period_seconds,
             vendor_pool_bps: state.vendor_pool_bps,
             buyer_pool_bps: BPS_DENOM - state.vendor_pool_bps,
-            current_period: current_period(&state, now),
             total_contributed: state.total_contributed,
             total_claimed: state.total_claimed,
-            now,
+            now: env.ledger().timestamp(),
         })
     }
 
-    /// A period's pools and volumes (all zero for a period without sales).
+    /// A period's rules, pools and volumes (empty for a period without sales).
     pub fn get_period(env: Env, marketplace_id: u64, period: u32) -> Result<PeriodTotals, Error> {
         let state = load_rewards(&env, marketplace_id)?;
-        if period > current_period(&state, env.ledger().timestamp()) {
+        if period > state.current_period {
             return Err(Error::PeriodNotFound);
         }
-        Ok(load_period(&env, marketplace_id, period))
+        Ok(load_period(&env, marketplace_id, period, &state))
     }
 
-    /// One address's reward for a period: final once the period has ended,
-    /// a running estimate while it is still current.
+    /// One address's reward for a period: final once the period is
+    /// distributed, a running estimate while it is still current.
     pub fn get_reward(env: Env, marketplace_id: u64, period: u32, member: Address) -> Result<RewardView, Error> {
         let state = load_rewards(&env, marketplace_id)?;
-        let now = env.ledger().timestamp();
-        if period > current_period(&state, now) {
+        if period > state.current_period {
             return Err(Error::PeriodNotFound);
         }
         let participation = load_participation(&env, marketplace_id, period, &member);
-        let totals = load_period(&env, marketplace_id, period);
+        let totals = load_period(&env, marketplace_id, period, &state);
         Ok(RewardView {
             vendor_volume: participation.vendor_volume,
             buyer_volume: participation.buyer_volume,
             amount: reward_of(&totals, &participation)?,
-            period_ended: now >= period_end(&state, period),
+            period_ended: totals.distributed,
             claimed: participation.claimed,
         })
     }

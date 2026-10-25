@@ -156,7 +156,7 @@ async function main(): Promise<void> {
               targetStroops: usdToStroops(m.communityGoalUsd!),
               recipients: recipients.map((r) => r.address),
               sharesBps: recipients.map((r) => r.shareBps),
-              policy: m.fundraisePolicy as GoalPolicy,
+              policy: m.fundraisePolicy === "stop" ? "stop" : "new-round",
             })
           : await createMarketplace({
               ...split,
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
             });
     const rewardsStartAt =
       mode === "rewards"
-        ? new Date((await getRewardsStatus(created.marketplaceId)).startTs * 1000)
+        ? new Date((await getRewardsStatus(created.marketplaceId)).periodStart * 1000)
         : null;
     console.log(`    marketplace_id ${created.marketplaceId} · tx ${created.txHash}`);
 

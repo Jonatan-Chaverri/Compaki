@@ -1,9 +1,13 @@
 // /api/rewards — Community Rewards and fundraising.
 //
 //   GET  /marketplace/:slug                    rules, periods / fundraising progress (public)
-//   POST /marketplace/:slug/periods/:id/claim  claim the session user's reward for an ended period
+//   POST /marketplace/:slug/periods/:id/claim  claim the session user's reward for a distributed period
 //                                              (own wallets: 202 + tx to sign,
 //                                              finished by POST /api/tx/:id)
+//   PUT  /marketplace/:slug/next-rules         set or clear the next period's rules (operator)
+//   POST /marketplace/:slug/distribute         distribute a due period now (any signed-in user;
+//                                              the scheduler normally does it on time)
+//   PUT  /marketplace/:slug/fundraise/next-target  set or clear the next round's target (operator)
 //   POST /marketplace/:slug/fundraise/release  release a round that reached its target (any signed-in user)
 //   POST /marketplace/:slug/guarantees         simulate a forbidden action (operator)
 //   GET  /me                                   session user's rewards across marketplaces
@@ -18,7 +22,8 @@
 import { Hono } from "hono";
 
 import { parseSplitSnapshot, prisma } from "@/lib/db";
-import { loadFundraiseView, releaseIfReached } from "@/lib/fundraise";
+import { distributeIfDue, loadDistributable } from "@/lib/distribution";
+import { loadFundraiseView, releaseIfReachedById } from "@/lib/fundraise";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import {
   boundOnChainId,
@@ -33,6 +38,7 @@ import {
   claimReward,
   decryptSecret,
   getFundraise,
+  getPeriodTotals,
   getReward,
   getRewardsStatus,
   i128Of,
@@ -40,6 +46,7 @@ import {
   simulateForbiddenAction,
   stellarConfig,
   stellarExpertTxUrl,
+  isTestnet,
   stroopsToUsd,
   usdToStroops,
 } from "@/lib/stellar";
@@ -55,9 +62,12 @@ const marketplaceSelect = {
   splitCommunityBps: true,
   rewardsPeriodSeconds: true,
   rewardsVendorPoolBps: true,
+  rewardsNextVendorPoolBps: true,
+  rewardsNextPeriodSeconds: true,
   communityGoalUsd: true,
   fundraisePolicy: true,
   fundraiseRecipients: true,
+  fundraiseNextTargetUsd: true,
   contractMarketplaceId: true,
   contractId: true,
 } as const;
@@ -160,7 +170,7 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
       }
     }
     if (!ended) {
-      return c.json({ error: "This period hasn't ended yet; rewards can be claimed after it ends.", code: "PeriodNotEnded" }, 409);
+      return c.json({ error: "This period hasn't been distributed yet; rewards can be claimed after the distribution.", code: "PeriodNotEnded" }, 409);
     }
     if (!claimable) {
       return c.json({ error: "You have no unclaimed reward in this period.", code: "NothingToClaim" }, 409);
@@ -246,7 +256,7 @@ rewards.post("/marketplace/:slug/fundraise/release", async (c) => {
     return c.json({ error: "This marketplace has no fundraising target" }, 400);
   }
   try {
-    const released = await releaseIfReached(marketplace);
+    const released = await releaseIfReachedById(marketplace.id);
     if (!released) {
       return c.json({ error: "The fundraising target hasn't been reached yet.", code: "GoalNotReached" }, 409);
     }
@@ -255,6 +265,111 @@ rewards.post("/marketplace/:slug/fundraise/release", async (c) => {
     const { body, status } = errorResponse(error, "Could not release the funds");
     return c.json(body, status);
   }
+});
+
+// ── Next period's rules / next round's target (operator) ───────────────────
+//
+// The contract takes them at the next distribution / release, in that same
+// call; until then they are a pending choice in Postgres the operator can
+// change or clear (null). They never touch the running period or round.
+
+const DAY = 24 * 60 * 60;
+/** Lengths offered for a period (monthly … yearly; 10 minutes on testnet for demos). */
+function allowedPeriods(): number[] {
+  const periods = [30 * DAY, 90 * DAY, 180 * DAY, 365 * DAY];
+  return isTestnet() ? [10 * 60, ...periods] : periods;
+}
+
+async function operatorMarketplace(c: Parameters<typeof getSessionUser>[0], slug: string) {
+  const user = await getSessionUser(c);
+  if (!user) return { error: c.json({ error: "Sign in as the operator" }, 401) };
+  const marketplace = await prisma.marketplace.findUnique({ where: { slug }, select: marketplaceSelect });
+  if (!marketplace) return { error: c.json({ error: "Marketplace not found" }, 404) };
+  if (marketplace.operatorId !== user.id) {
+    return { error: c.json({ error: "Only the marketplace operator can change this" }, 403) };
+  }
+  return { marketplace };
+}
+
+async function readBody(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown> | null> {
+  try {
+    const body = await c.req.json();
+    return body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+rewards.put("/marketplace/:slug/next-rules", async (c) => {
+  const found = await operatorMarketplace(c, c.req.param("slug"));
+  if (found.error) return found.error;
+  const { marketplace } = found;
+  if (communityModeOf(marketplace) !== "rewards") {
+    return c.json({ error: "Community Rewards is not enabled for this marketplace" }, 400);
+  }
+  const body = await readBody(c);
+  if (!body) return c.json({ error: "Invalid JSON" }, 400);
+  if (body.clear === true) {
+    await prisma.marketplace.update({
+      where: { id: marketplace.id },
+      data: { rewardsNextVendorPoolBps: null, rewardsNextPeriodSeconds: null },
+    });
+    return c.json({ nextRules: null });
+  }
+  const vendorPoolBps = Number(body.vendorPoolBps);
+  const periodSeconds = Number(body.periodSeconds);
+  if (!Number.isInteger(vendorPoolBps) || vendorPoolBps < 0 || vendorPoolBps > 10_000) {
+    return c.json({ error: "The sellers' and buyers' parts of the rewards must add up to 100%" }, 400);
+  }
+  if (!allowedPeriods().includes(periodSeconds)) {
+    return c.json({ error: "Choose how often rewards are shared" }, 400);
+  }
+  await prisma.marketplace.update({
+    where: { id: marketplace.id },
+    data: { rewardsNextVendorPoolBps: vendorPoolBps, rewardsNextPeriodSeconds: periodSeconds },
+  });
+  return c.json({ nextRules: { vendorPoolBps, periodSeconds } });
+});
+
+rewards.post("/marketplace/:slug/distribute", async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Sign in first" }, 401);
+  const marketplace = await loadDistributable({ slug: c.req.param("slug") });
+  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+  try {
+    const done = await distributeIfDue(marketplace);
+    if (!done) {
+      return c.json({ error: "This period hasn't reached its end yet.", code: "PeriodNotEnded" }, 409);
+    }
+    return c.json({ ...done, verifyUrl: stellarExpertTxUrl(done.txHash) });
+  } catch (error) {
+    const { body, status } = errorResponse(error, "Could not distribute the rewards");
+    return c.json(body, status);
+  }
+});
+
+rewards.put("/marketplace/:slug/fundraise/next-target", async (c) => {
+  const found = await operatorMarketplace(c, c.req.param("slug"));
+  if (found.error) return found.error;
+  const { marketplace } = found;
+  if (communityModeOf(marketplace) !== "fundraise") {
+    return c.json({ error: "This marketplace has no fundraising target" }, 400);
+  }
+  const body = await readBody(c);
+  if (!body) return c.json({ error: "Invalid JSON" }, 400);
+  const raw = body.targetUsd;
+  const target = raw === null ? null : Number(raw);
+  if (
+    target !== null &&
+    (!Number.isFinite(target) || target < 0 || target > 1_000_000_000 || Math.abs(target * 100 - Math.round(target * 100)) > 0.00001)
+  ) {
+    return c.json({ error: "The next target must be 0 (stop) or a positive amount with up to two decimals" }, 400);
+  }
+  await prisma.marketplace.update({
+    where: { id: marketplace.id },
+    data: { fundraiseNextTargetUsd: target },
+  });
+  return c.json({ nextTargetUsd: target });
 });
 
 // ── POST /marketplace/:slug/guarantees — "try to break it" demo ───────────
@@ -408,13 +523,13 @@ rewards.get("/me", async (c) => {
               );
               const amount = rewards.reduce((sum, r) => sum + r.reward.amountStroops, 0n);
               const unclaimed = rewards.some((r) => r.reward.amountStroops > 0n && !r.reward.claimed);
-              const startTs = status.startTs + k * status.periodSeconds;
+              const totals = await getPeriodTotals(onChainId, k);
               const claimTx = claims.find((cl) => cl.periodId === k && entry.addresses.has(cl.memberAddress));
               return {
                 periodId: k,
-                startTs,
-                endTs: startTs + status.periodSeconds,
-                status: k < status.currentPeriod ? "ended" : "current",
+                startTs: totals.startTs,
+                endTs: totals.distributed ? totals.endTs : status.periodEnd,
+                status: totals.distributed ? "ended" : "current",
                 soldUsd: Math.round(entry.sold * 100) / 100,
                 boughtUsd: Math.round(entry.bought * 100) / 100,
                 amountUsd: stroopsToUsd(amount),
