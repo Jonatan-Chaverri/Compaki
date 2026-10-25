@@ -1,9 +1,12 @@
 // GET /api/me — session user plus the marketplace they operate (if any) and
 // the marketplaces they sell in (drives the "Vendor dashboard" menu items).
+// GET /api/me/marketplaces — every marketplace the session user operates,
+// with sales and catalog totals ("My marketplaces").
 
 import { Hono } from "hono";
 
 import { prisma } from "@/lib/db";
+import { communityModeOf } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 import { ownWalletProvider } from "@/lib/wallets";
 
@@ -38,6 +41,57 @@ me.get("/", async (c) => {
     vendorMarketplaces: memberships.map((m) => ({
       slug: m.marketplace.slug,
       name: m.marketplace.name,
+    })),
+  });
+});
+
+me.get("/marketplaces", async (c) => {
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Sign in to see your marketplaces" }, 401);
+
+  const marketplaces = await prisma.marketplace.findMany({
+    where: { operatorId: user.id },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      category: true,
+      communityMode: true,
+      splitCommunityBps: true,
+      createdAt: true,
+    },
+  });
+  const ids = marketplaces.map((m) => m.id);
+  const [available, sales] = await Promise.all([
+    prisma.product.groupBy({
+      by: ["marketplaceId"],
+      where: { marketplaceId: { in: ids }, stock: { gt: 0 } },
+      _count: { _all: true },
+    }),
+    Promise.all(
+      ids.map((id) =>
+        prisma.sale.aggregate({
+          where: { product: { marketplaceId: id } },
+          _sum: { amountUsd: true },
+          _count: { _all: true },
+        }),
+      ),
+    ),
+  ]);
+  const availableBy = new Map(available.map((row) => [row.marketplaceId, row._count._all]));
+
+  return c.json({
+    marketplaces: marketplaces.map((m, i) => ({
+      name: m.name,
+      slug: m.slug,
+      category: m.category,
+      communityMode: communityModeOf(m),
+      communityBps: m.splitCommunityBps,
+      createdAt: m.createdAt.toISOString(),
+      revenueUsd: sales[i]._sum.amountUsd ?? 0,
+      salesCount: sales[i]._count._all,
+      availableProducts: availableBy.get(m.id) ?? 0,
     })),
   });
 });

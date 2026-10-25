@@ -895,7 +895,6 @@
     "dismissNotification": "Dismiss notification",
     "accountValue": "Account: {value1}",
     "signInOrCreateAnAccount": "Sign in or create an account",
-    "manageMyMarketplace": "Manage my marketplace",
     "vendorDashboard": "Vendor dashboard",
     "signOut": "Sign out",
     "browseFreelySignInToBuyOrSell": "Browse freely — sign in to buy or sell.",
@@ -1131,6 +1130,22 @@
     "apiFieldPurpose": "Community purpose",
     "apiFieldBeneficiaries": "Who benefits",
     "apiFieldDistribution": "Distribution explanation",
-    "products": "Products"
+    "products": "Products",
+    "myMarketplaces": "My marketplaces",
+    "everyMarketplaceYouCreatedWithItsSalesAndCatalog": "Every marketplace you created, with its sales and catalog.",
+    "signInToSeeTheMarketplacesYouCreated": "Sign in to see the marketplaces you created.",
+    "marketplacesRequestFailedValue": "Marketplaces request failed ({value1})",
+    "youHaveNotCreatedAMarketplaceYet": "You haven’t created a marketplace yet. Bring your sellers together and start your first one.",
+    "createMarketplace": "Create marketplace",
+    "marketplaceTypeRewards": "Rewards",
+    "marketplaceTypeFundraise": "Fundraising",
+    "marketplaceTypeCommunityFund": "Community fund",
+    "marketplaceTypeStandard": "Standard",
+    "revenue": "Revenue",
+    "salesCount": "{count, plural, =0 {No sales yet} one {# sale} other {# sales}}",
+    "availableProducts": "Products available",
+    "createdOn": "Created",
+    "manage": "Manage",
+    "apiSignInToSeeYourMarketplaces": "Sign in to see your marketplaces"
   }
 }

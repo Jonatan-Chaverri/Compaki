@@ -12,6 +12,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { useCompakiWallet } from "@/components/cavos-provider";
+import { Icon } from "@/components/icon";
 import { LanguageOptions } from "./language-menu";
 import { ThemeOptions } from "./theme-menu";
 
@@ -159,7 +160,14 @@ export function UserMenu() {
                   )}
                 </span>
               </div>
-              <Link role="menuitem" href="/dashboard" onClick={() => setOpen(false)} className="block px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-50">{t("manageMyMarketplace")}</Link>
+              <Link
+                role="menuitem"
+                href="/dashboard"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
+              >
+                <Icon name="store" className="h-4 w-4 text-slate-400" />
+                {t("myMarketplaces")}</Link>
               <Link
                 role="menuitem"
                 href="/profile"

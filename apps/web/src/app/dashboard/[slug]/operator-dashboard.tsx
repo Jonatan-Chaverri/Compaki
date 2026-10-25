@@ -99,6 +99,7 @@ export function OperatorDashboard({
 
   return (
     <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-6 py-8">
+      <Link href="/dashboard" className="mb-4 inline-block text-sm text-slate-500 hover:text-slate-900">← {t("myMarketplaces")}</Link>
       <PageHeading eyebrow={t("yourMarketplaceAtAGlance")} title={name} description={t("aHomeForYourSellersYourSalesAndTheGoodYou")}>
         <Link href={`/m/${slug}`} className="button-secondary button-small">{t("viewStorefront")}<Icon name="arrow" className="h-4 w-4" /></Link>
       </PageHeading>

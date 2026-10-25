@@ -895,7 +895,6 @@
     "dismissNotification": "Cerrar notificación",
     "accountValue": "Cuenta: {value1}",
     "signInOrCreateAnAccount": "Inicia sesión o crea una cuenta",
-    "manageMyMarketplace": "Gestionar mi marketplace",
     "vendorDashboard": "Panel del vendedor",
     "signOut": "Cerrar sesión",
     "browseFreelySignInToBuyOrSell": "Explora libremente. Inicia sesión para comprar o vender.",
@@ -1131,6 +1130,22 @@
     "apiFieldPurpose": "El propósito de la comunidad",
     "apiFieldBeneficiaries": "Quién se beneficia",
     "apiFieldDistribution": "La explicación del reparto",
-    "products": "Productos"
+    "products": "Productos",
+    "myMarketplaces": "Mis marketplaces",
+    "everyMarketplaceYouCreatedWithItsSalesAndCatalog": "Todos los marketplaces que creaste, con sus ventas y su catálogo.",
+    "signInToSeeTheMarketplacesYouCreated": "Inicia sesión para ver los marketplaces que creaste.",
+    "marketplacesRequestFailedValue": "No se pudieron cargar los marketplaces ({value1})",
+    "youHaveNotCreatedAMarketplaceYet": "Todavía no has creado un marketplace. Reúne a tus vendedores y crea el primero.",
+    "createMarketplace": "Crear marketplace",
+    "marketplaceTypeRewards": "Recompensas",
+    "marketplaceTypeFundraise": "Recaudación",
+    "marketplaceTypeCommunityFund": "Fondo comunitario",
+    "marketplaceTypeStandard": "Estándar",
+    "revenue": "Ingresos",
+    "salesCount": "{count, plural, =0 {Sin ventas todavía} one {# venta} other {# ventas}}",
+    "availableProducts": "Productos disponibles",
+    "createdOn": "Creado",
+    "manage": "Gestionar",
+    "apiSignInToSeeYourMarketplaces": "Inicia sesión para ver tus marketplaces"
   }
 }
