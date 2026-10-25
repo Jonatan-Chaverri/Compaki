@@ -22,7 +22,7 @@ const benefits: { icon: IconName; title: string; text: string }[] = [
 ];
 
   return <div className="landing">
-    <AppHeader right={<Link href="/onboarding" className="button-primary button-small">{t("startAMarketplace")}<Icon name="arrow" className="h-3.5 w-3.5" /></Link>} />
+    <AppHeader />
     <main id="main-content">
       <section className="landing-hero">
         <div>

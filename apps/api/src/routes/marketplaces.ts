@@ -36,8 +36,10 @@ import {
   type GoalPolicy,
 } from "@/lib/stellar";
 import { demoImpersonationEnabled } from "./demo";
+import { createMarketplaceDeletion } from "./marketplace-deletion";
 
 export const marketplaces = new Hono();
+marketplaces.route("/", createMarketplaceDeletion({ db: prisma, sessionUser: getSessionUser }));
 
 const CATEGORIES = ["Coffee & agriculture", "Crafts", "Services", "Other"] as const;
 

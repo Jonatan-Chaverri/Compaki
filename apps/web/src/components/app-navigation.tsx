@@ -31,7 +31,6 @@ export function AppNavigation() {
   const links = [
     { href: "/marketplaces", label: t("exploreMarketplaces"), active: pathname === "/marketplaces" || pathname.startsWith("/m/") },
     { href: "/#how-it-works", label: t("howItWorks"), active: false },
-    { href: "/dashboard", label: t("forYourCommunity"), active: pathname.startsWith("/dashboard") || pathname === "/onboarding" },
   ];
   return <>
     <nav className="desktop-nav" aria-label={t("mainNavigation")}>

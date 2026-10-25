@@ -1282,6 +1282,17 @@
     "communityCurrentFundReceived": "Contributions received by the current fund",
     "communityCurrencyNote": "Amounts are shown in US dollars (USD). Payments use USDC. This demo uses test funds.",
     "communityMarketplaceLabel": "Marketplace",
-    "communityBuyersLabel": "Buyers"
+    "communityBuyersLabel": "Buyers",
+    "marketplaceSettings": "Marketplace settings",
+    "deleteMarketplace": "Delete marketplace",
+    "deleteMarketplaceHint": "Remove this marketplace from Compaki along with its products, orders and history.",
+    "deleteMarketplaceTitle": "Delete {name}?",
+    "deleteMarketplaceDescription": "The marketplace, its products, orders, sales and community records will be removed from Compaki. This cannot be undone.",
+    "deleteMarketplaceFundNote": "Deletion does not distribute or move funds. Payments already made remain recorded on the network.",
+    "deleteMarketplaceConfirm": "Yes, delete",
+    "deletingMarketplace": "Deleting marketplace…",
+    "deleteMarketplaceFailed": "Could not delete the marketplace. Please try again.",
+    "deleteMarketplaceSignIn": "Your session has ended. Sign in again to delete this marketplace.",
+    "deleteMarketplaceOwnerOnly": "Only the owner can delete this marketplace."
   }
 }

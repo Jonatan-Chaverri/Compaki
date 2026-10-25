@@ -1,44 +1,29 @@
-.header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px;
-  align-items: center;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 25px;
-  background: var(--surface-soft);
-}
-.intro { min-width: 0; padding: 34px 0 30px 36px; }
-.title { margin-top: 13px; color: var(--ink); font-size: clamp(30px, 4.1vw, 48px); font-weight: 550; line-height: 1.12; letter-spacing: -.045em; overflow-wrap: anywhere; }
-.description { max-width: 650px; margin-top: 17px; color: var(--ink-muted); font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
-.products { display: flex; align-items: center; gap: 8px; margin-top: 21px; color: var(--ink-muted); font-size: 11px; line-height: 1.7; }
+.page { padding-top: 24px; padding-bottom: 48px; }
+.page > :global(.storefront-breadcrumb) { margin-bottom: 16px; }
+.header { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-soft); }
+.intro { min-width: 0; padding: 20px 24px; }
+.meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.meta :global(.eyebrow) { font-size: 9px; }
+.title { margin-top: 10px; color: var(--ink); font-size: clamp(25px, 3vw, 32px); font-weight: 550; line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 850px; margin-top: 8px; color: var(--ink-muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.products { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .products svg { flex-shrink: 0; }
-.art { padding: 20px 28px 20px 12px; }
-.art > svg { width: 100%; height: 170px; }
-.impact { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 22px 30px 23px 36px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-card) 45%, transparent); }
-.impactIcon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border: 1px solid var(--brand-yellow-line); border-radius: 13px; background: var(--brand-yellow-soft); color: var(--brand-yellow-ink); }
+.impact { display: flex; align-items: center; gap: 11px; padding: 11px 24px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-card) 45%, transparent); }
+.impactIcon { display: grid; place-items: center; width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--brand-yellow-line); border-radius: 9px; background: var(--brand-yellow-soft); color: var(--brand-yellow-ink); }
+.impactIcon svg { width: 16px; height: 16px; }
 .impactCopy { min-width: 0; flex: 1; }
-.impactLabel { color: var(--ink-soft); font-size: 9px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
-.impactCopy h2 { margin-top: 5px; color: var(--ink); font-size: 16px; font-weight: 550; line-height: 1.5; letter-spacing: -.025em; }
-.purpose { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 5px; color: var(--ink-muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.benefits { flex-shrink: 0; background: transparent; }
-@media (max-width: 900px) {
-  .header { grid-template-columns: minmax(0, 1fr) 190px; }
-  .intro { padding-left: 28px; }
-  .art { padding-right: 18px; }
-  .impact { flex-wrap: wrap; padding-inline: 28px; gap: 13px; }
-  .impactCopy { flex-basis: calc(100% - 60px); }
-  .benefits { margin-left: 55px; }
-}
+.impactCopy h2 { color: var(--ink-muted); font-size: 11px; font-weight: 500; line-height: 1.6; }
+.benefits { flex-shrink: 0; background: transparent; min-height: 34px; padding: 7px 11px; font-size: 10px; }
 @media (max-width: 640px) {
-  .header { grid-template-columns: minmax(0, 1fr); border-radius: 20px; }
-  .intro { padding: 27px 24px 25px; }
-  .title { font-size: clamp(30px, 8vw, 40px); }
-  .description { margin-top: 14px; font-size: 13px; }
-  .products { margin-top: 17px; }
-  .art { display: none; }
-  .impact { padding: 20px 24px 23px; align-items: flex-start; gap: 12px; }
-  .impactIcon { width: 36px; height: 36px; border-radius: 11px; }
-  .impactCopy { flex-basis: calc(100% - 48px); }
-  .impactCopy h2 { font-size: 15px; }
-  .benefits { justify-content: space-between; width: 100%; margin: 3px 0 0; white-space: normal; text-align: left; }
+  .page { padding-top: 20px; padding-inline: 20px; }
+  .intro { padding: 18px; }
+  .meta { gap: 7px; }
+  .products { font-size: 9px; }
+  .title { margin-top: 9px; font-size: 26px; }
+  .description { margin-top: 7px; font-size: 11px; }
+  .impact { padding: 11px 18px; gap: 9px; flex-wrap: wrap; }
+  .impactIcon { display: none; }
+  .impactCopy { flex-basis: 170px; }
+  .impactCopy h2 { font-size: 10px; }
+  .benefits { min-height: 32px; font-size: 10px; }
 }

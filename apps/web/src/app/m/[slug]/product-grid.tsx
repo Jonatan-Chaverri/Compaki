@@ -71,7 +71,7 @@ export function ProductGrid({
   };
 
   return (
-    <div className="mt-9">
+    <div className="mt-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-medium tracking-tight">{t("findYourNextFavorite2")}</h2><span className="text-xs text-slate-500">{t("madeGrownOrChosenWithCare")}</span></div>
       <div className="catalog-toolbar flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">

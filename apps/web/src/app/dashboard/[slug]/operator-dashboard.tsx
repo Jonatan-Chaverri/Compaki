@@ -4,6 +4,7 @@ import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 import { CommunityEditor } from "@/components/community-editor";
+import { DeleteMarketplace } from "@/components/delete-marketplace";
 import { Icon, type IconName } from "@/components/icon";
 import { LiveBalance } from "@/components/live-balance";
 import { ProductVisual } from "@/components/shell";
@@ -184,6 +185,7 @@ export function OperatorDashboard({ community, initialTab = "overview", name, sl
           <ProductVisual imageUrl={product.imageUrl} /><div className={styles.productBody}><span className={styles.productSeller}>{product.vendorName}</span><h3>{product.name}</h3><p>{product.description}</p><div className={styles.productBottom}><strong>{formatUsd(product.priceUsd, locale)}</strong><span><Icon name="arrow" className="h-4 w-4" /></span></div></div>
         </Link>)}</div>}
     </section>}
+    <DeleteMarketplace name={name} slug={slug} />
   </main>;
 }
 
