@@ -7,48 +7,16 @@
 import { Hono } from "hono";
 
 import { prisma } from "@/lib/db";
-import { parseProductInput } from "@/lib/products";
+import { createProductManagement } from "./product-management";
+import { createProductLifecycle } from "./product-lifecycle";
 import { communityModeOf } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 
 import { communityFundLabel } from "./marketplaces";
 
 export const products = new Hono();
-
-products.post("/", async (c) => {
-  const user = await getSessionUser(c);
-  if (!user) return c.json({ error: "Not signed in" }, 401);
-
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON" }, 400);
-  }
-  const b = (body ?? {}) as Record<string, unknown>;
-  const slug = typeof b.marketplaceSlug === "string" ? b.marketplaceSlug : "";
-  const input = parseProductInput(body);
-  if (typeof input === "string") return c.json({ error: input }, 400);
-
-  const marketplace = await prisma.marketplace.findUnique({ where: { slug } });
-  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
-
-  const membership = await prisma.vendorMembership.findUnique({
-    where: { marketplaceId_userId: { marketplaceId: marketplace.id, userId: user.id } },
-  });
-  if (!membership) {
-    return c.json({ error: "You are not a vendor of this marketplace" }, 403);
-  }
-
-  const product = await prisma.product.create({
-    data: {
-      ...input,
-      marketplaceId: marketplace.id,
-      vendorId: user.id,
-    },
-  });
-  return c.json({ product }, 201);
-});
+products.route("/", createProductLifecycle({ db: prisma, sessionUser: getSessionUser }));
+products.route("/", createProductManagement({ db: prisma, sessionUser: getSessionUser }));
 
 products.get("/:id", async (c) => {
   const id = c.req.param("id");
@@ -59,7 +27,7 @@ products.get("/:id", async (c) => {
       marketplace: { include: { communityFund: { select: { name: true } } } },
     },
   });
-  if (!product) return c.json({ error: "Product not found" }, 404);
+  if (!product || product.visibility !== "PUBLISHED") return c.json({ error: "Product not found" }, 404);
 
   return c.json({
     product: {
@@ -83,26 +51,3 @@ products.get("/:id", async (c) => {
   });
 });
 
-products.patch("/:id", async (c) => {
-  const user = await getSessionUser(c);
-  if (!user) return c.json({ error: "Not signed in" }, 401);
-
-  const id = c.req.param("id");
-  const existing = await prisma.product.findUnique({ where: { id } });
-  if (!existing) return c.json({ error: "Product not found" }, 404);
-  if (existing.vendorId !== user.id) {
-    return c.json({ error: "Not your product" }, 403);
-  }
-
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON" }, 400);
-  }
-  const input = parseProductInput(body);
-  if (typeof input === "string") return c.json({ error: input }, 400);
-
-  const product = await prisma.product.update({ where: { id }, data: input });
-  return c.json({ product });
-});

@@ -213,36 +213,7 @@ export function UserMenu() {
                   <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
                 </svg>
                 {t("myRewards")}</Link>
-              {vendorMarketplaces.map((marketplace) => (
-                <Link
-                  key={marketplace.slug}
-                  role="menuitem"
-                  href={`/vendor/${marketplace.slug}`}
-                  onClick={() => setOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-4 w-4 shrink-0 text-slate-400"
-                  >
-                    <path d="M3 9l1.5-5h15L21 9" />
-                    <path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0" />
-                    <path d="M5 11.5V21h14v-9.5M9 21v-6h6v6" />
-                  </svg>
-                  <span className="min-w-0">
-                    {t("vendorDashboard")}{vendorMarketplaces.length > 1 && (
-                      <span className="block truncate text-xs text-slate-400">
-                        {marketplace.name}
-                      </span>
-                    )}
-                  </span>
-                </Link>
-              ))}
+              {vendorMarketplaces.length > 0 && <Link role="menuitem" href="/vendor" onClick={() => setOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"><Icon name="bag" className="h-4 w-4 text-slate-400" />{t("vendorDashboard")}</Link>}
               <ThemeOptions />
               <button
                 role="menuitem"

@@ -1,4 +1,6 @@
 // Shared validation for product create/edit payloads.
+export const publishedProducts = { visibility: "PUBLISHED" } as const;
+export const activeProducts = { visibility: { not: "DELETED" } } as const;
 
 export interface ProductInput {
   name: string;

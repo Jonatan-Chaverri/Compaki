@@ -154,6 +154,8 @@ model Product {
   // Units the vendor has for sale. Decremented when an order item settles.
   stock       Int      @default(0)
   imageUrl    String?
+  // PUBLISHED is public, HIDDEN can be republished, DELETED preserves order history.
+  visibility  String   @default("PUBLISHED")
   createdAt   DateTime @default(now())
 
   marketplaceId String

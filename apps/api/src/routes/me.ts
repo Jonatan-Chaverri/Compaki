@@ -9,8 +9,11 @@ import { prisma } from "@/lib/db";
 import { communityModeOf } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 import { ownWalletProvider } from "@/lib/wallets";
+import { publishedProducts } from "@/lib/products";
+import { createSellerDashboard } from "./seller-dashboard";
 
 export const me = new Hono();
+me.route("/seller-dashboard", createSellerDashboard({ db: prisma, sessionUser: getSessionUser }));
 
 me.get("/", async (c) => {
   const user = await getSessionUser(c);
@@ -66,7 +69,7 @@ me.get("/marketplaces", async (c) => {
   const [available, sales] = await Promise.all([
     prisma.product.groupBy({
       by: ["marketplaceId"],
-      where: { marketplaceId: { in: ids }, stock: { gt: 0 } },
+      where: { marketplaceId: { in: ids }, stock: { gt: 0 }, ...publishedProducts },
       _count: { _all: true },
     }),
     Promise.all(

@@ -33,6 +33,7 @@ import { boundOnChainId, describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 import { createCustodialAccount, decryptSecret, purchase } from "@/lib/stellar";
 import { ownWalletPending, personalWallet } from "@/lib/wallets";
+import { publishedProducts } from "@/lib/products";
 
 export const orders = new Hono();
 
@@ -82,7 +83,7 @@ orders.post("/", async (c) => {
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
 
   const products = await prisma.product.findMany({
-    where: { id: { in: [...requested.keys()] }, marketplaceId: marketplace.id },
+    where: { id: { in: [...requested.keys()] }, marketplaceId: marketplace.id, ...publishedProducts },
   });
   if (products.length !== requested.size) {
     return c.json({ error: "Some cart items are no longer available" }, 409);

@@ -19,6 +19,7 @@ export interface EditableProduct {
   priceUsd: number;
   stock: number;
   imageUrl: string | null;
+  marketplace?: { name: string; slug: string };
 }
 
 const EMOJI_CHOICES = ["☕", "🍫", "🧺", "🏺", "🧶", "🎨", "🍯", "🌱", "🥖", "🧼", "📦", "🛠️"];
@@ -47,17 +48,22 @@ export function Modal({ children, onClose, label }: { children: React.ReactNode;
 
 export function ProductModal({
   marketplaceSlug,
+  marketplaces = [],
   product,
   onClose,
+  onCreated,
 }: {
   /** Required when creating; ignored on edit. */
   marketplaceSlug?: string;
+  marketplaces?: { name: string; slug: string }[];
   product: EditableProduct | null;
   onClose: () => void;
+  onCreated?: (marketplaceSlug: string) => void;
 }) {
   const t = useTranslations("ui");
 
   const router = useRouter();
+  const [selectedMarketplace, setSelectedMarketplace] = useState(marketplaceSlug ?? marketplaces[0]?.slug ?? "");
   const [name, setName] = useState(product?.name ?? "");
   const [shortDescription, setShortDescription] = useState(product?.shortDescription ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
@@ -68,6 +74,7 @@ export function ProductModal({
   const [error, setError] = useState<string | null>(null);
 
   const valid =
+    Boolean(product || selectedMarketplace) &&
     name.trim().length >= 2 &&
     Number(price) >= 0.01 &&
     Number.isInteger(Number(stock)) &&
@@ -81,7 +88,7 @@ export function ProductModal({
         method: product ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          marketplaceSlug,
+          marketplaceSlug: selectedMarketplace,
           name,
           shortDescription,
           description,
@@ -92,6 +99,7 @@ export function ProductModal({
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(localizedMessage(data.error, t, t("couldNotSaveProduct")));
+      if (!product) onCreated?.(selectedMarketplace);
       onClose();
       router.refresh();
     } catch (err) {
@@ -106,6 +114,15 @@ export function ProductModal({
         {product ? t("editProduct") : t("addAProduct")}
       </h2>
       <div className="mt-4 space-y-4">
+        {!product && <div>
+          <label htmlFor="product-marketplace" className="mb-1.5 block text-sm font-medium text-slate-700">{t("sellerPublishIn")}</label>
+          <select id="product-marketplace" value={selectedMarketplace} onChange={event => setSelectedMarketplace(event.target.value)} className={inputClass} disabled={busy}>
+            <option value="" disabled>{t("sellerChooseMarketplace")}</option>
+            {marketplaces.map(marketplace => <option key={marketplace.slug} value={marketplace.slug}>{marketplace.name}</option>)}
+          </select>
+          <p className="mt-2 text-xs text-slate-500">{t("sellerMarketplaceOptionsHint")}</p>
+        </div>}
+        {product?.marketplace && <p className="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-600">{t("sellerProductMarketplace", { name: product.marketplace.name })}</p>}
         <div>
           <label htmlFor="product-name" className="mb-1.5 block text-sm font-medium text-slate-700">{t("productName")}</label>
           <input

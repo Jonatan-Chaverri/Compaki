@@ -23,6 +23,7 @@
 .onboarding-categories label:has(:checked) { background: var(--brand-yellow-soft); border-color: var(--brand-yellow-line); }
 .onboarding-progress li[aria-current="step"] .onboarding-step-number { background: var(--brand-yellow); color: #263c30; border-color: var(--brand-yellow); }
 .header-inner { gap: 24px; }
+.desktop-nav { position: absolute; left: 50%; transform: translateX(-50%); margin-left: 0; }
 .header-brand, .onboarding-header > .header-brand { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .header-brand > a { flex-shrink: 0; }
 .header-actions { gap: 11px; }

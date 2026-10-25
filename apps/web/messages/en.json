@@ -1309,6 +1309,25 @@
     "catalogFixPriceTitle": "Check the price range",
     "catalogFixPriceHint": "Correct the price filters or clear them to see products again.",
     "catalogNoResults": "No products match that combination. Try a different name, price range or seller.",
-    "catalogSellersEmpty": "Sellers will appear here when they publish products."
+    "catalogSellersEmpty": "Sellers will appear here when they publish products.",
+    "sellerStudioDescription": "Manage your products and sales across all your marketplaces in one place.",
+    "sellerMarketplaceFilter": "Marketplace",
+    "allMarketplaces2": "All marketplaces",
+    "sellerEmptyCatalog": "There are no products in this selection yet. Publish your first product to get started.",
+    "sellerJoinMarketplace": "Explore marketplaces to sell in",
+    "sellerProductPublished": "Visible",
+    "sellerProductHidden": "Hidden",
+    "sellerHideProduct": "Hide",
+    "sellerPublishProduct": "Publish",
+    "sellerDeleteProduct": "Delete",
+    "sellerDeleteProductTitle": "Delete {name}?",
+    "sellerDeleteProductDescription": "The product will be removed from your catalog and marketplace. Earlier sales and orders are kept. You cannot restore the product from this dashboard.",
+    "sellerDeletingProduct": "Deleting…",
+    "sellerProductActionFailed": "Could not update the product. Check your session and try again.",
+    "sellerPublishIn": "Publish in",
+    "sellerChooseMarketplace": "Choose a marketplace",
+    "sellerMarketplaceOptionsHint": "Only marketplaces where you are already a seller appear here.",
+    "sellerProductMarketplace": "Marketplace: {name}",
+    "sellerSignIn": "Sign in to manage your products and sales."
   }
 }

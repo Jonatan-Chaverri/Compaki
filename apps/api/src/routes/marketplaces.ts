@@ -37,6 +37,7 @@ import {
 } from "@/lib/stellar";
 import { demoImpersonationEnabled } from "./demo";
 import { createMarketplaceDeletion } from "./marketplace-deletion";
+import { activeProducts, publishedProducts } from "@/lib/products";
 
 export const marketplaces = new Hono();
 marketplaces.route("/", createMarketplaceDeletion({ db: prisma, sessionUser: getSessionUser }));
@@ -298,7 +299,7 @@ marketplaces.get("/directory", async (c) => {
   const rows = await prisma.marketplace.findMany({
     include: {
       communityFund: { select: { name: true } },
-      _count: { select: { products: true, vendors: true } },
+      _count: { select: { products: { where: publishedProducts }, vendors: true } },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -592,6 +593,7 @@ marketplaces.get("/:slug/storefront", async (c) => {
     include: {
       communityFund: { select: { name: true } },
       products: {
+        where: publishedProducts,
         include: { vendor: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       },
@@ -643,6 +645,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
         orderBy: { createdAt: "desc" },
       },
       products: {
+        where: publishedProducts,
         include: { vendor: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       },
@@ -767,7 +770,7 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
   }
 
   const products = await prisma.product.findMany({
-    where: { marketplaceId: marketplace.id, vendorId: user.id },
+    where: { marketplaceId: marketplace.id, vendorId: user.id, ...activeProducts },
     orderBy: { createdAt: "desc" },
   });
   const sales = await prisma.sale.findMany({
@@ -793,6 +796,8 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
       priceUsd: p.priceUsd,
       stock: p.stock,
       imageUrl: p.imageUrl,
+      visibility: p.visibility,
+      marketplace: { name: marketplace.name, slug: marketplace.slug },
     })),
     sales: sales.map((s) => {
       let vendorShareUsd = s.amountUsd;
@@ -804,6 +809,7 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
       return {
         id: s.id,
         productName: s.product.name,
+        marketplace: { name: marketplace.name, slug: marketplace.slug },
         quantity: s.quantity,
         amountUsd: s.amountUsd,
         vendorShareUsd,

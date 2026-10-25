@@ -1309,6 +1309,25 @@
     "catalogFixPriceTitle": "Revisa el rango de precios",
     "catalogFixPriceHint": "Corrige los precios del filtro o límpialos para volver a ver los productos.",
     "catalogNoResults": "No encontramos productos con esa combinación. Prueba otro nombre, rango de precio o vendedor.",
-    "catalogSellersEmpty": "Los vendedores aparecerán aquí cuando publiquen productos."
+    "catalogSellersEmpty": "Los vendedores aparecerán aquí cuando publiquen productos.",
+    "sellerStudioDescription": "Administra tus productos y ventas en todos tus marketplaces desde un mismo lugar.",
+    "sellerMarketplaceFilter": "Marketplace",
+    "allMarketplaces2": "Todos los marketplaces",
+    "sellerEmptyCatalog": "Aún no hay productos en esta selección. Publica tu primer producto para empezar.",
+    "sellerJoinMarketplace": "Explorar marketplaces para vender",
+    "sellerProductPublished": "Visible",
+    "sellerProductHidden": "Oculto",
+    "sellerHideProduct": "Ocultar",
+    "sellerPublishProduct": "Publicar",
+    "sellerDeleteProduct": "Eliminar",
+    "sellerDeleteProductTitle": "¿Eliminar {name}?",
+    "sellerDeleteProductDescription": "El producto dejará de aparecer en tu catálogo y en el marketplace. Las ventas y los pedidos anteriores se conservan. No podrás recuperar el producto desde este panel.",
+    "sellerDeletingProduct": "Eliminando…",
+    "sellerProductActionFailed": "No se pudo actualizar el producto. Comprueba tu sesión e intenta de nuevo.",
+    "sellerPublishIn": "Publicar en",
+    "sellerChooseMarketplace": "Escoge un marketplace",
+    "sellerMarketplaceOptionsHint": "Solo aparecen los marketplaces donde ya eres vendedor.",
+    "sellerProductMarketplace": "Marketplace: {name}",
+    "sellerSignIn": "Inicia sesión para administrar tus productos y ventas."
   }
 }

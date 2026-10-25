@@ -15,6 +15,7 @@
 // moves. A payment that fails puts the units back (releaseStock).
 
 import { prisma } from "@/lib/db";
+import { publishedProducts } from "@/lib/products";
 import { fulfillmentOf } from "@/lib/fulfillment";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import { releaseIfReachedById } from "@/lib/fundraise";
@@ -164,11 +165,12 @@ export class PurchaseRefusedError extends Error {}
  */
 export async function reserveStock(item: { productId: string; quantity: number; product: { name: string } }) {
   const { count } = await prisma.product.updateMany({
-    where: { id: item.productId, stock: { gte: item.quantity } },
+    where: { id: item.productId, stock: { gte: item.quantity }, ...publishedProducts },
     data: { stock: { decrement: item.quantity } },
   });
   if (count === 1) return;
-  const product = await prisma.product.findUnique({ where: { id: item.productId }, select: { stock: true } });
+  const product = await prisma.product.findUnique({ where: { id: item.productId }, select: { stock: true, visibility: true } });
+  if (!product || product.visibility !== "PUBLISHED") throw new PurchaseRefusedError("Some cart items are no longer available");
   throw new PurchaseRefusedError(outOfStockMessage(item.product.name, Math.max(0, product?.stock ?? 0)));
 }
 
@@ -302,6 +304,7 @@ export async function nextOwnWalletPurchaseStep(orderId: string, buyer: { id: st
   const onChainId = boundOnChainId(order.marketplace);
   if (onChainId === null) throw new Error("Marketplace is not bound to the configured contract");
   const item = unsettled[0];
+  if (item.product.visibility !== "PUBLISHED") throw new PurchaseRefusedError("Some cart items are no longer available");
   const vendorAddress = vendorAddressFor(order, item);
   if (!vendorAddress) throw new Error(`${item.product.name} has no payout address`);
 
