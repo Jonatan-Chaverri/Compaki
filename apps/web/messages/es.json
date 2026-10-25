@@ -1365,6 +1365,12 @@
     "apiFinishWalletBeforeLaunch": "Termina de configurar tu wallet antes de lanzar un marketplace",
     "apiSignInWithTheMarketplaceWallet": "Inicia sesión con la wallet que creó este marketplace",
     "apiCouldNotSaveNextRules": "No se pudieron guardar las reglas del siguiente período",
-    "apiCouldNotSaveNextTarget": "No se pudo guardar la meta de la siguiente ronda"
+    "apiCouldNotSaveNextTarget": "No se pudo guardar la meta de la siguiente ronda",
+    "apiSignInToDeleteMarketplace": "Inicia sesión para eliminar este marketplace",
+    "apiOnlyOwnerCanDeleteMarketplace": "Solo quien creó el marketplace puede eliminarlo",
+    "apiCouldNotDeleteMarketplace": "No se pudo eliminar este marketplace. Inténtalo de nuevo.",
+    "apiInvalidProductVisibility": "La visibilidad del producto no es válida",
+    "apiMarketplaceIsRequired": "Elige un marketplace",
+    "apiCouldNotLoadMarketplaceRules": "No se pudieron cargar las reglas actuales del marketplace"
   }
 }

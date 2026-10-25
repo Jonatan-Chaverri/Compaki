@@ -574,23 +574,42 @@ vendor onboarding and products; cart and per-item checkout; verifiable
 receipts linking to stellar.expert; operator and vendor dashboards; custodial
 testnet accounts; 9 contract tests.
 
-**Added during the ideathon (Community Rewards v1):**
+**Added during the ideathon** (October 24–25, 2026; see the git history):
 
-- Contract: rewards marketplaces, protected treasury, per-marketplace and
-  per-period accounting, periods with frozen fixed-share members,
-  permissionless close with exact rounding, one-time member claims, views,
-  events, TTL management, and 17 new tests.
-- API: rewards endpoints, on-chain read model, contract error mapping,
-  guarantee checks, period booking at checkout, `contractId` binding, and the
-  `marketplaces:rebind`, `deploy --contract-only`, `demo:rewards` and
-  `users:set-password` scripts.
-- Web: the *Community rewards* operator tab, the `/rewards` member page, and a
-  Community Rewards option in the launch wizard.
-- Security: the impersonation, legacy-claim and vendor-join takeover fixes
-  above, plus operator-only dashboard data.
-- Fixes found along the way: the API retried every failed Stellar call (the
-  timeout check matched its own stack frame), and `deploy:testnet` crashed
-  under ESM (`__dirname`)
+- **Contract** (`contracts/marketplace`, 9 → 44 tests):
+  - Three community modes chosen at launch:
+    - classic fund;
+    - Community Rewards — a protected treasury shared each period between that period's sellers and buyers, in proportion to their sales and purchases;
+    - fundraising — a target paid to fixed public recipient wallets, in rounds.
+  - Permissionless distributions and releases. The operator changes only the next period's rules or the next round's target, scheduled on-chain (`set_next_rules`, `set_next_target`).
+  - Vendors register themselves (`join`), so a marketplace owner can be a wallet that signs only in the browser.
+  - Compaki's fixed 2% platform fee.
+  - Upgrades in place (`upgrade`, `version`).
+  - Instance-only TTL bumps, so code rent never lands on a buyer.
+  - Strict-auth tests, mutation-tested guards.
+- **Stellar ecosystem:**
+  - Sign-in with Cavos (email/Google) wallets, or with an existing wallet (Freighter, xBull, Albedo…) through Stellar Wallets Kit. Users sign their own purchases and claims.
+  - A marketplace owner's own wallet is its on-chain operator and receives the operator share.
+  - SEP-1 (`stellar.toml`) and SEP-10 web authentication.
+  - The repository is a Scaffold Stellar project: the API calls the contract through the generated, typed client, and deploys upload the optimized wasm.
+  - Deploys and the API's keep-alive cope with today's testnet fees: fee bumps and Friendbot-funded payers.
+- **API:**
+  - Rewards and fundraising endpoints, and a scheduler that distributes periods and releases rounds on time.
+  - "Try to break it" guarantee checks, simulated against the live contract.
+  - Stock reserved before charging (no overselling), and payments never retried after a confirmation timeout (no double charge).
+  - Order fulfilment (shipped / delivered, with tracking), shipping addresses for sellers, totals over all sales.
+  - Global seller profiles, product visibility and deletion, marketplace deletion.
+- **Web:**
+  - Redesign with a dark theme, and English/Spanish throughout (API messages included).
+  - Launch wizard for the three modes, with the owner's wallet signing.
+  - Public community page, operator rewards/fundraising tab with next-period rules, and the member `/rewards` page.
+  - "My marketplaces", seller studio with delivery status, order tracking in "My orders", marketplace filters.
+- **Security fixes:** the impersonation, legacy-claim and vendor-join takeover fixes described in Guarantees, and operator-only dashboard data.
+- **Scripts:**
+  - `deploy:testnet` with `--upgrade` / `--contract-only`, `marketplaces:rebind`;
+  - `demo:seed`, `demo:rewards`;
+  - `users:set-password`, `data:reset`;
+  - `stellar:home-domain`, `contract:client`.
 
 ## Project layout
 

@@ -1365,6 +1365,12 @@
     "apiFinishWalletBeforeLaunch": "Finish setting up your wallet before launching a marketplace",
     "apiSignInWithTheMarketplaceWallet": "Sign in with the wallet that created this marketplace",
     "apiCouldNotSaveNextRules": "Could not save the next period's rules",
-    "apiCouldNotSaveNextTarget": "Could not save the next round's target"
+    "apiCouldNotSaveNextTarget": "Could not save the next round's target",
+    "apiSignInToDeleteMarketplace": "Sign in to delete this marketplace",
+    "apiOnlyOwnerCanDeleteMarketplace": "Only the marketplace owner can delete it",
+    "apiCouldNotDeleteMarketplace": "Could not delete this marketplace. Please try again.",
+    "apiInvalidProductVisibility": "Invalid product visibility",
+    "apiMarketplaceIsRequired": "Marketplace is required",
+    "apiCouldNotLoadMarketplaceRules": "Could not load the current marketplace rules"
   }
 }
