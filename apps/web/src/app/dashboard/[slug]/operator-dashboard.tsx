@@ -1,21 +1,17 @@
 "use client";
-import { useLocale } from "next-intl";
 
-import { useTranslations } from "next-intl";
-
-import { CommunityEditor } from "@/components/community-editor";
-import type { CommunityDetails } from "@/lib/community";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
-import { Icon } from "@/components/icon";
-import { PageHeading } from "@/components/shell";
 import { useState } from "react";
-
+import { CommunityEditor } from "@/components/community-editor";
+import { Icon, type IconName } from "@/components/icon";
 import { LiveBalance } from "@/components/live-balance";
 import { ProductVisual } from "@/components/shell";
+import type { CommunityDetails } from "@/lib/community";
 import { formatDateTime, formatUsd } from "@/lib/format";
 import type { CommunityMode } from "@/lib/rewards";
-
 import { RewardsPanel } from "./rewards-panel";
+import styles from "./dashboard.module.css";
 
 export interface SaleFeedRow {
   id: string;
@@ -49,22 +45,7 @@ export interface CatalogRow {
 
 type Tab = "overview" | "rewards" | "vendors" | "products" | "community";
 
-export function OperatorDashboard({
-  community,
-  initialTab = "overview",
-  name,
-  slug,
-  regenerativeEnabled,
-  communityMode,
-  demoImpersonation,
-  splits,
-  operatorAccount,
-  communityAccount,
-  stats,
-  sales,
-  vendors,
-  catalog,
-}: {
+export interface OperatorDashboardProps {
   community: CommunityDetails;
   initialTab?: "overview" | "community";
   name: string;
@@ -86,236 +67,142 @@ export function OperatorDashboard({
   sales: SaleFeedRow[];
   vendors: VendorRow[];
   catalog: CatalogRow[];
-}) {
+}
+
+export function OperatorDashboard({ community, initialTab = "overview", name, slug, communityMode,
+  demoImpersonation, splits, operatorAccount, communityAccount, stats, sales, vendors, catalog }: OperatorDashboardProps) {
   const locale = useLocale();
-
   const t = useTranslations("ui");
+  const hasCommunity = splits.communityBps > 0;
+  const [tab, setTab] = useState<Tab>(initialTab === "community" && hasCommunity ? "community" : "overview");
+  const [query, setQuery] = useState("");
+  const [salesExpanded, setSalesExpanded] = useState(false);
+  const normalize = (text: string) => text.toLocaleLowerCase(locale).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const filteredCatalog = catalog.filter(product => normalize(`${product.name} ${product.vendorName}`).includes(normalize(query.trim())));
+  const tabs: { key: Tab; label: string; icon: IconName; count?: number }[] = [
+    { key: "overview", label: t("overview"), icon: "grid" },
+    { key: "vendors", label: t("sellers"), icon: "people", count: vendors.length },
+    { key: "products", label: t("products"), icon: "bag", count: catalog.length },
+    ...(communityMode !== "classic" ? [{ key: "rewards" as const, label: communityMode === "fundraise" ? t("fundraising") : t("communityRewards"), icon: "leaf" as const }] : []),
+    ...(hasCommunity ? [{ key: "community" as const, label: t("communityStory"), icon: "heart" as const }] : []),
+  ];
+  const shares = [
+    { label: t("sellers"), bps: splits.vendorBps, amount: stats.vendorRevenue, color: "var(--accent)" },
+    { label: t("yourMarketplace"), bps: splits.operatorBps, amount: stats.operatorRevenue, color: "var(--warm-accent)" },
+    ...(hasCommunity ? [{ label: t("community2"), bps: splits.communityBps, amount: stats.communityRevenue, color: "#91ad79" }] : []),
+    { label: t("dashboardPlatform"), bps: Math.max(0, 10_000 - splits.vendorBps - splits.operatorBps - splits.communityBps), amount: stats.platformRevenue ?? 0, color: "var(--ink-soft)" },
+  ];
 
-  const [tab, setTab] = useState<Tab>(initialTab === "community" && splits.communityBps > 0 ? "community" : "overview");
-  const tabs: Tab[] = communityMode !== "classic"
-    ? ["overview", "rewards", "vendors", "products"]
-    : ["overview", "vendors", "products"];
-  if (splits.communityBps > 0) tabs.push("community");
-
-  return (
-    <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-6 py-8">
-      <Link href="/dashboard" className="mb-4 inline-block text-sm text-slate-500 hover:text-slate-900">← {t("myMarketplaces")}</Link>
-      <PageHeading eyebrow={t("yourMarketplaceAtAGlance")} title={name} description={t("aHomeForYourSellersYourSalesAndTheGoodYou")}>
+  return <main id="main-content" tabIndex={-1} className={styles.dashboard}>
+    <Link href="/dashboard" className={styles.breadcrumb}>← {t("myMarketplaces")}</Link>
+    <header className={styles.header}>
+      <div><p className="eyebrow">{t("dashboardEyebrow")}</p><h1>{name}</h1><p className={styles.intro}>{t("dashboardIntro")}</p></div>
+      <div className={styles.headerActions}>
         <Link href={`/m/${slug}`} className="button-secondary button-small">{t("viewStorefront")}<Icon name="arrow" className="h-4 w-4" /></Link>
-      </PageHeading>
-      <div className="dashboard-tabs" aria-label={t("marketplaceSections")}>
-        {tabs.map(tabKey => <button key={tabKey} aria-pressed={tab === tabKey} onClick={() => setTab(tabKey)} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium capitalize text-slate-500"><Icon name={tabKey === "overview" ? "grid" : (tabKey === "rewards" || tabKey === "community") ? "leaf" : tabKey === "vendors" ? "people" : "bag"} className="h-4 w-4" />{tabKey === "rewards" ? (communityMode === "fundraise" ? t("fundraising") : t("communityRewards")) : tabKey === "vendors" ? t("sellers") : tabKey === "community" ? t("communityStory") : (tabKey === "overview" ? t("overview") : t("products"))}</button>)}
+        <button type="button" className="button-primary button-small" onClick={() => setTab("vendors")}><Icon name="people" className="h-4 w-4" />{t("inviteVendors")}</button>
       </div>
-      {tab === "overview" && <div className="account-intro"><Icon name="leaf" className="h-5 w-5 shrink-0" /><span>{t("everySaleSupportsYourPeople")}{" "}<strong>{splits.vendorBps / 100}{t("toSellers")}</strong> · {splits.operatorBps / 100}{t("toYourMarketplace")}{" "}{splits.communityBps / 100}{t("toTheCommunity")}{regenerativeEnabled && t("communityContributionsAreEnabled")}</span></div>}
+    </header>
+    <nav className={styles.tabs} aria-label={t("marketplaceSections")}>
+      {tabs.map(item => <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => setTab(item.key)}>
+        <Icon name={item.icon} className="h-4 w-4" /><span>{item.label}</span>{item.count !== undefined && <span className={styles.tabCount}>{item.count.toLocaleString(locale)}</span>}
+      </button>)}
+    </nav>
 
-      {tab === "overview" && (
-        <>
-          <div className="mt-6 grid gap-4 sm:grid-cols-4">
-            <StatCard label={t("totalSales")} value={String(stats.totalSales)} />
-            <StatCard label={t("totalOrderValue")} value={formatUsd(stats.grossVolume, locale)} />
-            {operatorAccount && (
-              <LiveBalance account={operatorAccount} label={t("yourDemoBalance")} />
-            )}
-            {communityAccount && (
-              <LiveBalance account={communityAccount} label={t("communityDemoBalance")} accent />
-            )}
+    {tab === "overview" && <div className={styles.overview}>
+      <section aria-labelledby="dashboard-summary-title">
+        <div className={styles.sectionHeading}><h2 id="dashboard-summary-title">{t("dashboardOverview")}</h2><span className={styles.period}>{t("dashboardAllTime")}</span></div>
+        <div className={styles.metrics}>
+          <div className={styles.earnings}>
+            <div className={styles.metricTop}><span>{t("dashboardRevenue")}</span><Icon name="store" className="h-5 w-5" /></div>
+            <strong className={styles.earningsValue}>{formatUsd(stats.operatorRevenue, locale)}</strong>
+            <p>{t("dashboardRevenueHint")}</p>
+            <span className={styles.shareBadge}>{t("dashboardSaleShare", { percent: splits.operatorBps / 100 })}</span>
           </div>
+          <MetricCard icon="bag" label={t("dashboardVolume")} value={formatUsd(stats.grossVolume, locale)} hint={t("dashboardVolumeHint")} />
+          <MetricCard icon="check" label={t("totalSales")} value={stats.totalSales.toLocaleString(locale)} hint={t("dashboardSalesHint")} />
+          <MetricCard icon={hasCommunity ? "leaf" : "store"} label={hasCommunity ? t("dashboardCommunity") : t("products")} value={hasCommunity ? formatUsd(stats.communityRevenue, locale) : catalog.length.toLocaleString(locale)} hint={hasCommunity ? t("dashboardCommunityHint") : t("dashboardProductsHint")} />
+        </div>
+      </section>
 
-          <div className="dashboard-summary">
-            <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
-              {t("goodSharedWithEverySale")}</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <RevenueRow label={t("vendors")} amount={stats.vendorRevenue} dot="bg-navy-900" />
-              <RevenueRow label={t("yourMarketplace")} amount={stats.operatorRevenue} dot="bg-slate-400" />
-              <RevenueRow
-                label={communityMode === "rewards" ? t("communityRewards") : communityMode === "fundraise" ? t("fundraising") : t("communityFund")}
-                amount={stats.communityRevenue}
-                dot="bg-emerald-500"
-              />
-              <RevenueRow label={t("compakiFee2")} amount={stats.platformRevenue ?? 0} dot="bg-brand-500" />
+      <div className={styles.workspace}>
+        <section className={styles.activity} aria-labelledby="dashboard-activity-title">
+          <div className={styles.panelHeading}><div><h2 id="dashboard-activity-title">{t("dashboardActivity")}</h2><p>{t("dashboardActivityHint")}</p></div><span className={styles.panelIcon}><Icon name="bag" /></span></div>
+          {sales.length === 0 ? <div className={styles.empty}>
+            <span className={styles.emptyIcon}><Icon name="store" className="h-7 w-7" /></span><h3>{t("dashboardFirstSale")}</h3><p>{t("dashboardFirstSaleHint")}</p>
+            <button type="button" className="button-secondary button-small" onClick={() => setTab("vendors")}>{t("inviteVendors")}<Icon name="arrow" className="h-4 w-4" /></button>
+          </div> : <ul id="dashboard-recent-sales" className={styles.salesList}>{sales.slice(0, salesExpanded ? sales.length : 5).map(sale => <li key={sale.id}>
+            <span className={styles.saleIcon}><Icon name="bag" className="h-4 w-4" /></span>
+            <div className={styles.saleInfo}><strong>{sale.productName}</strong><p>{sale.vendorName}<span aria-hidden="true"> · </span><time dateTime={sale.createdAt}>{formatDateTime(sale.createdAt, locale)}</time></p></div>
+            <strong className={styles.saleAmount}>{formatUsd(sale.amountUsd, locale)}</strong>
+            <Link href={`/receipt/${sale.id}`} className={styles.receipt} aria-label={t("dashboardReceiptFor", { product: sale.productName })}><Icon name="arrow" className="h-4 w-4" /></Link>
+          </li>)}</ul>}
+          {sales.length > 5 && <button type="button" className={styles.moreSales} aria-expanded={salesExpanded} aria-controls="dashboard-recent-sales" onClick={() => setSalesExpanded(!salesExpanded)}>{salesExpanded ? t("dashboardFewerSales") : t("dashboardMoreSales", { count: sales.length })}</button>}
+        </section>
+        <aside className={styles.sidebar}>
+          <InviteLink slug={slug} compact />
+          {(operatorAccount || communityAccount) && <section className={styles.balances}>
+            <h2>{t("dashboardBalances")}</h2>
+            <div className={styles.balanceGrid}>
+              {operatorAccount && <LiveBalance account={operatorAccount} label={t("dashboardOperatorBalance")} />}
+              {communityAccount && <LiveBalance account={communityAccount} label={t("dashboardCommunityBalance")} accent />}
             </div>
+            <p className={styles.balanceHint}>{t("dashboardBalancesHint")}</p>
+          </section>}
+        </aside>
+      </div>
+
+      <section className={styles.distribution} aria-labelledby="dashboard-distribution-title">
+        <div className={styles.panelHeading}><div><h2 id="dashboard-distribution-title">{t("dashboardDistribution")}</h2><p>{t("dashboardDistributionHint")}</p></div>{hasCommunity && <Link href={`/m/${slug}/community`} className={styles.textAction}>{t("dashboardCommunityDetails")}<Icon name="arrow" className="h-4 w-4" /></Link>}</div>
+        <div className={styles.splitBar} aria-hidden="true">{shares.filter(share => share.bps > 0).map(share => <span key={share.label} style={{width: `${share.bps / 100}%`, background: share.color}} />)}</div>
+        <dl className={styles.shareList}>{shares.map(share => <div key={share.label}><dt><i style={{background: share.color}} />{share.label}<span>{(share.bps / 100).toLocaleString(locale)}%</span></dt><dd>{formatUsd(share.amount, locale)}</dd></div>)}</dl>
+      </section>
+    </div>}
+
+    {tab === "rewards" && <div className={styles.detailPane}><RewardsPanel slug={slug} /></div>}
+    {tab === "community" && <div className={styles.detailPane}><CommunityEditor slug={slug} initial={community} mode={communityMode} /></div>}
+
+    {tab === "vendors" && <section className={styles.tabContent}>
+      <div className={styles.sectionHeading}><div><h2>{t("dashboardSellerTitle")}</h2><p>{t("dashboardSellerCount", { count: vendors.length })}</p></div></div>
+      <InviteLink slug={slug} />
+      {vendors.length === 0 ? <div className={`${styles.empty} ${styles.emptyPanel}`}><span className={styles.emptyIcon}><Icon name="people" className="h-7 w-7" /></span><h3>{t("dashboardNoSellers")}</h3><p>{t("dashboardNoSellersHint")}</p></div>
+        : <ul className={styles.vendors}>{vendors.map(vendor => <li key={vendor.id}>
+          <div className={styles.vendorIdentity}><span className={styles.avatar}>{vendor.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase()}</span><div><h3>{vendor.name}</h3><p>{vendor.email}</p>{vendor.sells && <p className={styles.vendorDescription}>{vendor.sells}</p>}</div></div>
+          <div className={styles.vendorActions}><span className={styles.productCount}>{t("productCount", { count: vendor.productCount })}</span>
+            {vendor.registerTxHash && <details className={styles.registration}><summary>{t("dashboardRegistration")}</summary><a href={`https://stellar.expert/explorer/testnet/tx/${vendor.registerTxHash}`} target="_blank" rel="noopener noreferrer">{t("viewRegistration")}</a></details>}
+            {demoImpersonation && <a href={`/api/demo/impersonate?userId=${vendor.id}&redirect=/vendor/${slug}`} className={styles.textAction} title={t("localDemoShortcutEnableDemoImpersonationSwitchesYourSessionToThis")}>{t("viewTheirDashboard")}</a>}
           </div>
+        </li>)}</ul>}
+    </section>}
 
-          <section className="mt-8">
-            <h2 className="text-sm font-medium uppercase tracking-wider text-slate-400">
-              {t("recentSales")}</h2>
-            {sales.length === 0 ? (
-              <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-                {t("noSalesYetShareYourStorefrontToGetGoing")}</div>
-            ) : (
-              <div className="scroll-table mt-3 rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wider text-slate-400">
-                      <th className="px-4 py-3 font-medium">{t("product")}</th>
-                      <th className="px-4 py-3 font-medium">{t("vendor")}</th>
-                      <th className="px-4 py-3 font-medium">{t("when")}</th>
-                      <th className="px-4 py-3 text-right font-medium">{t("amount")}</th>
-                      <th className="px-4 py-3 text-right font-medium">{t("receipt")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sales.map((s) => (
-                      <tr key={s.id} className="border-b border-slate-50 last:border-0">
-                        <td className="px-4 py-3 font-medium text-slate-900">{s.productName}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.vendorName}</td>
-                        <td className="px-4 py-3 text-slate-500">{formatDateTime(s.createdAt, locale)}</td>
-                        <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                          {formatUsd(s.amountUsd, locale)}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <a
-                            href={`https://stellar.expert/explorer/testnet/tx/${s.txHash}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-700"
-                          >
-                            {t("viewPayment")}</a>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-
-      {tab === "rewards" && <RewardsPanel slug={slug} />}
-      {tab === "community" && <CommunityEditor slug={slug} initial={community} mode={communityMode} />}
-
-      {tab === "vendors" && (
-        <section className="mt-6">
-          <InviteLink slug={slug} />
-          {vendors.length === 0 ? (
-            <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-              {t("noVendorsYetShareTheInviteLinkAbove")}</div>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {vendors.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-                >
-                  <div>
-                    <p className="font-medium text-slate-900">
-                      {v.name}
-                      <span className="ml-2 text-xs font-normal text-slate-400">{v.email}</span>
-                    </p>
-                    <p className="mt-0.5 text-sm text-slate-500">
-                      {v.sells || "—"} · {t("productCount", { count: v.productCount })}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs">
-                    {v.registerTxHash && (
-                      <a
-                        href={`https://stellar.expert/explorer/testnet/tx/${v.registerTxHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-slate-400 underline decoration-dotted underline-offset-2 hover:text-slate-700"
-                      >
-                        {t("viewRegistration")}</a>
-                    )}
-                    {demoImpersonation && (
-                      <a
-                        href={`/api/demo/impersonate?userId=${v.id}&redirect=/vendor/${slug}`}
-                        className="rounded-full border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50"
-                        title={t("localDemoShortcutEnableDemoImpersonationSwitchesYourSessionToThis")}
-                      >
-                        {t("viewTheirDashboard")}</a>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {tab === "products" && (
-        <section className="mt-6">
-          {catalog.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-              {t("theCatalogIsEmptyVendorsAddProductsFromTheirOwnDashboards")}</div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-3">
-              {catalog.map((p) => (
-                <div key={p.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <ProductVisual imageUrl={p.imageUrl} />
-                  <div className="mt-3 flex items-baseline justify-between gap-2">
-                    <p className="font-medium text-slate-900">{p.name}</p>
-                    <p className="text-sm font-semibold tabular-nums text-slate-900">
-                      {formatUsd(p.priceUsd, locale)}
-                    </p>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">{t("by")}{" "}{p.vendorName}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-    </main>
-  );
+    {tab === "products" && <section className={styles.tabContent}>
+      <div className={styles.sectionHeading}><div><h2>{t("dashboardCatalogTitle")}</h2><p>{t("dashboardCatalogCount", { count: catalog.length })}</p></div>
+        {catalog.length > 0 && <div className={styles.search}><Icon name="search" className="h-4 w-4" /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("dashboardSearchProducts")} aria-label={t("searchProducts")} /></div>}
+      </div>
+      {catalog.length === 0 ? <div className={`${styles.empty} ${styles.emptyPanel}`}><span className={styles.emptyIcon}><Icon name="bag" className="h-7 w-7" /></span><h3>{t("dashboardNoProducts")}</h3><p>{t("dashboardNoProductsHint")}</p><button type="button" className="button-secondary button-small" onClick={() => setTab("vendors")}>{t("dashboardManageSellers")}<Icon name="arrow" className="h-4 w-4" /></button></div>
+        : filteredCatalog.length === 0 ? <div className={`${styles.empty} ${styles.emptyPanel}`}><Icon name="search" /><h3>{t("dashboardNoMatches")}</h3><button type="button" className="text-link" onClick={() => setQuery("")}>{t("dashboardClearSearch")}</button></div>
+        : <div className={styles.catalog}>{filteredCatalog.map(product => <Link key={product.id} href={`/m/${slug}/p/${product.id}`} className={styles.productCard}>
+          <ProductVisual imageUrl={product.imageUrl} /><div className={styles.productBody}><span className={styles.productSeller}>{product.vendorName}</span><h3>{product.name}</h3><p>{product.description}</p><div className={styles.productBottom}><strong>{formatUsd(product.priceUsd, locale)}</strong><span><Icon name="arrow" className="h-4 w-4" /></span></div></div>
+        </Link>)}</div>}
+    </section>}
+  </main>;
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wider text-slate-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">
-        {value}
-      </p>
-    </div>
-  );
+function MetricCard({ icon, label, value, hint }: { icon: IconName; label: string; value: string; hint: string }) {
+  return <div className={styles.metric}><div className={styles.metricTop}><span>{label}</span><Icon name={icon} className="h-4 w-4" /></div><strong className={styles.metricValue}>{value}</strong><p>{hint}</p></div>;
 }
 
-function RevenueRow({ label, amount, dot }: { label: string; amount: number; dot: string }) {
-  const locale = useLocale();
-
-  return (
-    <p className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm">
-      <span className="flex items-center gap-2 text-slate-600">
-        <span className={`h-2 w-2 rounded-full ${dot}`} />
-        {label}
-      </span>
-      <span className="font-semibold tabular-nums text-slate-900">{formatUsd(amount, locale)}</span>
-    </p>
-  );
-}
-
-function InviteLink({ slug }: { slug: string }) {
+function InviteLink({ slug, compact = false }: { slug: string; compact?: boolean }) {
   const t = useTranslations("ui");
-
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const url = `/m/${slug}/join`;
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div>
-        <p className="text-sm font-medium text-slate-900">{t("inviteVendors")}</p>
-        <p className="mt-0.5 text-sm text-slate-500">
-          {t("anyoneWithThisLinkCanRegisterAndStartSellingInAbout")}</p>
-      </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <code className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">
-          {url}
-        </code>
-        <button
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(`${window.location.origin}/m/${slug}/join`);
-              setCopied(true);
-              setCopyError(false);
-              setTimeout(() => setCopied(false), 1_500);
-            } catch { setCopyError(true); }
-          }}
-          className="rounded-full bg-navy-900 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700"
-        >
-          {copied ? t("copied") : copyError ? t("selectAndCopyLink") : t("copyInviteLink")}
-        </button>
-      </div>
-    </div>
-  );
+  return <section className={`${styles.invite} ${compact ? styles.inviteCompact : ""}`}>
+    <div className={styles.inviteCopy}><span className={styles.inviteIcon}><Icon name="people" /></span><div><h2>{compact ? t("dashboardGrow") : t("inviteVendors")}</h2><p>{t("dashboardGrowHint")}</p></div></div>
+    <div className={styles.inviteActions}>{!compact && <code>{url}</code>}<button type="button" className={compact ? "button-primary button-small" : "button-secondary button-small"} onClick={async () => {
+      try { await navigator.clipboard.writeText(`${window.location.origin}${url}`); setCopied(true); setCopyError(false); setTimeout(() => setCopied(false), 1_500); }
+      catch { setCopyError(true); }
+    }}>{copied ? t("copied") : t("dashboardCopyLink")}<Icon name="arrow" className="h-4 w-4" /></button></div>
+    <span role="status" className={styles.copyStatus}>{copyError ? t("selectAndCopyLink") : copied ? t("copied") : ""}</span>
+    {copyError && <code className={styles.copyFallback}>{url}</code>}
+  </section>;
 }
