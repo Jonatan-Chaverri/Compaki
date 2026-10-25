@@ -90,11 +90,11 @@ export const POLICY_TEXT: Record<GoalPolicy, { label: string; detail: string }> 
   },
   "new-round": {
     label: "Start a new round",
-    detail: "After each payout, a new round starts from zero toward the same target and wallets.",
+    detail: "After each payout, a new round starts from zero toward the same target and recipients.",
   },
   direct: {
-    label: "Pay wallets directly",
-    detail: "After the target is paid out, every sale sends its community share straight to the wallets.",
+    label: "Pay recipients directly",
+    detail: "After the target is paid out, every sale sends its community share straight to the recipients’ accounts.",
   },
 };
 
