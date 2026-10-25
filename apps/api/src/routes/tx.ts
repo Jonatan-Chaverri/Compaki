@@ -5,18 +5,22 @@
 // src/lib/pending-tx.ts). It is only submitted if the signed envelope still
 // hashes to that stored transaction and carries the wallet's signature; then
 // the flow that asked for it continues (wallet setup, the next item of a
-// purchase, a claim) and its response — possibly the next transaction to
-// sign — is returned.
+// purchase, a claim, launching a marketplace, a vendor joining, the next
+// period's rules or round's target) and its response — possibly the next
+// transaction to sign — is returned.
 
+import type { xdr } from "@stellar/stellar-sdk";
 import { Hono } from "hono";
 
 import { completePurchaseStep, PurchaseRefusedError, releaseStock, reservePurchaseStock } from "@/lib/checkout";
+import { completeLaunch } from "@/lib/launch";
 import { takePending, type PendingTx } from "@/lib/pending-tx";
+import { completeJoin } from "@/lib/seller-registration";
 import { describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
 import { SignedTxMismatchError, submitUserSignedXdr } from "@/lib/stellar";
 
-import { completeClaim } from "./rewards";
+import { completeClaim, completeNextRules, completeNextTarget } from "./rewards";
 import { completeWalletSetup } from "./wallet";
 
 export const tx = new Hono();
@@ -25,6 +29,23 @@ const LABELS: Record<PendingTx["kind"], string> = {
   "wallet-setup": "wallet setup",
   purchase: "purchase",
   claim: "claim",
+  "create-marketplace": "create marketplace",
+  join: "vendor registration",
+  "next-rules": "next period's rules",
+  "next-target": "next round's target",
+};
+
+type Completion = (pending: PendingTx, result: { txHash: string; returnValue: xdr.ScVal | undefined }) => Promise<object>;
+
+/** What continues each flow once its signed transaction confirmed. */
+const COMPLETIONS: Record<PendingTx["kind"], Completion> = {
+  "wallet-setup": (pending) => completeWalletSetup(pending),
+  purchase: completePurchaseStep,
+  claim: completeClaim,
+  "create-marketplace": completeLaunch,
+  join: completeJoin,
+  "next-rules": completeNextRules,
+  "next-target": completeNextTarget,
 };
 
 tx.post("/:id", async (c) => {
@@ -74,12 +95,7 @@ tx.post("/:id", async (c) => {
   }
 
   try {
-    const next =
-      pending.kind === "wallet-setup"
-        ? await completeWalletSetup(pending)
-        : pending.kind === "purchase"
-          ? await completePurchaseStep(pending, result)
-          : await completeClaim(pending, result);
+    const next = await COMPLETIONS[pending.kind](pending, result);
     return c.json(
       { txHash: result.txHash, ...next },
       typeof next === "object" && next && "signatureRequired" in next ? 202 : 200,

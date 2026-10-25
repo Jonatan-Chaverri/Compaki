@@ -73,6 +73,11 @@ model Marketplace {
   contractId           String?
   // Hash of the create_marketplace transaction — the "verified on-chain" link.
   createTxHash         String?
+  // The marketplace's operator address in the contract: the owner's own
+  // wallet (Cavos or an existing Stellar wallet; they sign in the browser)
+  // or, for accounts without one, their custodial account. It receives the
+  // operator share of every sale. Null until registered on-chain.
+  operatorAddress      String?
   regenerativeEnabled  Boolean  @default(false)
   // What happens to the community share, fixed when the marketplace is
   // registered on-chain (the contract enforces it):

@@ -11,11 +11,12 @@
 //     demo-asset issuer account pays the network fee).
 
 import { prisma } from "@/lib/db";
+import { operatorKeysSelect, operatorSignerOf } from "@/lib/operator";
 import { boundOnChainId, communityModeOf, namesOf } from "@/lib/rewards";
 import {
   ContractError,
-  decryptSecret,
   getFundraise,
+  getNextTarget,
   releaseFundraise,
   stellarConfig,
   stellarExpertContractUrl,
@@ -153,23 +154,30 @@ export async function releaseIfReached(marketplace: {
   contractMarketplaceId: string | null;
   contractId: string | null;
   fundraiseNextTargetUsd: number | null;
-  operator: { stellarSecretEncrypted: string | null };
+  operatorAddress: string | null;
+  operator: { stellarPublicKey: string | null; stellarSecretEncrypted: string | null };
 }): Promise<{ round: number; amountUsd: number; txHash: string } | null> {
   const onChainId = boundOnChainId(marketplace);
   if (onChainId === null) return null;
   const state = await getFundraise(onChainId);
   if (!state.collecting || state.raisedStroops <= 0n || state.raisedStroops < state.targetStroops) return null;
 
+  // The operator schedules the next target on-chain (set_next_target), so the
+  // release needs no signature and the contract applies it. A target chosen
+  // before that existed is only in Postgres: a custodial operator passes it.
   const nextTarget = marketplace.fundraiseNextTargetUsd;
-  const operatorSecret = marketplace.operator.stellarSecretEncrypted;
-  if (nextTarget !== null && !operatorSecret) throw new Error("Operator payment account missing");
+  let legacyTarget: bigint | null = null;
+  let signerSecret = stellarConfig.usdcIssuerSecret;
+  if (nextTarget !== null && (await getNextTarget(onChainId)) === null) {
+    const operator = operatorSignerOf(marketplace);
+    if (operator?.kind === "custodial") {
+      legacyTarget = usdToStroops(nextTarget);
+      signerSecret = operator.secret;
+    }
+  }
   let released;
   try {
-    released = await releaseFundraise({
-      signerSecret: nextTarget !== null ? decryptSecret(operatorSecret as string) : stellarConfig.usdcIssuerSecret,
-      marketplaceId: onChainId,
-      nextTargetStroops: nextTarget !== null ? usdToStroops(nextTarget) : null,
-    });
+    released = await releaseFundraise({ signerSecret, marketplaceId: onChainId, nextTargetStroops: legacyTarget });
   } catch (error) {
     if (error instanceof ContractError && error.errorName === "GoalNotReached") return null;
     throw error;
@@ -210,7 +218,7 @@ export async function releaseIfReachedById(marketplaceId: string) {
       contractMarketplaceId: true,
       contractId: true,
       fundraiseNextTargetUsd: true,
-      operator: { select: { stellarSecretEncrypted: true } },
+      ...operatorKeysSelect,
     },
   });
   return marketplace ? releaseIfReached(marketplace) : null;

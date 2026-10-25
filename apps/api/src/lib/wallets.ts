@@ -5,8 +5,9 @@
 // key Compaki never sees: purchases, vendor revenue and member rewards use
 // that wallet as soon as it is set up (funded + trusting the demo asset), and
 // the user signs in the browser. Everyone else still uses the custodial
-// account the backend signs for. Operator actions always use the custodial
-// account (it is the marketplace's on-chain operator address).
+// account the backend signs for. The same applies to marketplace owners: a
+// marketplace is registered with its owner's wallet as operator when they
+// have one (see src/lib/operator.ts).
 
 export type WalletProvider = "cavos" | "stellar-wallet";
 

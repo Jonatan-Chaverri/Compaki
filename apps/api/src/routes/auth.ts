@@ -5,10 +5,13 @@
 //                          over the challenge (+ the Cavos email token, when
 //                          verifiable), links/creates the Compaki user, sets
 //                          the session cookie
-//   POST /wallet/challenge { address } → challenge transaction for an existing
+//   POST /wallet/challenge { address } → SEP-10 challenge for an existing
 //                          Stellar wallet (Freighter, xBull, Albedo…) to sign
-//   POST /wallet           { address, signedXdr } → verifies the signature,
-//                          links/creates the user, sets the session cookie
+//   POST /wallet           { address, signedXdr } → verifies the signed
+//                          challenge, links/creates the user, sets the session cookie
+//   GET  /sep10            ?account=G…[&home_domain=] → SEP-10 challenge
+//   POST /sep10            { transaction } → SEP-10 JWT (the standard endpoint
+//                          stellar.toml publishes as WEB_AUTH_ENDPOINT)
 //   POST /profile          name (+ country, required on first login) for the signed-in user
 //   POST /login            email + password (existing/demo accounts)
 //   POST /logout           clears the session cookie
@@ -32,7 +35,8 @@ import {
   getSessionUser,
   sessionCookieHeader,
 } from "@/lib/session";
-import { isValidAccountAddress } from "@/lib/stellar";
+import { buildChallenge, issueToken, Sep10Error, verifyChallenge } from "@/lib/sep10";
+import { isValidAccountAddress, stellarConfig } from "@/lib/stellar";
 
 export const auth = new Hono();
 
@@ -128,7 +132,7 @@ auth.post("/wallet", async (c) => {
   if (!b) return c.json({ error: "Invalid JSON" }, 400);
   const address = typeof b.address === "string" ? b.address : "";
   const signedXdr = typeof b.signedXdr === "string" ? b.signedXdr : "";
-  if (!isValidAccountAddress(address) || !verifyWalletChallenge(address, signedXdr)) {
+  if (!isValidAccountAddress(address) || !(await verifyWalletChallenge(address, signedXdr))) {
     return c.json(
       { error: "We couldn't verify your wallet's signature — make sure it's on Stellar testnet and try again" },
       401,
@@ -164,6 +168,38 @@ auth.post("/wallet", async (c) => {
     needsProfile: !user.country,
     walletReady: user.walletReadyAt !== null,
   });
+});
+
+// ── SEP-10 web authentication (standard endpoint) ─────────────────────────
+
+auth.get("/sep10", (c) => {
+  const account = c.req.query("account") ?? "";
+  if (!isValidAccountAddress(account)) return c.json({ error: "account must be a valid Stellar account (G…)" }, 400);
+  try {
+    return c.json({
+      transaction: buildChallenge(account, c.req.query("home_domain")),
+      network_passphrase: stellarConfig.networkPassphrase,
+    });
+  } catch (error) {
+    if (error instanceof Sep10Error) return c.json({ error: error.message }, 400);
+    throw error;
+  }
+});
+
+auth.post("/sep10", async (c) => {
+  // SEP-10 clients may send JSON or a form.
+  const type = c.req.header("content-type") ?? "";
+  const transaction = type.includes("application/json")
+    ? (await readJson(c))?.transaction
+    : (await c.req.parseBody().catch(() => ({} as Record<string, unknown>))).transaction;
+  if (typeof transaction !== "string" || !transaction) return c.json({ error: "transaction is required" }, 400);
+  try {
+    const { account, hash } = await verifyChallenge(transaction);
+    return c.json({ token: issueToken(account, hash) });
+  } catch (error) {
+    if (error instanceof Sep10Error) return c.json({ error: error.message }, 400);
+    throw error;
+  }
 });
 
 auth.post("/profile", async (c) => {

@@ -4,10 +4,12 @@
 //   POST /marketplace/:slug/periods/:id/claim  claim the session user's reward for a distributed period
 //                                              (own wallets: 202 + tx to sign,
 //                                              finished by POST /api/tx/:id)
-//   PUT  /marketplace/:slug/next-rules         set or clear the next period's rules (operator)
+//   PUT  /marketplace/:slug/next-rules         schedule or clear the next period's rules on-chain
+//                                              (operator; own wallets: 202 + tx to sign)
 //   POST /marketplace/:slug/distribute         distribute a due period now (any signed-in user;
 //                                              the scheduler normally does it on time)
-//   PUT  /marketplace/:slug/fundraise/next-target  set or clear the next round's target (operator)
+//   PUT  /marketplace/:slug/fundraise/next-target  schedule or clear the next round's target
+//                                              on-chain (operator; own wallets: 202 + tx to sign)
 //   POST /marketplace/:slug/fundraise/release  release a round that reached its target (any signed-in user)
 //   POST /marketplace/:slug/guarantees         simulate a forbidden action (operator)
 //   GET  /me                                   session user's rewards across marketplaces
@@ -24,6 +26,7 @@ import { Hono } from "hono";
 import { parseSplitSnapshot, prisma } from "@/lib/db";
 import { distributeIfDue, loadDistributable } from "@/lib/distribution";
 import { loadFundraiseView, releaseIfReachedById } from "@/lib/fundraise";
+import { operatorAddressOf, operatorKeysSelect, operatorSignerOf, type OperatorSigner } from "@/lib/operator";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import {
   boundOnChainId,
@@ -42,7 +45,12 @@ import {
   getReward,
   getRewardsStatus,
   i128Of,
+  invokeCall,
+  prepareCall,
   prepareClaim,
+  setNextRulesCall,
+  setNextTargetCall,
+  type ContractCall,
   simulateForbiddenAction,
   stellarConfig,
   stellarExpertTxUrl,
@@ -269,9 +277,12 @@ rewards.post("/marketplace/:slug/fundraise/release", async (c) => {
 
 // ── Next period's rules / next round's target (operator) ───────────────────
 //
-// The contract takes them at the next distribution / release, in that same
-// call; until then they are a pending choice in Postgres the operator can
-// change or clear (null). They never touch the running period or round.
+// Scheduled on-chain (set_next_rules / set_next_target, operator-signed) and
+// applied by the next distribution / release, which then needs no signature.
+// An operator with their own wallet signs in the browser (202 + transaction,
+// finished by POST /api/tx/:id); for a custodial operator the backend signs.
+// Postgres mirrors the confirmed choice for display. They never touch the
+// running period or round; null clears them.
 
 const DAY = 24 * 60 * 60;
 /** Lengths offered for a period (monthly … yearly; 10 minutes on testnet for demos). */
@@ -283,12 +294,85 @@ function allowedPeriods(): number[] {
 async function operatorMarketplace(c: Parameters<typeof getSessionUser>[0], slug: string) {
   const user = await getSessionUser(c);
   if (!user) return { error: c.json({ error: "Sign in as the operator" }, 401) };
-  const marketplace = await prisma.marketplace.findUnique({ where: { slug }, select: marketplaceSelect });
+  const marketplace = await prisma.marketplace.findUnique({
+    where: { slug },
+    select: { ...marketplaceSelect, ...operatorKeysSelect },
+  });
   if (!marketplace) return { error: c.json({ error: "Marketplace not found" }, 404) };
   if (marketplace.operatorId !== user.id) {
     return { error: c.json({ error: "Only the marketplace operator can change this" }, 403) };
   }
-  return { marketplace };
+  const onChainId = boundOnChainId(marketplace);
+  const signer = operatorSignerOf(marketplace);
+  if (onChainId === null || !signer) {
+    return { error: c.json({ error: "This marketplace is not ready for purchases yet" }, 409) };
+  }
+  // The browser can only sign with the wallet the session belongs to.
+  if (signer.kind === "own" && signer.address !== user.walletAddress) {
+    return { error: c.json({ error: "Sign in with the wallet that created this marketplace" }, 409) };
+  }
+  return { user, marketplace, onChainId, signer };
+}
+
+/**
+ * Submits an operator-signed call: right away for a custodial operator,
+ * or as a 202 + transaction for the operator's own wallet to sign.
+ */
+async function signAsOperator<C>(
+  found: { user: { id: string }; signer: OperatorSigner },
+  call: ContractCall,
+  pendingKind: "next-rules" | "next-target",
+  context: C,
+  label: string,
+  finish: (context: C) => Promise<Record<string, unknown>>,
+) {
+  if (found.signer.kind === "custodial") {
+    await invokeCall(call, found.signer.secret);
+    return { status: 200 as const, body: await finish(context) };
+  }
+  const prepared = await prepareCall(call, found.signer.address);
+  const pending = createPending<C>({
+    kind: pendingKind,
+    userId: found.user.id,
+    signer: found.signer.address,
+    xdr: prepared.xdr,
+    hash: prepared.hash,
+    context,
+  });
+  return { status: 202 as const, body: signatureRequest(pending, label) };
+}
+
+interface NextRulesContext {
+  marketplaceId: string;
+  rules: { vendorPoolBps: number; periodSeconds: number } | null;
+}
+
+async function saveNextRules({ marketplaceId, rules }: NextRulesContext) {
+  await prisma.marketplace.update({
+    where: { id: marketplaceId },
+    data: { rewardsNextVendorPoolBps: rules?.vendorPoolBps ?? null, rewardsNextPeriodSeconds: rules?.periodSeconds ?? null },
+  });
+  return { nextRules: rules };
+}
+
+/** Called by POST /api/tx/:id once the operator's wallet signed set_next_rules. */
+export function completeNextRules(pending: PendingTx) {
+  return saveNextRules(pending.context as NextRulesContext);
+}
+
+interface NextTargetContext {
+  marketplaceId: string;
+  targetUsd: number | null;
+}
+
+async function saveNextTarget({ marketplaceId, targetUsd }: NextTargetContext) {
+  await prisma.marketplace.update({ where: { id: marketplaceId }, data: { fundraiseNextTargetUsd: targetUsd } });
+  return { nextTargetUsd: targetUsd };
+}
+
+/** Called by POST /api/tx/:id once the operator's wallet signed set_next_target. */
+export function completeNextTarget(pending: PendingTx) {
+  return saveNextTarget(pending.context as NextTargetContext);
 }
 
 async function readBody(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown> | null> {
@@ -309,26 +393,36 @@ rewards.put("/marketplace/:slug/next-rules", async (c) => {
   }
   const body = await readBody(c);
   if (!body) return c.json({ error: "Invalid JSON" }, 400);
-  if (body.clear === true) {
-    await prisma.marketplace.update({
-      where: { id: marketplace.id },
-      data: { rewardsNextVendorPoolBps: null, rewardsNextPeriodSeconds: null },
+  let rules: NextRulesContext["rules"] = null;
+  if (body.clear !== true) {
+    const vendorPoolBps = Number(body.vendorPoolBps);
+    const periodSeconds = Number(body.periodSeconds);
+    if (!Number.isInteger(vendorPoolBps) || vendorPoolBps < 0 || vendorPoolBps > 10_000) {
+      return c.json({ error: "The sellers' and buyers' parts of the rewards must add up to 100%" }, 400);
+    }
+    if (!allowedPeriods().includes(periodSeconds)) {
+      return c.json({ error: "Choose how often rewards are shared" }, 400);
+    }
+    rules = { vendorPoolBps, periodSeconds };
+  }
+  try {
+    const call = setNextRulesCall({
+      marketplaceId: found.onChainId,
+      rules: rules && { ...rules, buyerPoolBps: 10_000 - rules.vendorPoolBps },
     });
-    return c.json({ nextRules: null });
+    const { status, body: result } = await signAsOperator(
+      found,
+      call,
+      "next-rules",
+      { marketplaceId: marketplace.id, rules },
+      "Schedule the next period's rules",
+      saveNextRules,
+    );
+    return c.json(result, status);
+  } catch (error) {
+    const { body: errBody, status } = errorResponse(error, "Could not save the next period's rules");
+    return c.json(errBody, status);
   }
-  const vendorPoolBps = Number(body.vendorPoolBps);
-  const periodSeconds = Number(body.periodSeconds);
-  if (!Number.isInteger(vendorPoolBps) || vendorPoolBps < 0 || vendorPoolBps > 10_000) {
-    return c.json({ error: "The sellers' and buyers' parts of the rewards must add up to 100%" }, 400);
-  }
-  if (!allowedPeriods().includes(periodSeconds)) {
-    return c.json({ error: "Choose how often rewards are shared" }, 400);
-  }
-  await prisma.marketplace.update({
-    where: { id: marketplace.id },
-    data: { rewardsNextVendorPoolBps: vendorPoolBps, rewardsNextPeriodSeconds: periodSeconds },
-  });
-  return c.json({ nextRules: { vendorPoolBps, periodSeconds } });
 });
 
 rewards.post("/marketplace/:slug/distribute", async (c) => {
@@ -365,11 +459,24 @@ rewards.put("/marketplace/:slug/fundraise/next-target", async (c) => {
   ) {
     return c.json({ error: "The next target must be 0 (stop) or a positive amount with up to two decimals" }, 400);
   }
-  await prisma.marketplace.update({
-    where: { id: marketplace.id },
-    data: { fundraiseNextTargetUsd: target },
-  });
-  return c.json({ nextTargetUsd: target });
+  try {
+    const call = setNextTargetCall({
+      marketplaceId: found.onChainId,
+      targetStroops: target === null ? null : usdToStroops(target),
+    });
+    const { status, body: result } = await signAsOperator(
+      found,
+      call,
+      "next-target",
+      { marketplaceId: marketplace.id, targetUsd: target },
+      "Schedule the next round's target",
+      saveNextTarget,
+    );
+    return c.json(result, status);
+  } catch (error) {
+    const { body: errBody, status } = errorResponse(error, "Could not save the next round's target");
+    return c.json(errBody, status);
+  }
 });
 
 // ── POST /marketplace/:slug/guarantees — "try to break it" demo ───────────
@@ -384,7 +491,7 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
   if (!user) return c.json({ error: "Sign in as the operator" }, 401);
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug: c.req.param("slug") },
-    select: { ...marketplaceSelect, operator: { select: { stellarPublicKey: true } } },
+    select: { ...marketplaceSelect, ...operatorKeysSelect },
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
   if (marketplace.operatorId !== user.id) {
@@ -392,7 +499,9 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
   }
   const mode = communityModeOf(marketplace);
   const onChainId = boundOnChainId(marketplace);
-  if (mode === "classic" || onChainId === null || !marketplace.operator.stellarPublicKey) {
+  // Simulation only: the operator's address, no key needed.
+  const operatorAddress = operatorAddressOf(marketplace);
+  if (mode === "classic" || onChainId === null || !operatorAddress) {
     return c.json({ error: "This marketplace has no protected community fund" }, 400);
   }
 
@@ -430,7 +539,7 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
     }
     const result = await simulateForbiddenAction({
       kind,
-      operatorPublicKey: marketplace.operator.stellarPublicKey,
+      operatorPublicKey: operatorAddress,
       marketplaceId: onChainId,
       amountStroops: held > 0n ? held : usdToStroops(1),
       participant,

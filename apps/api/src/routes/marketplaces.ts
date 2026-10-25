@@ -17,14 +17,21 @@ import { boundOnChainId, communityModeOf, loadRewardsView, PERIOD_HISTORY_LIMIT,
 import { isValidSlug } from "@/lib/slug";
 import { MARKETPLACE_SHARE_BPS, PLATFORM_FEE_BPS } from "@/lib/splits";
 import { getSessionUser } from "@/lib/session";
-import { ensureMarketplaceVendor } from "@/lib/seller-registration";
+import { ensureMarketplaceVendor, isSignatureRequest } from "@/lib/seller-registration";
 import { SellerSetupError } from "@/lib/seller-errors";
+import { finishLaunch, type LaunchContext } from "@/lib/launch";
+import { ownWalletPending, personalWallet } from "@/lib/wallets";
+import { createPending, signatureRequest } from "@/lib/pending-tx";
 import {
   createCustodialAccount,
-  createFundraiseMarketplace,
-  createMarketplace,
-  createRewardsMarketplace,
+  createFundraiseMarketplaceCall,
+  createMarketplaceCall,
+  createRewardsMarketplaceCall,
   decryptSecret,
+  invokeCall,
+  marketplaceIdOf,
+  prepareCall,
+  type ContractCall,
   demoTrustlineState,
   getRewardsStatus,
   getUsdBalance,
@@ -241,7 +248,7 @@ marketplaces.get("/:slug/community", async (c) => {
       ...communityDetailsOf(marketplace),
       communityDetailsUpdatedAt: marketplace.communityDetailsUpdatedAt?.toISOString() ?? null,
       splits: { vendorBps: marketplace.splitVendorBps, operatorBps: marketplace.splitOperatorBps, communityBps: marketplace.splitCommunityBps },
-      operator: { name: marketplace.operator.name, address: marketplace.operator.stellarPublicKey },
+      operator: { name: marketplace.operator.name, address: marketplace.operatorAddress ?? marketplace.operator.stellarPublicKey },
       communityFund: marketplace.communityFund ? { name: marketplace.communityFund.name, address: marketplace.communityFund.stellarPublicKey } : null,
       sellers: marketplace.vendors.map(v => ({ name: v.user.name, address: v.payoutAddress ?? v.user.stellarPublicKey })),
     },
@@ -372,6 +379,13 @@ marketplaces.post("/", async (c) => {
     }
   }
 
+  // Owners with their own wallet register the marketplace with it (they sign
+  // in the browser); everyone else with their custodial account.
+  if (ownWalletPending(sessionUser)) {
+    return c.json({ error: "Finish setting up your wallet before launching a marketplace", code: "WALLET_SETUP" }, 409);
+  }
+  const ownWallet = personalWallet(sessionUser);
+
   const operator = await prisma.user.update({
     where: { id: sessionUser.id },
     data: { role: "OPERATOR" },
@@ -391,7 +405,7 @@ marketplaces.post("/", async (c) => {
         stepStart("accounts");
 
         let operatorUser = operator;
-        if (!operatorUser.stellarPublicKey || !operatorUser.stellarSecretEncrypted) {
+        if (ownWallet.kind !== "own" && (!operatorUser.stellarPublicKey || !operatorUser.stellarSecretEncrypted)) {
           const account = await createCustodialAccount();
           operatorUser = await prisma.user.update({
             where: { id: operator.id },
@@ -476,22 +490,26 @@ marketplaces.post("/", async (c) => {
 
         // ── 2. On-chain registration ───────────────────────────────────
         stepStart("deploy");
-        let contractMarketplaceId = marketplace.contractMarketplaceId;
-        let createTxHash = marketplace.createTxHash;
-        let contractId = marketplace.contractId;
-        if (contractMarketplaceId === null) {
-          if (!operatorUser.stellarSecretEncrypted) {
-            throw new Error("Payment accounts missing after provisioning");
-          }
+        let registration: { contractMarketplaceId: string; createTxHash: string | null; operatorAddress: string } | null =
+          marketplace.contractMarketplaceId && marketplace.operatorAddress
+            ? {
+                contractMarketplaceId: marketplace.contractMarketplaceId,
+                createTxHash: marketplace.createTxHash,
+                operatorAddress: marketplace.operatorAddress,
+              }
+            : null;
+        if (registration === null) {
+          const operatorAddress = ownWallet.kind === "own" ? ownWallet.address : operatorUser.stellarPublicKey;
+          if (!operatorAddress) throw new Error("Payment accounts missing after provisioning");
           const split = {
-            operatorSecret: decryptSecret(operatorUser.stellarSecretEncrypted),
+            operator: operatorAddress,
             vendorBps: marketplace.splitVendorBps,
             operatorBps: marketplace.splitOperatorBps,
             communityBps: marketplace.splitCommunityBps,
           };
-          let result;
+          let call: ContractCall;
           if (mode === "rewards") {
-            result = await createRewardsMarketplace({
+            call = createRewardsMarketplaceCall({
               ...split,
               periodSeconds: marketplace.rewardsPeriodSeconds ?? REWARDS_PERIODS[0],
               vendorPoolBps: marketplace.rewardsVendorPoolBps ?? 5_000,
@@ -501,7 +519,7 @@ marketplaces.post("/", async (c) => {
             if (!marketplace.communityGoalUsd || recipients.length === 0 || !marketplace.fundraisePolicy) {
               throw new Error("Fundraising rules missing");
             }
-            result = await createFundraiseMarketplace({
+            call = createFundraiseMarketplaceCall({
               ...split,
               targetStroops: usdToStroops(marketplace.communityGoalUsd),
               recipients: recipients.map((r) => r.address),
@@ -512,44 +530,39 @@ marketplaces.post("/", async (c) => {
             if (!fundUser?.stellarPublicKey) {
               throw new Error("Payment accounts missing after provisioning");
             }
-            result = await createMarketplace({
-              ...split,
-              communityFundPublicKey: fundUser.stellarPublicKey,
-            });
+            call = createMarketplaceCall({ ...split, communityFund: fundUser.stellarPublicKey });
           }
-          contractMarketplaceId = result.marketplaceId.toString();
-          createTxHash = result.txHash;
-          contractId = stellarConfig.marketplaceContractId;
+
+          if (ownWallet.kind === "own") {
+            // The owner's wallet signs; POST /api/tx/:id finishes the launch.
+            const prepared = await prepareCall(call, operatorAddress);
+            const pending = createPending<LaunchContext>({
+              kind: "create-marketplace",
+              userId: operator.id,
+              signer: operatorAddress,
+              xdr: prepared.xdr,
+              hash: prepared.hash,
+              context: { marketplaceId: marketplace.id },
+            });
+            emit({ type: "signature", ...signatureRequest(pending, "Create your marketplace") });
+            return;
+          }
+          if (!operatorUser.stellarSecretEncrypted) throw new Error("Payment accounts missing after provisioning");
+          const { txHash, returnValue } = await invokeCall(call, decryptSecret(operatorUser.stellarSecretEncrypted));
+          registration = {
+            contractMarketplaceId: marketplaceIdOf(returnValue).toString(),
+            createTxHash: txHash,
+            operatorAddress,
+          };
         }
         stepDone("deploy");
 
         // ── 3. Store records ───────────────────────────────────────────
         stepStart("store");
-        // Periods are counted from the ledger time the contract recorded.
-        let rewardsStartAt = marketplace.rewardsStartAt;
-        if (mode === "rewards" && !rewardsStartAt && contractMarketplaceId) {
-          const status = await getRewardsStatus(BigInt(contractMarketplaceId));
-          rewardsStartAt = new Date(status.periodStart * 1000);
-        }
-        marketplace = await prisma.marketplace.update({
-          where: { id: marketplace.id },
-          data: { contractMarketplaceId, createTxHash, contractId, rewardsStartAt },
-          include: { communityFund: true },
-        });
+        const launched = await finishLaunch(marketplace.id, registration);
         stepDone("store");
 
-        emit({
-          type: "complete",
-          marketplace: {
-            id: marketplace.id,
-            name: marketplace.name,
-            slug: marketplace.slug,
-            url: `compaki.app/m/${marketplace.slug}`,
-            path: `/m/${marketplace.slug}`,
-            dashboardPath: `/dashboard/${marketplace.slug}`,
-            verifyUrl: createTxHash ? stellarExpertTxUrl(createTxHash) : null,
-          },
-        });
+        emit({ type: "complete", marketplace: launched });
       } catch (error) {
         console.error("[launch] failed:", error);
         emit({
@@ -699,7 +712,8 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       communityBps: marketplace.splitCommunityBps,
       platformBps: PLATFORM_FEE_BPS,
     },
-    operatorAccount: marketplace.operator.stellarPublicKey,
+    // Where the operator share lands: the owner's own wallet or their custodial account.
+    operatorAccount: marketplace.operatorAddress ?? marketplace.operator.stellarPublicKey,
     // Rewards and fundraising marketplaces hold the community share in the
     // contract; their community tab reads that fund from chain instead.
     communityAccount: communityModeOf(marketplace) !== "classic"
@@ -842,6 +856,7 @@ marketplaces.post("/:slug/vendors", async (c) => {
   await prisma.user.update({ where: { id: user.id }, data: { isSeller: true } });
   try {
     const membership = await ensureMarketplaceVendor(user.id, marketplace.id);
+    if (isSignatureRequest(membership)) return c.json(membership, 202);
     return c.json({
       vendor: { id: user.id, name: user.name },
       marketplace: { name: marketplace.name, slug: marketplace.slug },

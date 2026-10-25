@@ -13,13 +13,19 @@
 //! - Community Rewards: held by THIS contract and shared, per period, between
 //!   the period's vendors and buyers in proportion to what each one sold and
 //!   bought. A period ends with `distribute`, callable by anyone once its
-//!   length has passed; the operator may pass new pool shares and a new
-//!   length for the next period in that same call.
+//!   length has passed; the operator may schedule new pool shares and a new
+//!   length for the next period ahead of time (`set_next_rules`), or pass
+//!   them in that same call.
 //! - Fundraising: held by THIS contract until a round reaches its target,
 //!   then released to recipient wallets at fixed shares. After a release a
-//!   new round starts (same target, or one the operator passes) or, with a
-//!   target of 0, fundraising stops and later sales give that share to the
-//!   vendor.
+//!   new round starts (same target, or one the operator scheduled with
+//!   `set_next_target` or passes) or, with a target of 0, fundraising stops
+//!   and later sales give that share to the vendor.
+//!
+//! The operator only has to sign while present: creating the marketplace and
+//! scheduling the next rules or target. Vendors register themselves (`join`),
+//! and distributions and releases need no signature, so an operator can use a
+//! wallet that only signs in the browser.
 //!
 //! Every payment leg is a direct token transfer from the buyer to its
 //! recipient inside the `purchase` call; the contract only holds tokens for
@@ -31,8 +37,8 @@
 //!   participant) and `release_fundraise` (the raised amount, to the
 //!   recipients fixed at creation).
 //! - A running period's or round's rules can't change; the operator can only
-//!   set the next period's rules (at `distribute`) or the next round's target
-//!   (at `release_fundraise`). Recipients and splits never change.
+//!   set the next period's rules or the next round's target, which take effect
+//!   at `distribute` / `release_fundraise`. Recipients and splits never change.
 //! - The code is upgradeable by the admin set at `initialize` (`upgrade`), so
 //!   the contract keeps its address. Stored data survives upgrades; whoever
 //!   holds the admin key can change these rules with new code, which is the
@@ -46,7 +52,7 @@ use soroban_sdk::{
 };
 
 /// Bumped on every code change; `version` lets anyone check an upgrade landed.
-pub const CONTRACT_VERSION: u32 = 5;
+pub const CONTRACT_VERSION: u32 = 6;
 pub const BPS_DENOM: u32 = 10_000;
 /// Compaki's platform fee on every sale (2%), paid to the platform recipient
 /// fixed at `initialize`. A constant: no one can change it on this deployment.
@@ -130,6 +136,12 @@ pub enum DataKey {
     Participation(u64, u32, Address),
     /// Fundraising state; present only for fundraising marketplaces.
     Fundraise(u64),
+    /// Rules the operator scheduled for the next rewards period; the next
+    /// `distribute` applies and removes them.
+    NextRules(u64),
+    /// Target the operator scheduled for the next fundraising round (0 stops
+    /// fundraising); the next `release_fundraise` applies and removes it.
+    NextTarget(u64),
 }
 
 #[contracttype]
@@ -161,7 +173,8 @@ pub struct RewardsState {
     pub total_claimed: i128,
 }
 
-/// Rules for the next period, passed by the operator to `distribute`.
+/// Rules for the next period, scheduled by the operator (`set_next_rules`) or
+/// passed to `distribute`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RewardsRules {
@@ -370,6 +383,13 @@ fn validate_period_seconds(period_seconds: u64) -> Result<(), Error> {
     } else {
         Err(Error::InvalidRewardsConfig)
     }
+}
+
+fn validate_rules(rules: &RewardsRules) -> Result<(), Error> {
+    if rules.vendor_pool_bps.checked_add(rules.buyer_pool_bps) != Some(BPS_DENOM) {
+        return Err(Error::InvalidRewardsConfig);
+    }
+    validate_period_seconds(rules.period_seconds)
 }
 
 fn bps_of(amount: i128, bps: u32) -> Result<i128, Error> {
@@ -656,6 +676,22 @@ impl MarketplaceContract {
         Ok(())
     }
 
+    /// Registers the caller as a vendor of a marketplace, with the vendor's
+    /// own signature (the app's open invite link), so the operator doesn't
+    /// have to be online to approve each one. Same effect as
+    /// `register_vendor`; registering twice is harmless.
+    pub fn join(env: Env, marketplace_id: u64, vendor: Address) -> Result<(), Error> {
+        bump_instance(&env);
+        load_config(&env, marketplace_id)?;
+        vendor.require_auth();
+
+        save(&env, &DataKey::Vendor(marketplace_id, vendor.clone()), &true);
+
+        env.events()
+            .publish((symbol_short!("vendor"), marketplace_id), vendor);
+        Ok(())
+    }
+
     /// Executes a purchase: atomically moves `amount` of the payment token
     /// from the buyer to vendor / operator / community according to the
     /// marketplace's split, plus the 2% platform fee to the platform
@@ -788,10 +824,12 @@ impl MarketplaceContract {
 
     /// Ends the current rewards period once its length has passed: its pools
     /// become claimable and a new period starts now. Anyone may call it with
-    /// `next = None` (same rules for the next period), so nobody can hold the
-    /// rewards back; passing `Some(rules)` sets the next period's pool shares
-    /// and length and requires the operator's authorization. The API calls it
-    /// right when the period is due. Returns the distributed pool total.
+    /// `next = None`, so nobody can hold the rewards back: the next period
+    /// uses the rules the operator scheduled with `set_next_rules`, or the
+    /// same ones. Passing `Some(rules)` sets the next period's pool shares and
+    /// length directly and requires the operator's authorization. The API
+    /// calls it right when the period is due. Returns the distributed pool
+    /// total.
     pub fn distribute(env: Env, marketplace_id: u64, next: Option<RewardsRules>) -> Result<i128, Error> {
         bump_instance(&env);
         let config = load_config(&env, marketplace_id)?;
@@ -802,11 +840,15 @@ impl MarketplaceContract {
         }
         if let Some(rules) = &next {
             config.operator.require_auth();
-            if rules.vendor_pool_bps.checked_add(rules.buyer_pool_bps) != Some(BPS_DENOM) {
-                return Err(Error::InvalidRewardsConfig);
-            }
-            validate_period_seconds(rules.period_seconds)?;
+            validate_rules(rules)?;
         }
+        // Scheduled rules are used up by this distribution either way.
+        let scheduled_key = DataKey::NextRules(marketplace_id);
+        let scheduled: Option<RewardsRules> = env.storage().persistent().get(&scheduled_key);
+        if scheduled.is_some() {
+            env.storage().persistent().remove(&scheduled_key);
+        }
+        let next = next.or(scheduled);
 
         let k = state.current_period;
         let mut totals = load_period(&env, marketplace_id, k, &state);
@@ -828,6 +870,26 @@ impl MarketplaceContract {
             (pool, state.vendor_pool_bps, state.period_seconds),
         );
         Ok(pool)
+    }
+
+    /// Schedules the rules of the next rewards period (pool shares and
+    /// length); the next `distribute`, whoever calls it, applies them. `None`
+    /// clears a schedule. Operator only. The running period is unaffected.
+    pub fn set_next_rules(env: Env, marketplace_id: u64, rules: Option<RewardsRules>) -> Result<(), Error> {
+        bump_instance(&env);
+        let config = load_config(&env, marketplace_id)?;
+        load_rewards(&env, marketplace_id)?;
+        config.operator.require_auth();
+        let key = DataKey::NextRules(marketplace_id);
+        match &rules {
+            Some(r) => {
+                validate_rules(r)?;
+                save(&env, &key, r);
+            }
+            None => env.storage().persistent().remove(&key),
+        }
+        env.events().publish((symbol_short!("nxtrules"), marketplace_id), rules);
+        Ok(())
     }
 
     /// Pays `member` their reward for a distributed period: their share of
@@ -879,7 +941,8 @@ impl MarketplaceContract {
     /// Releases a fundraising round that reached its target: pays everything
     /// raised in it to the recipients at their fixed shares (rounding as in
     /// `split_by_shares`). What follows depends on `next_target`:
-    /// - `None` (anyone may call): the policy's default — a new round toward
+    /// - `None` (anyone may call): the target the operator scheduled with
+    ///   `set_next_target`, or else the policy's default — a new round toward
     ///   the same target (NewRound) or stop (Stop);
     /// - `Some(t)` (operator only): a new round toward `t`, or stop if t == 0.
     /// Once stopped, later sales give the community share to the vendor.
@@ -890,14 +953,20 @@ impl MarketplaceContract {
         if !state.collecting || state.raised < state.target || state.raised <= 0 {
             return Err(Error::GoalNotReached);
         }
-        let next = match next_target {
-            Some(target) => {
-                config.operator.require_auth();
-                if target < 0 {
-                    return Err(Error::InvalidGoal);
-                }
-                target
+        if let Some(target) = next_target {
+            config.operator.require_auth();
+            if target < 0 {
+                return Err(Error::InvalidGoal);
             }
+        }
+        // A scheduled target is used up by this release either way.
+        let scheduled_key = DataKey::NextTarget(marketplace_id);
+        let scheduled: Option<i128> = env.storage().persistent().get(&scheduled_key);
+        if scheduled.is_some() {
+            env.storage().persistent().remove(&scheduled_key);
+        }
+        let next = match next_target.or(scheduled) {
+            Some(target) => target,
             None => match state.policy {
                 GoalPolicy::Stop => 0,
                 GoalPolicy::NewRound => state.target,
@@ -932,6 +1001,28 @@ impl MarketplaceContract {
             (amount, next),
         );
         Ok(amount)
+    }
+
+    /// Schedules the next fundraising round's target (0 stops fundraising
+    /// after the current round); the next `release_fundraise`, whoever calls
+    /// it, applies it. `None` clears a schedule. Operator only, while the
+    /// fundraiser is still collecting.
+    pub fn set_next_target(env: Env, marketplace_id: u64, target: Option<i128>) -> Result<(), Error> {
+        bump_instance(&env);
+        let config = load_config(&env, marketplace_id)?;
+        let state = load_fundraise(&env, marketplace_id)?;
+        config.operator.require_auth();
+        if !state.collecting {
+            return Err(Error::InvalidGoal);
+        }
+        let key = DataKey::NextTarget(marketplace_id);
+        match target {
+            Some(t) if t < 0 => return Err(Error::InvalidGoal),
+            Some(t) => save(&env, &key, &t),
+            None => env.storage().persistent().remove(&key),
+        }
+        env.events().publish((symbol_short!("nxttarg"), marketplace_id), target);
+        Ok(())
     }
 
     /// Replaces this contract's code with an uploaded wasm (by hash), keeping
@@ -1023,6 +1114,18 @@ impl MarketplaceContract {
     /// Rules and progress of a fundraising marketplace.
     pub fn get_fundraise(env: Env, marketplace_id: u64) -> Result<FundraiseState, Error> {
         load_fundraise(&env, marketplace_id)
+    }
+
+    /// The rules scheduled for the next rewards period, if any.
+    pub fn get_next_rules(env: Env, marketplace_id: u64) -> Result<Option<RewardsRules>, Error> {
+        load_rewards(&env, marketplace_id)?;
+        Ok(load(&env, &DataKey::NextRules(marketplace_id)))
+    }
+
+    /// The target scheduled for the next fundraising round, if any.
+    pub fn get_next_target(env: Env, marketplace_id: u64) -> Result<Option<i128>, Error> {
+        load_fundraise(&env, marketplace_id)?;
+        Ok(load(&env, &DataKey::NextTarget(marketplace_id)))
     }
 }
 

@@ -1,6 +1,8 @@
 "use client";
 import "./purpose-setup.css";
 import { localizedMessage } from "@/i18n/errors";
+import { useCompakiWallet } from "@/components/cavos-provider";
+import { followSignatures, type SignatureRequired } from "@/lib/wallet-signing";
 
 import { categoryLabel } from "@/i18n/labels";
 
@@ -117,6 +119,9 @@ const STEP_COPY = [
     Record<LaunchStepId, LaunchStepState>
   >({ accounts: "pending", deploy: "pending", store: "pending" });
   const [launchError, setLaunchError] = useState<string | null>(null);
+  // Owners with their own wallet approve the on-chain registration in it.
+  const wallet = useCompakiWallet();
+  const [approving, setApproving] = useState(false);
   const [result, setResult] = useState<LaunchResult | null>(null);
   const launchInFlight = useRef(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -234,6 +239,7 @@ const STEP_COPY = [
       const decoder = new TextDecoder();
       let buffer = "";
       let completed = false;
+      let signature: SignatureRequired | null = null;
       for (;;) {
         const { done, value } = await reader.read();
         buffer += done
@@ -246,9 +252,12 @@ const STEP_COPY = [
           if (!line) continue;
           const event = JSON.parse(line.slice(6)) as
             | { type: "step"; step: LaunchStepId; status: "start" | "done" }
+            | { type: "signature"; signatureRequired: SignatureRequired }
             | { type: "complete"; marketplace: LaunchResult & { slug: string } }
             | { type: "error"; message: string };
-          if (event.type === "step") {
+          if (event.type === "signature") {
+            signature = event.signatureRequired;
+          } else if (event.type === "step") {
             setLaunchStates((prev) => ({
               ...prev,
               [event.step]: event.status === "start" ? "active" : "done",
@@ -263,17 +272,35 @@ const STEP_COPY = [
         if (done) break;
       }
       reader.releaseLock();
+      if (signature) {
+        // Registration in the contract, signed by the owner's wallet.
+        setApproving(true);
+        const signed = await followSignatures<{ complete?: { marketplace: LaunchResult & { slug: string } } }>(
+          { status: 202, body: { signatureRequired: signature } },
+          wallet.signXdr,
+        );
+        setApproving(false);
+        const marketplace = signed.body.complete?.marketplace;
+        if (signed.status !== 200 || !marketplace) {
+          throw new Error(localizedMessage(signed.body.error, t, t("launchFailed")));
+        }
+        setLaunchStates({ accounts: "done", deploy: "done", store: "done" });
+        completed = true;
+        setResult({ ...marketplace, name: name.trim() });
+      }
       if (!completed)
         throw new Error(
           t("theConnectionWasInterruptedRetryToFinishSettingUpYourMarketplace"),
         );
     } catch (error) {
+      setApproving(false);
       setLaunchError(localizedMessage(error, t, t("launchFailed")));
     } finally {
       launchInFlight.current = false;
     }
   }, [
     t,
+    wallet,
     name,
     slug,
     description,
@@ -890,7 +917,9 @@ const STEP_COPY = [
                             {launchStates[id] === "done"
                               ? t("done")
                               : launchStates[id] === "active"
-                                ? t("inProgress")
+                                ? id === "deploy" && approving
+                                  ? t("approveInYourWallet")
+                                  : t("inProgress")
                                 : t("upNext")}
                           </small>
                         </li>

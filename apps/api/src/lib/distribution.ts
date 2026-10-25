@@ -2,10 +2,10 @@
 //
 // A rewards period ends with `distribute`, which the contract accepts from
 // anyone once the period's length has passed. The API submits it as soon as a
-// period is due — right on time, from a timer — so nobody has to remember:
-//   - with the operator's pending next-period rules (set in the dashboard),
-//     signed by the operator's custodial key, as the contract requires;
-//   - otherwise unchanged, with the demo-asset issuer paying the fee.
+// period is due — right on time, from a timer — so nobody has to remember. No
+// signature is needed (the demo-asset issuer pays the fee): next-period rules
+// the operator scheduled in the dashboard are already on-chain, and the
+// contract applies them.
 // The same timer also releases fundraising rounds whose automatic release
 // after a sale didn't go through, and keeps the contract's code and instance
 // from expiring (see src/lib/stellar/ttl.ts), so their rent never lands on a
@@ -13,12 +13,13 @@
 
 import { prisma } from "@/lib/db";
 import { releaseIfReached } from "@/lib/fundraise";
+import { operatorKeysSelect, operatorSignerOf } from "@/lib/operator";
 import { boundOnChainId, nextRulesOf } from "@/lib/rewards";
 import {
   ContractError,
-  decryptSecret,
   distributeRewards,
   getFundraise,
+  getNextRules,
   getRewardsStatus,
   keepContractAlive,
   stellarConfig,
@@ -32,7 +33,7 @@ const marketplaceSelect = {
   contractId: true,
   rewardsNextVendorPoolBps: true,
   rewardsNextPeriodSeconds: true,
-  operator: { select: { stellarSecretEncrypted: true } },
+  ...operatorKeysSelect,
 } as const;
 
 type DistributableMarketplace = {
@@ -41,7 +42,8 @@ type DistributableMarketplace = {
   contractId: string | null;
   rewardsNextVendorPoolBps: number | null;
   rewardsNextPeriodSeconds: number | null;
-  operator: { stellarSecretEncrypted: string | null };
+  operatorAddress: string | null;
+  operator: { stellarPublicKey: string | null; stellarSecretEncrypted: string | null };
 };
 
 /**
@@ -56,22 +58,27 @@ export async function distributeIfDue(
   const status = await getRewardsStatus(onChainId);
   if (status.ledgerTime < status.periodEnd) return null;
 
+  // The operator schedules the next rules on-chain (set_next_rules), so the
+  // distribution needs no signature and the contract applies them. Rules
+  // chosen before that existed are only in Postgres: a custodial operator
+  // passes them in the call.
   const pending = nextRulesOf(marketplace);
-  const operatorSecret = marketplace.operator.stellarSecretEncrypted;
-  if (pending && !operatorSecret) throw new Error("Operator payment account missing");
+  let legacyRules = null;
+  let signerSecret = stellarConfig.usdcIssuerSecret;
+  if (pending && (await getNextRules(onChainId)) === null) {
+    const operator = operatorSignerOf(marketplace);
+    if (operator?.kind === "custodial") {
+      legacyRules = {
+        vendorPoolBps: pending.vendorPoolBps,
+        buyerPoolBps: 10_000 - pending.vendorPoolBps,
+        periodSeconds: pending.periodSeconds,
+      };
+      signerSecret = operator.secret;
+    }
+  }
   let result;
   try {
-    result = await distributeRewards({
-      signerSecret: pending ? decryptSecret(operatorSecret as string) : stellarConfig.usdcIssuerSecret,
-      marketplaceId: onChainId,
-      next: pending
-        ? {
-            vendorPoolBps: pending.vendorPoolBps,
-            buyerPoolBps: 10_000 - pending.vendorPoolBps,
-            periodSeconds: pending.periodSeconds,
-          }
-        : null,
-    });
+    result = await distributeRewards({ signerSecret, marketplaceId: onChainId, next: legacyRules });
   } catch (error) {
     if (error instanceof ContractError && error.errorName === "PeriodNotEnded") return null;
     throw error;
@@ -140,7 +147,7 @@ export async function runCommunityTick(): Promise<void> {
         contractMarketplaceId: true,
         contractId: true,
         fundraiseNextTargetUsd: true,
-        operator: { select: { stellarSecretEncrypted: true } },
+        ...operatorKeysSelect,
       },
     });
     for (const m of fundraisers) {

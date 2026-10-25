@@ -118,6 +118,11 @@ async function main(): Promise<void> {
       console.log("    skipped: operator has no payment account");
       continue;
     }
+    // Owned by the operator's own wallet: only that wallet can register it again.
+    if (m.operatorAddress && m.operatorAddress !== m.operator.stellarPublicKey) {
+      console.log("    skipped: registered with the owner's own wallet; they must launch it again from the app");
+      continue;
+    }
     if (mode !== "classic" && m.splitCommunityBps === 0) {
       console.log("    skipped: rewards and fundraising need a community share above 0%");
       continue;
@@ -191,6 +196,7 @@ async function main(): Promise<void> {
           contractId,
           contractMarketplaceId: created.marketplaceId.toString(),
           createTxHash: created.txHash,
+          operatorAddress: m.operator.stellarPublicKey,
           splitVendorBps: vendorBps,
           communityMode: mode,
           ...(mode === "rewards"

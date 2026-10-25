@@ -3,7 +3,6 @@
 // on timeout. Nothing outside src/lib/stellar may talk to the chain.
 
 import {
-  Account,
   Address,
   BASE_FEE,
   Contract,
@@ -283,25 +282,6 @@ export async function submitUserSignedXdr(params: {
   return sendAndConfirm(checkUserSignedXdr(params), params.label);
 }
 
-/**
- * Sign-in challenge for an existing Stellar wallet (SEP-10 style): a
- * transaction from the user's account with sequence number 0 — so it can
- * never be valid on-chain — carrying the nonce in a manageData operation and
- * a 5-minute time bound. Every wallet can sign transactions, while plain
- * message signing is not universal; the API only verifies the signature and
- * never submits it.
- */
-export function buildLoginChallengeTx(params: { address: string; nonce: string }): PreparedTx {
-  const tx = new TransactionBuilder(new Account(params.address, "-1"), {
-    fee: BASE_FEE,
-    networkPassphrase: stellarConfig.networkPassphrase,
-  })
-    .addOperation(Operation.manageData({ name: "Compaki sign-in", value: params.nonce }))
-    .setTimeout(300)
-    .build();
-  return toPrepared(tx);
-}
-
 function toPrepared(tx: Transaction): PreparedTx {
   return { xdr: tx.toXDR(), hash: tx.hash().toString("hex"), source: tx.source };
 }
@@ -343,30 +323,61 @@ async function simulateContract(
   });
 }
 
-/** Registers a classic marketplace instance on-chain. Returns its on-chain id. */
-export async function createMarketplace(params: {
-  operatorSecret: string;
-  communityFundPublicKey: string;
+/**
+ * One contract invocation, built once and signed either with a key the
+ * backend holds (invokeCall) or in the user's own wallet (prepareCall, then
+ * submitUserSignedXdr). Who must sign is the call's own business: e.g. the
+ * operator for create_* and set_next_*, the vendor for join.
+ */
+export interface ContractCall {
+  method: string;
+  args: xdr.ScVal[];
+}
+
+/** Signs and submits `call` with a custodial key (also the fee payer). */
+export function invokeCall(call: ContractCall, signerSecret: string): Promise<InvokeResult> {
+  return invokeContract(call.method, call.args, Keypair.fromSecret(signerSecret));
+}
+
+/** Prepares `call` for `source`'s wallet to sign in the browser. */
+export function prepareCall(call: ContractCall, source: string): Promise<PreparedTx> {
+  return withTimeoutRetry(`prepare ${call.method}`, async () =>
+    toPrepared(await prepareInvocation(call.method, call.args, source, USER_SIGNING_TIMEOUT_S)),
+  );
+}
+
+/** The new marketplace's on-chain id, from a confirmed create_* call. */
+export function marketplaceIdOf(returnValue: xdr.ScVal | undefined): bigint {
+  if (!returnValue) throw new Error("create marketplace returned no value");
+  return scValToNative(returnValue) as bigint;
+}
+
+interface SplitParams {
   vendorBps: number;
   operatorBps: number;
   communityBps: number;
+}
+
+function splitArgs(params: SplitParams): xdr.ScVal[] {
+  return [scU32(params.vendorBps), scU32(params.operatorBps), scU32(params.communityBps)];
+}
+
+export function createMarketplaceCall(params: SplitParams & { operator: string; communityFund: string }): ContractCall {
+  return {
+    method: "create_marketplace",
+    args: [scAddress(params.operator), scAddress(params.communityFund), ...splitArgs(params)],
+  };
+}
+
+/** Registers a classic marketplace instance on-chain. Returns its on-chain id. */
+export async function createMarketplace(params: SplitParams & {
+  operatorSecret: string;
+  communityFundPublicKey: string;
 }): Promise<{ marketplaceId: bigint; txHash: string }> {
-  const operator = Keypair.fromSecret(params.operatorSecret);
-  const { txHash, returnValue } = await invokeContract(
-    "create_marketplace",
-    [
-      scAddress(operator.publicKey()),
-      scAddress(params.communityFundPublicKey),
-      scU32(params.vendorBps),
-      scU32(params.operatorBps),
-      scU32(params.communityBps),
-    ],
-    operator,
-  );
-  if (!returnValue) {
-    throw new Error("create_marketplace returned no value");
-  }
-  return { marketplaceId: scValToNative(returnValue) as bigint, txHash };
+  const operator = Keypair.fromSecret(params.operatorSecret).publicKey();
+  const call = createMarketplaceCall({ ...params, operator, communityFund: params.communityFundPublicKey });
+  const { txHash, returnValue } = await invokeCall(call, params.operatorSecret);
+  return { marketplaceId: marketplaceIdOf(returnValue), txHash };
 }
 
 /**
@@ -375,31 +386,33 @@ export async function createMarketplace(params: {
  * from now), is shared between that period's vendors (`vendorPoolBps`) and
  * buyers (the rest), in proportion to their sales and purchases.
  */
-export async function createRewardsMarketplace(params: {
+export async function createRewardsMarketplace(params: SplitParams & {
   operatorSecret: string;
-  vendorBps: number;
-  operatorBps: number;
-  communityBps: number;
   periodSeconds: number;
   vendorPoolBps: number;
 }): Promise<{ marketplaceId: bigint; txHash: string }> {
-  const operator = Keypair.fromSecret(params.operatorSecret);
-  const { txHash, returnValue } = await invokeContract(
-    "create_rewards_marketplace",
-    [
-      scAddress(operator.publicKey()),
-      scU32(params.vendorBps),
-      scU32(params.operatorBps),
-      scU32(params.communityBps),
+  const operator = Keypair.fromSecret(params.operatorSecret).publicKey();
+  const { txHash, returnValue } = await invokeCall(
+    createRewardsMarketplaceCall({ ...params, operator }),
+    params.operatorSecret,
+  );
+  return { marketplaceId: marketplaceIdOf(returnValue), txHash };
+}
+
+export function createRewardsMarketplaceCall(params: SplitParams & {
+  operator: string;
+  periodSeconds: number;
+  vendorPoolBps: number;
+}): ContractCall {
+  return {
+    method: "create_rewards_marketplace",
+    args: [
+      scAddress(params.operator),
+      ...splitArgs(params),
       scU64(BigInt(params.periodSeconds)),
       scU32(params.vendorPoolBps),
     ],
-    operator,
-  );
-  if (!returnValue) {
-    throw new Error("create_rewards_marketplace returned no value");
-  }
-  return { marketplaceId: scValToNative(returnValue) as bigint, txHash };
+  };
 }
 
 /** What follows a released fundraising round by default (contract `GoalPolicy`). */
@@ -441,35 +454,70 @@ function goalPolicyOf(raw: unknown): GoalPolicy {
  * stays in the contract until a round raises `targetStroops`, then is
  * released to `recipients` at `sharesBps` (summing to 10_000).
  */
-export async function createFundraiseMarketplace(params: {
+export async function createFundraiseMarketplace(params: FundraiseParams & {
   operatorSecret: string;
-  vendorBps: number;
-  operatorBps: number;
-  communityBps: number;
+}): Promise<{ marketplaceId: bigint; txHash: string }> {
+  const operator = Keypair.fromSecret(params.operatorSecret).publicKey();
+  const { txHash, returnValue } = await invokeCall(
+    createFundraiseMarketplaceCall({ ...params, operator }),
+    params.operatorSecret,
+  );
+  return { marketplaceId: marketplaceIdOf(returnValue), txHash };
+}
+
+interface FundraiseParams extends SplitParams {
   targetStroops: bigint;
   recipients: string[];
   sharesBps: number[];
   policy: GoalPolicy;
-}): Promise<{ marketplaceId: bigint; txHash: string }> {
-  const operator = Keypair.fromSecret(params.operatorSecret);
-  const { txHash, returnValue } = await invokeContract(
-    "create_fundraise_marketplace",
-    [
-      scAddress(operator.publicKey()),
-      scU32(params.vendorBps),
-      scU32(params.operatorBps),
-      scU32(params.communityBps),
+}
+
+export function createFundraiseMarketplaceCall(params: FundraiseParams & { operator: string }): ContractCall {
+  return {
+    method: "create_fundraise_marketplace",
+    args: [
+      scAddress(params.operator),
+      ...splitArgs(params),
       scI128(params.targetStroops),
       xdr.ScVal.scvVec(params.recipients.map(scAddress)),
       xdr.ScVal.scvVec(params.sharesBps.map(scU32)),
       scGoalPolicy(params.policy),
     ],
-    operator,
+  };
+}
+
+/**
+ * A vendor registering itself in a marketplace, with its own signature
+ * (contract `join`); used when the operator's key isn't available to the
+ * backend.
+ */
+export function joinCall(params: { marketplaceId: bigint; vendor: string }): ContractCall {
+  return { method: "join", args: [scU64(params.marketplaceId), scAddress(params.vendor)] };
+}
+
+function rulesVal(rules: RewardsRules | null): xdr.ScVal {
+  return scOption(
+    rules
+      ? scSymbolMap({
+          vendor_pool_bps: scU32(rules.vendorPoolBps),
+          buyer_pool_bps: scU32(rules.buyerPoolBps),
+          period_seconds: scU64(BigInt(rules.periodSeconds)),
+        })
+      : null,
   );
-  if (!returnValue) {
-    throw new Error("create_fundraise_marketplace returned no value");
-  }
-  return { marketplaceId: scValToNative(returnValue) as bigint, txHash };
+}
+
+/** Schedules (or with null clears) the next rewards period's rules; operator-signed. */
+export function setNextRulesCall(params: { marketplaceId: bigint; rules: RewardsRules | null }): ContractCall {
+  return { method: "set_next_rules", args: [scU64(params.marketplaceId), rulesVal(params.rules)] };
+}
+
+/** Schedules (or with null clears) the next fundraising round's target, 0 = stop; operator-signed. */
+export function setNextTargetCall(params: { marketplaceId: bigint; targetStroops: bigint | null }): ContractCall {
+  return {
+    method: "set_next_target",
+    args: [scU64(params.marketplaceId), scOption(params.targetStroops === null ? null : scI128(params.targetStroops))],
+  };
 }
 
 /** Registers a vendor; must be signed by the marketplace's operator. */
@@ -640,7 +688,8 @@ export interface RewardsRules {
 /**
  * Ends the current rewards period once its length has passed and starts the
  * next one. Without `next` anyone may submit it (the API uses the issuer as
- * fee payer); with `next` the signer must be the marketplace operator.
+ * fee payer) and the contract applies the rules the operator scheduled with
+ * set_next_rules, if any; with `next` the signer must be the operator.
  */
 export async function distributeRewards(params: {
   signerSecret: string;
@@ -648,16 +697,9 @@ export async function distributeRewards(params: {
   next: RewardsRules | null;
 }): Promise<{ poolStroops: bigint; txHash: string }> {
   const signer = Keypair.fromSecret(params.signerSecret);
-  const next = params.next
-    ? scSymbolMap({
-        vendor_pool_bps: scU32(params.next.vendorPoolBps),
-        buyer_pool_bps: scU32(params.next.buyerPoolBps),
-        period_seconds: scU64(BigInt(params.next.periodSeconds)),
-      })
-    : null;
   const { txHash, returnValue } = await invokeContract(
     "distribute",
-    [scU64(params.marketplaceId), scOption(next)],
+    [scU64(params.marketplaceId), rulesVal(params.next)],
     signer,
   );
   return { poolStroops: i128Of(returnValue), txHash };
@@ -824,10 +866,11 @@ export async function getFundraise(marketplaceId: bigint): Promise<FundraiseOnCh
 }
 
 /**
- * Releases a round that reached its target. Without `nextTargetStroops` the
- * contract applies the marketplace's default (same target again, or stop)
- * and anyone may submit it — the API pays the fee with the demo-asset issuer
- * account. With a next target (0 = stop) the signer must be the operator.
+ * Releases a round that reached its target. Without `nextTargetStroops`
+ * anyone may submit it — the API pays the fee with the demo-asset issuer
+ * account — and the contract applies the target the operator scheduled with
+ * set_next_target, or else the marketplace's default (same target again, or
+ * stop). With a next target (0 = stop) the signer must be the operator.
  */
 export async function releaseFundraise(params: {
   signerSecret: string;
@@ -844,6 +887,26 @@ export async function releaseFundraise(params: {
     signer,
   );
   return { amountStroops: i128Of(returnValue), txHash };
+}
+
+/** Rules scheduled on-chain for the next rewards period, if any. */
+export async function getNextRules(marketplaceId: bigint): Promise<RewardsRules | null> {
+  const raw = (await simulateContract("get_next_rules", [scU64(marketplaceId)])) as
+    | { vendor_pool_bps: number; buyer_pool_bps: number; period_seconds: bigint }
+    | null
+    | undefined;
+  if (!raw) return null;
+  return {
+    vendorPoolBps: Number(raw.vendor_pool_bps),
+    buyerPoolBps: Number(raw.buyer_pool_bps),
+    periodSeconds: Number(raw.period_seconds),
+  };
+}
+
+/** Target scheduled on-chain for the next fundraising round (stroops, 0 = stop), if any. */
+export async function getNextTarget(marketplaceId: bigint): Promise<bigint | null> {
+  const raw = (await simulateContract("get_next_target", [scU64(marketplaceId)])) as bigint | null | undefined;
+  return raw === null || raw === undefined ? null : BigInt(raw);
 }
 
 /** Code version of the deployed contract (bumped on every upgrade). */

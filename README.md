@@ -65,8 +65,9 @@ change a running period's or round's rules.
    operator can't hold rewards back; passing new rules
    (`RewardsRules { vendor_pool_bps, buyer_pool_bps, period_seconds }`)
    requires the **operator's** signature. In the dashboard the operator
-   schedules those rules ahead of time and the scheduler passes them in that
-   same call. The running period never changes.
+   schedules those rules ahead of time with `set_next_rules` (signed while
+   they are there, in their own wallet); the next `distribute` applies them,
+   still without any signature. The running period never changes.
 4. **Claim.** Every seller and buyer of a distributed period claims
    `vendor_pool × their sales / all sales + buyer_pool × their purchases /
    all purchases`, once, with their own signature, paid only to their own
@@ -84,9 +85,10 @@ shares_bps, policy)` keeps the community share until a round raises
 the recipients at their fixed shares. With `next_target = None` (anyone may
 call; the API does it right after the sale that reaches the target) the
 policy decides what follows: `NewRound` (same target again) or `Stop`. With
-`Some(t)` (operator only; scheduled in the dashboard) the next round's target
-is `t`, and `0` stops fundraising. Once stopped, sellers keep the community
-share of later sales.
+`Some(t)` (operator only) the next round's target is `t`, and `0` stops
+fundraising. In the dashboard the operator schedules it ahead of time with
+`set_next_target`, and a release without arguments applies it. Once stopped,
+sellers keep the community share of later sales.
 
 ## Contract architecture
 
@@ -101,13 +103,16 @@ and participant.
 | `create_marketplace(operator, fund, v, o, c)` | operator | Classic marketplace; `v + o + c` must be 9,800 bps. |
 | `create_rewards_marketplace(operator, v, o, c, period_seconds, vendor_pool_bps)` | operator | Rewards marketplace; first period starts now. |
 | `create_fundraise_marketplace(operator, v, o, c, target, recipients, shares_bps, policy)` | operator | Fundraising marketplace; up to 20 recipients. |
-| `register_vendor(id, vendor)` | operator | Unchanged. |
+| `register_vendor(id, vendor)` | operator | Registers a vendor (used when the backend holds the operator's key). |
+| `join(id, vendor)` | vendor | A vendor registers itself, so an operator signing in the browser doesn't have to approve each one. |
 | `purchase(id, buyer, vendor, amount) -> PurchaseReceipt` | buyer | Atomic split; returns what was paid, and the period or round. |
-| `distribute(id, next: Option<RewardsRules>) -> i128` | none, or operator with `next` | Ends a period whose length has passed; optionally sets the next period's rules. |
+| `set_next_rules(id, rules: Option<RewardsRules>)` | operator | Schedules (or clears) the next period's rules. |
+| `distribute(id, next: Option<RewardsRules>) -> i128` | none, or operator with `next` | Ends a period whose length has passed; the next period uses the scheduled rules, or `next`. |
 | `claim(id, period, member) -> i128` | member | Pays a participant's reward for a distributed period, once. |
-| `release_fundraise(id, next_target: Option<i128>) -> i128` | none, or operator with a target | Pays out a round that reached its target. |
+| `set_next_target(id, target: Option<i128>)` | operator | Schedules (or clears) the next round's target; 0 stops fundraising. |
+| `release_fundraise(id, next_target: Option<i128>) -> i128` | none, or operator with a target | Pays out a round that reached its target; the next round uses the scheduled target, `next_target` or the policy. |
 | `upgrade(new_wasm_hash)` | admin | Replaces the code, keeping the address and all data. |
-| `rewards_status`, `get_period`, `get_reward`, `get_fundraise`, `get_marketplace`, `get_platform`, `version`, `get_admin` | none | Views. |
+| `rewards_status`, `get_period`, `get_reward`, `get_fundraise`, `get_next_rules`, `get_next_target`, `get_marketplace`, `get_platform`, `version`, `get_admin` | none | Views. |
 
 **Compaki platform fee.** Every sale pays a fixed 2% (`PLATFORM_FEE_BPS = 200`,
 a constant) straight from the buyer to the platform account set at
@@ -123,11 +128,13 @@ recipients). The code is **upgradeable** by the admin (see
 Storage (`DataKey`): `Config(id)`, `Vendor(id, addr)`, `Rewards(id)`
 (current period, its start, length, pool split, lifetime totals),
 `Period(id, p)` (start, end, split, pools, volumes, claimed, distributed),
-`Participation(id, p, addr)` (sold, bought, claimed), `Fundraise(id)`. Every
+`Participation(id, p, addr)` (sold, bought, claimed), `Fundraise(id)`,
+`NextRules(id)` and `NextTarget(id)` (scheduled by the operator). Every
 entry a call touches has its TTL extended to about 30 days; archived entries
 are restored automatically when used. Arithmetic is checked, and
 `overflow-checks` stays on in release. Events: `market`, `rewards`,
-`fundrais`, `vendor`, `purchase`, `distrib`, `claim`, `release`, `upgrade`.
+`fundrais`, `vendor`, `purchase`, `nxtrules`, `distrib`, `claim`, `nxttarg`,
+`release`, `upgrade`.
 
 ## From purchase to claim
 
@@ -171,10 +178,10 @@ API (`apps/api/src/routes/rewards.ts`):
 | Endpoint | Who |
 | --- | --- |
 | `GET /api/rewards/marketplace/:slug` | public (on-chain view + tx links) |
-| `PUT /api/rewards/marketplace/:slug/next-rules` | operator: `{ vendorPoolBps, periodSeconds }` or `{ clear: true }` |
+| `PUT /api/rewards/marketplace/:slug/next-rules` | operator: `{ vendorPoolBps, periodSeconds }` or `{ clear: true }`; own wallets get 202 + a transaction to sign |
 | `POST /api/rewards/marketplace/:slug/distribute` | any signed-in user (fallback; the scheduler does it on time) |
 | `POST /api/rewards/marketplace/:slug/periods/:id/claim` | the signed-in seller or buyer (for themself only) |
-| `PUT /api/rewards/marketplace/:slug/fundraise/next-target` | operator: `{ targetUsd }` (0 = stop, `null` = default) |
+| `PUT /api/rewards/marketplace/:slug/fundraise/next-target` | operator: `{ targetUsd }` (0 = stop, `null` = default); own wallets get 202 + a transaction to sign |
 | `POST /api/rewards/marketplace/:slug/fundraise/release` | any signed-in user (fallback) |
 | `POST /api/rewards/marketplace/:slug/guarantees` | operator: `{ kind: "claim-for-someone" \| "withdraw" }` |
 | `GET /api/rewards/me` | signed-in user's periods |
@@ -243,21 +250,47 @@ and keeps in its vault. **Compaki never holds that key.**
 
 **Already have a Stellar wallet?** Users can also sign in with Freighter, xBull,
 Albedo, Lobstr and others through [Stellar Wallets Kit](https://stellarwalletskit.dev).
-The API issues a SEP-10-style challenge transaction (the user's account as
-source, sequence 0 so it can never be submitted, the nonce in a `manageData`
-operation, 5-minute time bound); the wallet signs it and the API checks the
-signature against the address (`POST /api/auth/wallet`). Activation, purchases
-and claims then work exactly as for Cavos — the wallet signs each prepared
-transaction. The wallet must be switched to **Testnet**; accounts whose master
-key was removed (multisig) are not supported in this version.
+The API issues a standard **SEP-10** challenge (see below); the wallet signs it
+and the API verifies it (`POST /api/auth/wallet`) and sets the session cookie.
+Each challenge is accepted once. Activation, purchases and claims then work
+exactly as for Cavos — the wallet signs each prepared transaction. The wallet
+must be switched to **Testnet**.
+
+### SEP-1 and SEP-10
+
+- **SEP-1 (`stellar.toml`).** The web app serves
+  `/.well-known/stellar.toml` (generated by the API from its config): Compaki's
+  organization info, the SEP-10 `SIGNING_KEY` and `WEB_AUTH_ENDPOINT`, the
+  accounts Compaki operates, and the demo asset — `status = "test"`, not
+  anchored, its token contract, and a description saying it is **not
+  Circle's USDC** and has no value. `npm run stellar:home-domain -- <domain>`
+  sets the asset issuer's `home_domain` to the web app's domain, so wallets
+  and stellar.expert show that information next to the asset.
+- **SEP-10 (web authentication).** `GET /api/auth/sep10?account=G…` returns a
+  challenge (sequence 0, 15-minute bounds, `<home_domain> auth` and
+  `web_auth_domain` entries, signed by the server key); `POST
+  /api/auth/sep10` with the signed `transaction` (JSON or form) returns a JWT.
+  Any SEP-10 client can authenticate against Compaki this way, and the app's
+  own wallet sign-in uses the same challenge. Accounts that exist must be
+  signed by signers meeting their medium threshold (multisig works); new
+  accounts by their master key. Built on the SDK's `WebAuth` helpers.
+- **Configuration.** `HOME_DOMAIN` (API) is the web app's host, e.g.
+  `compaki.example` (default `localhost:3000`). The signing key comes from
+  `SEP10_SIGNING_SECRET`, or is derived from `SESSION_SECRET` /
+  `WALLET_ENCRYPTION_KEY` so it stays stable without another variable; it
+  never holds funds.
 
 Personal money (purchases, vendor revenue, member rewards) uses the user's own
-wallet (Cavos or existing) as soon as it is active. **The marketplace operator stays a server-held
-service account**: creating marketplaces, registering vendors, opening and
-paying for closing periods are signed by the API — otherwise every vendor
-sign-up would wait for the operator's manual approval. Accounts created before
-Cavos (and the seeded demo accounts) keep their custodial account and can
-still sign in with a password.
+wallet (Cavos or existing) as soon as it is active. **The same goes for
+marketplace owners**: a marketplace launched by someone with their own wallet
+is registered with that wallet as its operator — they sign the creation in
+the browser and the operator share of every sale lands in it. The operator
+only signs while present (launching, scheduling the next rules or target):
+vendors register themselves with `join` (their own wallet signs, or the
+backend for custodial vendors), and distributions and releases need no
+signature. `Marketplace.operatorAddress` records the address. Accounts
+created before Cavos (and the seeded demo accounts) keep their custodial
+account, which the backend signs for, and can still sign in with a password.
 
 Setup: create an app in the Cavos console, add your web origin under allowed
 origins, and set `NEXT_PUBLIC_CAVOS_APP_ID` (see `apps/web/env.example`).
@@ -296,13 +329,14 @@ against your app id.
     purchases and claims carry the user's own signature, and payouts land in a
     wallet Compaki cannot move. Trust shifts to Cavos' key management (vault,
     enclave recovery) instead of Compaki.
-  - **Custodial accounts** (operators, pre-Cavos and demo accounts): the key is
-    held by the Compaki backend (AES-256-GCM, `WALLET_ENCRYPTION_KEY`), so
-    `require_auth()` proves "the backend signed for this user". The backend
-    holds every operator key and can do anything an operator can (register
-    vendors, set the next period's rules) — but it still **cannot** withdraw
-    the treasury or change a running period: the contract forbids that for
-    everyone.
+  - **Custodial accounts** (pre-Cavos and demo accounts, including
+    operators without their own wallet): the key is held by the Compaki
+    backend (AES-256-GCM, `WALLET_ENCRYPTION_KEY`), so `require_auth()` proves
+    "the backend signed for this user". For those operators the backend can do
+    anything an operator can (register vendors, schedule the next period's
+    rules) — but it still **cannot** withdraw the treasury or change a running
+    period: the contract forbids that for everyone. Operators with their own
+    wallet keep their key.
   Compaki is therefore **not** fully non-custodial.
 - **Signing requests are kept in memory** (single API instance): an API restart
   drops pending signatures and the user retries the action.
@@ -388,6 +422,8 @@ Environment variables used by this release:
 | `DEMO_ASSET_CODE`, `DEPLOY_ENV_FILE` | deploy | Asset code for fresh deploys (default `CPKUSD`); alternative env file. |
 | `NEXT_PUBLIC_CAVOS_APP_ID`, `NEXT_PUBLIC_CAVOS_ENV` | web | Cavos app id (public) and environment (`development` default). |
 | `CAVOS_APP_ID` | API | Optional: also require Cavos email tokens to be issued for this app. |
+| `HOME_DOMAIN` | API | The web app's host, for stellar.toml and SEP-10 (default `localhost:3000`). |
+| `SEP10_SIGNING_SECRET` | API | Optional SEP-10 signing key (otherwise derived from the session secret). |
 
 ## Stellar testnet
 
@@ -400,12 +436,15 @@ npm run demo:rewards                       # on-chain proof of the whole flow (n
 npm run demo:purchase                      # classic marketplace proof (unchanged)
 ```
 
-On current testnet, uploading new contract code and the first call into it
-(`initialize`) can cost more than a transaction's own fee field allows (a
-uint32, ~429 XLM): in October 2026 they cost ~781 and ~2,569 XLM. The deploy
-script then pays through a fee-bump transaction, whose fee field is 64-bit.
-The issuer's Friendbot balance (10,000 XLM) covers it. After that,
-calls are cheap again (a purchase ~0.002 XLM, creating a marketplace ~3 XLM).
+Testnet storage fees have risen sharply. In late October 2026 uploading the
+contract code (~64 KB) cost ~17,000 XLM, keeping it alive for 30 days
+~56,000 XLM, and creating a marketplace ~55 XLM. Both are above a
+transaction's own fee field (a uint32, ~429 XLM), so the deploy script pays
+through a fee-bump transaction, whose fee field is 64-bit. They are also above
+what one Friendbot account holds (10,000 XLM), so the deploy script and the
+API's keep-alive fund the payer by merging fresh Friendbot accounts into it
+(free test XLM). Uploading and extending need no particular signer; only
+`upgrade` is signed by the admin.
 
 ### Shipping a contract change
 
@@ -444,8 +483,8 @@ claimable there with `stellar contract invoke`.
 ## Tests
 
 ```bash
-cd contracts && cargo build --target wasm32v1-none --release && cargo test   # 38 tests
-cd apps/api && npm run typecheck && npm run test:community && npm run build
+cd contracts && cargo build --target wasm32v1-none --release && cargo test   # 44 tests
+cd apps/api && npm run typecheck && npm run test:community && npm run test:sep10 && npm run build
 cd apps/web && npm run typecheck && npm run lint && node --test tests/*.test.mjs && npm run build
 ```
 
@@ -455,7 +494,9 @@ operator-only) while the distributed period keeps its own; claims (before
 distribution, twice, by non-participants); periods isolated from each other
 and marketplaces from each other; rounding; self-dealing never paying;
 fundraising rounds, payouts above target, a new target or a stop chosen by the
-operator; withdrawal attempts (including a direct token transfer out of the
+operator; vendors joining with their own signature, and next rules and
+targets scheduled by the operator then applied without any signature;
+withdrawal attempts (including a direct token transfer out of the
 contract); only the admin upgrading, and a real upgrade keeping the stored
 data; and the exact `require_auth` set of every entry point. Happy paths
 assert `env.auths()`; negative auth tests run in strict mode (`set_auths(&[])`

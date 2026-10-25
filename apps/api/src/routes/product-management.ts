@@ -1,12 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 import { Hono, type Context } from "hono";
-import { activeProducts, parseProductInput } from "../lib/products";
+import { activeProducts, parseProductInput, type ProductInput } from "../lib/products";
 import { SellerSetupError } from "../lib/seller-errors";
 
 type Dependencies = {
   db: Pick<PrismaClient, "product" | "marketplace">;
   sessionUser: (c: Context) => Promise<{ id: string; isSeller: boolean } | null>;
-  ensureVendor: (userId: string, marketplaceId: string) => Promise<unknown>;
+  /** Registers the seller in the marketplace; may answer with a signature request instead (see seller-registration). */
+  ensureVendor: (userId: string, marketplaceId: string, product?: ProductInput) => Promise<unknown>;
 };
 export function createProductManagement({ db, sessionUser, ensureVendor }: Dependencies) {
   const router = new Hono();
@@ -23,7 +24,12 @@ export function createProductManagement({ db, sessionUser, ensureVendor }: Depen
     const marketplace = await db.marketplace.findUnique({ where: { slug } });
     if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
     try {
-      await ensureVendor(user.id, marketplace.id);
+      // A seller whose wallet must approve the registration gets the
+      // transaction to sign (202); the product is created once it confirms.
+      const registration = await ensureVendor(user.id, marketplace.id, input);
+      if (registration && typeof registration === "object" && "signatureRequired" in registration) {
+        return c.json(registration, 202);
+      }
     } catch (error) {
       if (error instanceof SellerSetupError) return c.json({ error: error.message }, 409);
       console.error("[seller-publication] setup failed:", error);

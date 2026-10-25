@@ -487,6 +487,134 @@ mod community {
         }
 
         #[test]
+        fn scheduled_rules_apply_at_the_next_distribution_without_a_signature() {
+            let c = setup();
+            let e = &c.env;
+            let id = rewards_marketplace(&c);
+            c.client.set_next_rules(&id, &rules(2_000, 8_000, 180 * DAY));
+            assert_eq!(
+                e.auths(),
+                std::vec![(
+                    c.operator.clone(),
+                    AuthorizedInvocation {
+                        function: AuthorizedFunction::Contract((
+                            c.contract.clone(),
+                            Symbol::new(e, "set_next_rules"),
+                            (id, rules(2_000, 8_000, 180 * DAY)).into_val(e),
+                        )),
+                        sub_invocations: std::vec![],
+                    }
+                )]
+            );
+            assert_eq!(c.client.get_next_rules(&id), rules(2_000, 8_000, 180 * DAY));
+            // The running period keeps its rules.
+            assert_eq!(c.client.rewards_status(&id).vendor_pool_bps, 6_000);
+            c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD));
+
+            // Anyone distributes, with no signature at all, and the schedule applies.
+            advance(&c, PERIOD);
+            e.set_auths(&[]);
+            assert_eq!(c.client.distribute(&id, &None), 5 * USD);
+            assert_eq!(e.auths(), std::vec![]);
+            let status = c.client.rewards_status(&id);
+            assert_eq!((status.vendor_pool_bps, status.period_seconds), (2_000, 180 * DAY));
+            assert_eq!(c.client.get_period(&id, &0).vendor_pool_bps, 6_000);
+            // Used up: the following distribution keeps the new rules.
+            assert_eq!(c.client.get_next_rules(&id), None);
+            advance(&c, 180 * DAY);
+            c.client.distribute(&id, &None);
+            assert_eq!(c.client.rewards_status(&id).vendor_pool_bps, 2_000);
+        }
+
+        #[test]
+        fn scheduled_rules_need_the_operator_and_are_validated() {
+            let c = setup();
+            let e = &c.env;
+            let id = rewards_marketplace(&c);
+            let bad = Err(Ok(Error::InvalidRewardsConfig));
+            assert_eq!(c.client.try_set_next_rules(&id, &rules(6_000, 3_000, PERIOD)), bad);
+            assert_eq!(c.client.try_set_next_rules(&id, &rules(5_000, 5_000, MIN_PERIOD_SECONDS - 1)), bad);
+            assert_eq!(c.client.get_next_rules(&id), None);
+
+            // Strict auth: no signature, or a stranger's, is refused.
+            e.set_auths(&[]);
+            assert!(c.client.try_set_next_rules(&id, &rules(5_000, 5_000, PERIOD)).is_err());
+            let stranger = Address::generate(e);
+            e.mock_auths(&[MockAuth {
+                address: &stranger,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "set_next_rules",
+                    args: (id, rules(5_000, 5_000, PERIOD)).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert!(c.client.try_set_next_rules(&id, &rules(5_000, 5_000, PERIOD)).is_err());
+            assert_eq!(c.client.get_next_rules(&id), None);
+
+            // The operator can clear a schedule.
+            e.mock_all_auths();
+            c.client.set_next_rules(&id, &rules(5_000, 5_000, PERIOD));
+            c.client.set_next_rules(&id, &None);
+            assert_eq!(c.client.get_next_rules(&id), None);
+
+            // Rules passed to distribute win over a schedule, which is used up.
+            c.client.set_next_rules(&id, &rules(1_000, 9_000, PERIOD));
+            advance(&c, PERIOD);
+            c.client.distribute(&id, &rules(3_000, 7_000, PERIOD));
+            assert_eq!(c.client.rewards_status(&id).vendor_pool_bps, 3_000);
+            assert_eq!(c.client.get_next_rules(&id), None);
+
+            // Only rewards marketplaces have periods.
+            let fund = Address::generate(e);
+            let classic = c.client.create_marketplace(&c.operator, &fund, &8_800, &800, &200);
+            assert_eq!(
+                c.client.try_set_next_rules(&classic, &rules(5_000, 5_000, PERIOD)),
+                Err(Ok(Error::RewardsNotEnabled))
+            );
+        }
+
+        #[test]
+        fn vendors_join_with_their_own_signature() {
+            let c = setup();
+            let e = &c.env;
+            let id = c
+                .client
+                .create_rewards_marketplace(&c.operator, &8_800, &500, &500, &PERIOD, &6_000);
+            assert_eq!(c.client.try_purchase(&id, &c.b1, &c.v1, &USD), Err(Ok(Error::VendorNotRegistered)));
+
+            // Strict auth: no signature, or the operator's, is refused.
+            e.set_auths(&[]);
+            assert!(c.client.try_join(&id, &c.v1).is_err());
+            e.mock_auths(&[MockAuth {
+                address: &c.operator,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "join",
+                    args: (id, &c.v1).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert!(c.client.try_join(&id, &c.v1).is_err());
+
+            // The vendor's own signature is enough, and exactly what's needed.
+            e.mock_auths(&[MockAuth {
+                address: &c.v1,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "join",
+                    args: (id, &c.v1).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            c.client.join(&id, &c.v1);
+            e.mock_all_auths();
+            c.client.join(&id, &c.v1); // twice is harmless
+            assert_eq!(c.client.purchase(&id, &c.b1, &c.v1, &(100 * USD)).vendor_amount, 88 * USD);
+            assert_eq!(c.client.try_join(&99, &c.v1), Err(Ok(Error::MarketplaceNotFound)));
+        }
+
+        #[test]
         fn claim_rules() {
             let c = setup();
             let id = rewards_marketplace(&c);
@@ -907,6 +1035,89 @@ mod community {
             assert!(!c.client.get_fundraise(&f.id).collecting);
             assert_eq!(c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD)).community_amount, 0);
             assert_paid_out(&f, 21 * USD, 9 * USD);
+        }
+
+        #[test]
+        fn scheduled_target_applies_at_the_next_release() {
+            let f = fundraiser(GoalPolicy::Stop);
+            let c = &f.c;
+            let e = &c.env;
+            c.client.set_next_target(&f.id, &Some(20 * USD));
+            assert_eq!(
+                e.auths(),
+                std::vec![(
+                    c.operator.clone(),
+                    AuthorizedInvocation {
+                        function: AuthorizedFunction::Contract((
+                            c.contract.clone(),
+                            Symbol::new(e, "set_next_target"),
+                            (f.id, Some(20 * USD)).into_val(e),
+                        )),
+                        sub_invocations: std::vec![],
+                    }
+                )]
+            );
+            assert_eq!(c.client.get_next_target(&f.id), Some(20 * USD));
+            // The running round keeps its target.
+            assert_eq!(c.client.get_fundraise(&f.id).target, 10 * USD);
+            reach_target(&f);
+
+            // Anyone releases, with no signature at all, and the schedule applies
+            // (overriding the Stop policy).
+            e.set_auths(&[]);
+            assert_eq!(c.client.release_fundraise(&f.id, &None), 10 * USD);
+            assert_eq!(e.auths(), std::vec![]);
+            let state = c.client.get_fundraise(&f.id);
+            assert_eq!((state.target, state.round, state.collecting), (20 * USD, 1, true));
+            assert_eq!(c.client.get_next_target(&f.id), None);
+
+            // A scheduled 0 stops fundraising after the round.
+            e.mock_all_auths();
+            c.client.set_next_target(&f.id, &Some(0));
+            for _ in 0..4 {
+                c.client.purchase(&f.id, &c.b1, &c.v1, &(100 * USD));
+            }
+            e.set_auths(&[]);
+            c.client.release_fundraise(&f.id, &None);
+            assert!(!c.client.get_fundraise(&f.id).collecting);
+            assert_paid_out(&f, 21 * USD, 9 * USD);
+            // Nothing left to schedule once stopped.
+            e.mock_all_auths();
+            assert_eq!(c.client.try_set_next_target(&f.id, &Some(5 * USD)), Err(Ok(Error::InvalidGoal)));
+        }
+
+        #[test]
+        fn scheduled_target_needs_the_operator_and_cant_be_negative() {
+            let f = fundraiser(GoalPolicy::NewRound);
+            let c = &f.c;
+            let e = &c.env;
+            assert_eq!(c.client.try_set_next_target(&f.id, &Some(-1)), Err(Ok(Error::InvalidGoal)));
+            e.set_auths(&[]);
+            assert!(c.client.try_set_next_target(&f.id, &Some(5 * USD)).is_err());
+            let stranger = Address::generate(e);
+            e.mock_auths(&[MockAuth {
+                address: &stranger,
+                invoke: &MockAuthInvoke {
+                    contract: &c.contract,
+                    fn_name: "set_next_target",
+                    args: (f.id, Some(5 * USD)).into_val(e),
+                    sub_invokes: &[],
+                },
+            }]);
+            assert!(c.client.try_set_next_target(&f.id, &Some(5 * USD)).is_err());
+            assert_eq!(c.client.get_next_target(&f.id), None);
+
+            // Cleared schedules fall back to the policy; a target passed to the
+            // release wins over a schedule, which is used up.
+            e.mock_all_auths();
+            c.client.set_next_target(&f.id, &Some(5 * USD));
+            c.client.set_next_target(&f.id, &None);
+            assert_eq!(c.client.get_next_target(&f.id), None);
+            c.client.set_next_target(&f.id, &Some(5 * USD));
+            reach_target(&f);
+            c.client.release_fundraise(&f.id, &Some(30 * USD));
+            assert_eq!(c.client.get_fundraise(&f.id).target, 30 * USD);
+            assert_eq!(c.client.get_next_target(&f.id), None);
         }
 
         #[test]

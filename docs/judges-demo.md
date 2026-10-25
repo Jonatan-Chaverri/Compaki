@@ -46,8 +46,9 @@ settles as its own atomic `purchase` transaction (vendor 83% / marketplace
 
 Still on the rewards tab, in **Next period's rules**, choose for example
 *every 6 months* and 30% sellers / 70% buyers → **Schedule these rules**. The
-running period keeps 60/40; the change is passed to the contract at the next
-distribution, signed by the operator.
+running period keeps 60/40; the change is stored in the contract right away
+(`set_next_rules`, signed by the operator — in their own wallet if they have
+one) and the next distribution applies it without any signature.
 
 ## 4. Distribution
 
@@ -84,9 +85,11 @@ and prints a table of transactions.
 
 **Be upfront with judges:**
 
-- Operator and older accounts are custodial, so the backend signs for them;
-  people who sign in with email or their own Stellar wallet sign their
-  purchases and claims themselves.
+- The seeded demo accounts (María included) are custodial, so the backend
+  signs for them. People who sign in with email or their own Stellar wallet
+  sign their purchases and claims themselves, and a marketplace they launch is
+  owned by that wallet: they sign its creation and receive the operator share
+  in it.
 - The contract is **upgradeable** by Compaki's admin key (same address, data
   kept). The guarantees hold for the deployed code version; trusting the
   admin key is part of the model. See *Guarantees and limitations* in the

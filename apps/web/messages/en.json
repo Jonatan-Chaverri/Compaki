@@ -1360,6 +1360,11 @@
     "sellerEarningsCommunity": "Community contribution",
     "sellerEarningsPlatform": "Compaki ({percent}%)",
     "sellerEarningsYourShare": "You’ll receive",
-    "sellerEarningsRules": "View marketplace benefits and rules"
+    "sellerEarningsRules": "View marketplace benefits and rules",
+    "approveJoiningInYourWallet": "Approve joining this marketplace in your wallet. Your product is published right after.",
+    "apiFinishWalletBeforeLaunch": "Finish setting up your wallet before launching a marketplace",
+    "apiSignInWithTheMarketplaceWallet": "Sign in with the wallet that created this marketplace",
+    "apiCouldNotSaveNextRules": "Could not save the next period's rules",
+    "apiCouldNotSaveNextTarget": "Could not save the next round's target"
   }
 }

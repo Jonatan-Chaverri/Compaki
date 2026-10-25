@@ -13,7 +13,14 @@ import { randomUUID } from "node:crypto";
 
 const TTL_MS = 3 * 60 * 1000; // matches the transactions' 180s time bounds
 
-export type PendingKind = "wallet-setup" | "purchase" | "claim";
+export type PendingKind =
+  | "wallet-setup"
+  | "purchase"
+  | "claim"
+  | "create-marketplace"
+  | "join"
+  | "next-rules"
+  | "next-target";
 
 export interface PendingTx<C = unknown> {
   id: string;

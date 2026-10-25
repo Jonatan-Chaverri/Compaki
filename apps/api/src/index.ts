@@ -15,6 +15,7 @@ import { orders } from "./routes/orders";
 import { products } from "./routes/products";
 import { rewards } from "./routes/rewards";
 import { sales } from "./routes/sales";
+import { stellarToml } from "./routes/stellar-toml";
 import { tx } from "./routes/tx";
 import { wallet } from "./routes/wallet";
 
@@ -36,6 +37,7 @@ app.route("/api/sales", sales);
 app.route("/api/tx", tx);
 app.route("/api/wallet", wallet);
 
+app.route("/.well-known", stellarToml);
 app.get("/health", (c) => c.json({ ok: true }));
 
 const port = Number(process.env.PORT ?? 4000);

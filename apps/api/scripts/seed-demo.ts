@@ -203,6 +203,7 @@ async function main(): Promise<void> {
         contractMarketplaceId: result.marketplaceId.toString(),
         contractId: stellarConfig.marketplaceContractId,
         createTxHash: result.txHash,
+        operatorAddress: operator.stellarPublicKey,
         communityMode: "rewards",
         rewardsPeriodSeconds: status.periodSeconds,
         rewardsVendorPoolBps: status.vendorPoolBps,

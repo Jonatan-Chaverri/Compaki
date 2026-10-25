@@ -15,12 +15,14 @@
     "marketplaces:rebind": "tsx scripts/rebind-marketplaces.ts",
     "users:set-password": "tsx scripts/set-password.ts",
     "data:reset": "tsx scripts/reset-data.ts",
+    "stellar:home-domain": "tsx scripts/set-home-domain.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "prisma:format": "prisma format",
-    "test:community": "node --import tsx --test src/lib/community.test.ts"
+    "test:community": "node --import tsx --test src/lib/community.test.ts",
+    "test:sep10": "node --import tsx --test src/lib/sep10.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

@@ -1,27 +1,38 @@
 "use client";
 
 // Operator forms for what comes next: the next rewards period's rules (pool
-// split and frequency) and the next fundraising round's target. They are a
-// pending choice the API passes to the contract at the next distribution or
-// payout — the running period or round never changes.
+// split and frequency) and the next fundraising round's target. Saving
+// schedules them in the contract, which applies them at the next
+// distribution or payout — the running period or round never changes. An
+// operator with their own wallet approves the change in it.
 
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { useCompakiWallet } from "@/components/cavos-provider";
 import { localizedMessage } from "@/i18n/errors";
+import { followSignatures, readResult } from "@/lib/wallet-signing";
 import { formatAmount, formatTs, frequencyLabel, getPolicyText, getRewardsFrequencies, type FundraiseView, type RewardsView } from "@/lib/rewards";
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-brand-500";
 
-async function put(url: string, body: unknown): Promise<void> {
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const result = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(result.error ?? `Request failed (${res.status})`);
+/** PUTs the choice; the operator's own wallet signs it when the API asks (202). */
+async function put(
+  url: string,
+  body: unknown,
+  signXdr: (xdr: string, address: string) => Promise<string>,
+  onApprove: () => void,
+): Promise<void> {
+  const first = await readResult(
+    await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  const result = await followSignatures(first, signXdr, onApprove);
+  if (result.status !== 200) throw new Error(result.body.error ?? `Request failed (${result.status})`);
 }
 
 export function NextRulesForm({
@@ -36,6 +47,7 @@ export function NextRulesForm({
   const t = useTranslations("ui");
   const locale = useLocale();
   const frequencies = getRewardsFrequencies(t);
+  const wallet = useCompakiWallet();
   const pending = rewards.nextRules;
   const [sellers, setSellers] = useState(() => Math.round((pending?.vendorPoolBps ?? rewards.vendorPoolBps ?? 5_000) / 100));
   const [periodSeconds, setPeriodSeconds] = useState(() => pending?.periodSeconds ?? rewards.periodSeconds ?? frequencies[0].seconds);
@@ -48,7 +60,9 @@ export function NextRulesForm({
     setError(null);
     setMessage(null);
     try {
-      await put(`/api/rewards/marketplace/${encodeURIComponent(slug)}/next-rules`, body);
+      await put(`/api/rewards/marketplace/${encodeURIComponent(slug)}/next-rules`, body, wallet.signXdr, () =>
+        setMessage(t("approveInYourWallet")),
+      );
       setMessage(done);
       onSaved();
     } catch (err) {
@@ -139,6 +153,7 @@ export function NextTargetForm({
 }) {
   const t = useTranslations("ui");
   const locale = useLocale();
+  const wallet = useCompakiWallet();
   const pending = fundraise.nextTargetUsd;
   const [target, setTarget] = useState(() => (pending === null ? "" : String(pending)));
   const [busy, setBusy] = useState(false);
@@ -153,7 +168,9 @@ export function NextTargetForm({
     setError(null);
     setMessage(null);
     try {
-      await put(`/api/rewards/marketplace/${encodeURIComponent(slug)}/fundraise/next-target`, { targetUsd });
+      await put(`/api/rewards/marketplace/${encodeURIComponent(slug)}/fundraise/next-target`, { targetUsd }, wallet.signXdr, () =>
+        setMessage(t("approveInYourWallet")),
+      );
       setMessage(done);
       if (targetUsd === null) setTarget("");
       onSaved();

@@ -9,6 +9,8 @@ import { useTranslations } from "next-intl";
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { followSignatures, readResult } from "@/lib/wallet-signing";
+import { useCompakiWallet } from "./cavos-provider";
 import { Icon } from "./icon";
 import { SellerEarnings } from "./seller-earnings";
 
@@ -73,6 +75,10 @@ export function ProductModal({
   const [imageUrl, setImageUrl] = useState(product?.imageUrl ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Publishing in a marketplace for the first time may need the seller's
+  // wallet to approve joining it on-chain.
+  const wallet = useCompakiWallet();
+  const [approving, setApproving] = useState(false);
 
   const valid =
     Boolean(product || selectedMarketplace) &&
@@ -85,25 +91,31 @@ export function ProductModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(product ? `/api/products/${product.id}` : "/api/products", {
-        method: product ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          marketplaceSlug: selectedMarketplace,
-          name,
-          shortDescription,
-          description,
-          priceUsd: Number(price),
-          stock: Number(stock),
-          imageUrl,
+      const first = await readResult(
+        await fetch(product ? `/api/products/${product.id}` : "/api/products", {
+          method: product ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            marketplaceSlug: selectedMarketplace,
+            name,
+            shortDescription,
+            description,
+            priceUsd: Number(price),
+            stock: Number(stock),
+            imageUrl,
+          }),
         }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(localizedMessage(data.error, t, t("couldNotSaveProduct")));
+      );
+      const result = await followSignatures(first, wallet.signXdr, () => setApproving(true));
+      setApproving(false);
+      if (result.status !== 200 && result.status !== 201) {
+        throw new Error(localizedMessage(result.body.error, t, t("couldNotSaveProduct")));
+      }
       if (!product) onCreated?.(selectedMarketplace);
       onClose();
       router.refresh();
     } catch (err) {
+      setApproving(false);
       setError(localizedMessage(err, t, t("couldNotSaveProduct")));
       setBusy(false);
     }
@@ -225,6 +237,7 @@ export function ProductModal({
         </div>
       </div>
 
+      {approving && <p className="mt-4 text-sm text-slate-600" role="status">{t("approveJoiningInYourWallet")}</p>}
       {error && <p className="mt-4 text-sm text-red-600">{localizedMessage(error, t, error)}</p>}
 
       <div className="mt-6 flex justify-end gap-3">

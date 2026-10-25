@@ -102,6 +102,60 @@ async function waitForAccountOnRpc(publicKey: string): Promise<void> {
   throw new Error(`Account ${publicKey} never appeared on Soroban RPC`);
 }
 
+const HORIZON_URL = "https://horizon-testnet.stellar.org";
+
+async function xlmBalance(publicKey: string): Promise<number> {
+  const res = await fetch(`${HORIZON_URL}/accounts/${publicKey}`);
+  if (!res.ok) throw new Error(`Horizon account lookup failed (${res.status})`);
+  const account = (await res.json()) as { balances: { asset_type: string; balance: string }[] };
+  return Number(account.balances.find((b) => b.asset_type === "native")?.balance ?? 0);
+}
+
+/**
+ * A fresh account holding at least `xlm` testnet XLM. Friendbot funds 10,000
+ * per account, so for larger amounts more Friendbot accounts are merged into
+ * it. Used for operations that need no particular signer but cost more than
+ * one account holds (uploading contract code, extending its TTL).
+ */
+async function testnetPayer(xlm: number): Promise<Keypair> {
+  const payer = Keypair.random();
+  await friendbot(payer.publicKey());
+  await waitForAccountOnRpc(payer.publicKey());
+  while ((await xlmBalance(payer.publicKey())) < xlm) {
+    const donor = Keypair.random();
+    await friendbot(donor.publicKey());
+    await waitForAccountOnRpc(donor.publicKey());
+    const merge = new TransactionBuilder(await server.getAccount(donor.publicKey()), {
+      fee: BASE_FEE,
+      networkPassphrase: PASSPHRASE,
+    })
+      .addOperation(Operation.accountMerge({ destination: payer.publicKey() }))
+      .setTimeout(60)
+      .build();
+    merge.sign(donor);
+    const sent = await server.sendTransaction(merge);
+    if (sent.status === "ERROR") throw new Error(`payer top-up failed: ${JSON.stringify(sent.errorResult)}`);
+    for (let i = 0; i < 30; i++) {
+      const result = await server.getTransaction(sent.hash);
+      if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) break;
+      if (result.status === rpc.Api.GetTransactionStatus.FAILED) throw new Error(`payer top-up ${sent.hash} failed`);
+      await sleep(1_500);
+    }
+  }
+  return payer;
+}
+
+/** Resource fee (XLM) the network currently asks for `operation`, simulated with `source`. */
+async function estimateXlm(operation: xdr.Operation, source: string, sorobanData?: xdr.SorobanTransactionData): Promise<number> {
+  let builder = new TransactionBuilder(await server.getAccount(source), { fee: BASE_FEE, networkPassphrase: PASSPHRASE })
+    .addOperation(operation)
+    .setTimeout(60);
+  if (sorobanData) builder = builder.setSorobanData(sorobanData);
+  const sim = await server.simulateTransaction(builder.build());
+  if (rpc.Api.isSimulationError(sim)) throw new Error(`fee estimate failed: ${sim.error}`);
+  return Number(sim.minResourceFee) / 1e7;
+}
+
 /** Simulate → sign → submit → poll one Soroban operation. Retries once on timeout-ish errors. */
 const UINT32_MAX = 4_294_967_295;
 
@@ -260,14 +314,17 @@ async function extendCodeTtl(wasmHash: Buffer, contractId?: string): Promise<voi
       ),
     );
   }
-  // No authorization is needed, so a fresh Friendbot account pays the rent.
-  const signer = Keypair.random();
-  await friendbot(signer.publicKey());
-  await waitForAccountOnRpc(signer.publicKey());
+  // No authorization is needed, so fresh Friendbot accounts pay the rent.
+  const footprint = new SorobanDataBuilder().setReadOnly(keys).build();
+  const extend = Operation.extendFootprintTtl({ extendTo: 30 * 17_280 });
+  const issuerPublic = existingEnvValue("DEMO_USDC_ISSUER_PUBLIC");
+  const rent = issuerPublic ? await estimateXlm(extend, issuerPublic, footprint) : 9_000;
+  console.log(`    extending the code's TTL to 30 days costs ~${rent.toFixed(0)} XLM`);
+  const signer = await testnetPayer(rent + 100);
   const account = await server.getAccount(signer.publicKey());
   const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: PASSPHRASE })
-    .addOperation(Operation.extendFootprintTtl({ extendTo: 30 * 17_280 }))
-    .setSorobanData(new SorobanDataBuilder().setReadOnly(keys).build())
+    .addOperation(extend)
+    .setSorobanData(footprint)
     .setTimeout(120)
     .build();
   const prepared = await prepareSigned(tx, signer, "code TTL extension");
@@ -285,7 +342,11 @@ async function extendCodeTtl(wasmHash: Buffer, contractId?: string): Promise<voi
   throw new Error(`code TTL extension ${sent.hash} confirmation timeout`);
 }
 
-/** Builds the contract and uploads its wasm; returns the code hash. */
+/**
+ * Builds the contract and uploads its wasm; returns the code hash. Uploading
+ * needs no particular signer: `signer` pays when it can afford the current
+ * network fee, otherwise a Friendbot-funded payer does.
+ */
 async function buildAndUploadWasm(signer: Keypair): Promise<Buffer> {
   console.log("Building marketplace contract (cargo → wasm)...");
   // wasm32v1-none emits pure WASM-1.0 (MVP) bytecode. The default
@@ -301,11 +362,14 @@ async function buildAndUploadWasm(signer: Keypair): Promise<Buffer> {
 
   console.log("Uploading the contract code...");
   const wasm = readFileSync(WASM_PATH);
-  const uploadResult = await submitSoroban(
-    Operation.uploadContractWasm({ wasm }),
-    signer,
-    "wasm upload",
-  );
+  const upload = Operation.uploadContractWasm({ wasm });
+  const fee = await estimateXlm(upload, signer.publicKey());
+  let payer = signer;
+  if ((await xlmBalance(signer.publicKey())) < fee + 100) {
+    console.log(`    upload costs ~${fee.toFixed(0)} XLM, more than ${signer.publicKey().slice(0, 6)}… holds: funding a payer from Friendbot`);
+    payer = await testnetPayer(fee + 100);
+  }
+  const uploadResult = await submitSoroban(upload, payer, "wasm upload");
   if (!uploadResult) throw new Error("wasm upload returned no hash");
   return scValToNative(uploadResult) as Buffer;
 }
