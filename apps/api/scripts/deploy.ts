@@ -59,11 +59,8 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url)); // ESM: no __dirname
 const ROOT = path.resolve(HERE, ".."); // apps/api — where .env.local lives
-const CONTRACTS_DIR = path.resolve(HERE, "../../../contracts"); // repo root
-const WASM_PATH = path.join(
-  CONTRACTS_DIR,
-  "target/wasm32v1-none/release/compaki_marketplace.wasm",
-);
+const REPO_ROOT = path.resolve(HERE, "../../.."); // the Scaffold Stellar project (scaffold.yml)
+const WASM_PATH = path.join(REPO_ROOT, "target/deploy/compaki_marketplace.wasm");
 const ENV_LOCAL = process.env.DEPLOY_ENV_FILE
   ? path.resolve(process.env.DEPLOY_ENV_FILE)
   : path.join(ROOT, ".env.local");
@@ -348,12 +345,13 @@ async function extendCodeTtl(wasmHash: Buffer, contractId?: string): Promise<voi
  * network fee, otherwise a Friendbot-funded payer does.
  */
 async function buildAndUploadWasm(signer: Keypair): Promise<Buffer> {
-  console.log("Building marketplace contract (cargo → wasm)...");
-  // wasm32v1-none emits pure WASM-1.0 (MVP) bytecode. The default
-  // wasm32-unknown-unknown target on rustc ≥1.82 emits reference-types,
-  // which Soroban's VM rejects at upload. Requires: rustup target add wasm32v1-none
-  execSync("cargo build --target wasm32v1-none --release", {
-    cwd: CONTRACTS_DIR,
+  console.log("Building marketplace contract (stellar scaffold build → optimized wasm)...");
+  // Scaffold Stellar compiles for wasm32v1-none (pure WASM-1.0, which
+  // Soroban's VM accepts) and optimizes the result, which makes the upload
+  // cheaper (~37 KB instead of ~42 KB). Requires the Scaffold CLI:
+  // cargo install --locked stellar-scaffold-cli
+  execSync("stellar scaffold build --compile-only --out-dir target/deploy", {
+    cwd: REPO_ROOT,
     stdio: ["ignore", "pipe", "inherit"],
   });
   if (!existsSync(WASM_PATH)) {

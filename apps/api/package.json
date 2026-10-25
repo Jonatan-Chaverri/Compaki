@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "deploy:testnet": "tsx scripts/deploy.ts",
+    "contract:client": "cd ../.. && stellar scaffold build --network testnet && cp packages/clients/marketplace/src/index.ts apps/api/src/lib/stellar/generated/marketplace.ts",
     "demo:purchase": "tsx scripts/demo-purchase.ts",
     "demo:seed": "tsx scripts/seed-demo.ts",
     "demo:rewards": "tsx scripts/demo-rewards.ts",

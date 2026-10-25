@@ -44,7 +44,7 @@ import {
   getPeriodTotals,
   getReward,
   getRewardsStatus,
-  i128Of,
+  claimedAmountOf,
   invokeCall,
   prepareCall,
   prepareClaim,
@@ -232,10 +232,10 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
 /** Called by POST /api/tx/:id once a wallet-signed claim confirmed on-chain. */
 export async function completeClaim(
   pending: PendingTx,
-  result: { txHash: string; returnValue: Parameters<typeof i128Of>[0] },
+  result: { txHash: string; returnValue: Parameters<typeof claimedAmountOf>[0] },
 ) {
   const context = pending.context as ClaimContext;
-  const amountUsd = stroopsToUsd(i128Of(result.returnValue));
+  const amountUsd = stroopsToUsd(claimedAmountOf(result.returnValue));
   await recordClaim({
     marketplaceId: context.marketplaceId,
     periodId: context.periodId,

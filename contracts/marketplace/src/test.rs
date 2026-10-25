@@ -1295,7 +1295,7 @@ mod community {
             // With the admin's signature the code is replaced, keeping the
             // address and the stored marketplaces. Uses the release build of
             // this contract when it exists (cargo build --target wasm32v1-none --release).
-            let wasm_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/wasm32v1-none/release/compaki_marketplace.wasm");
+            let wasm_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/wasm32v1-none/release/compaki_marketplace.wasm");
             let Ok(bytes) = std::fs::read(wasm_path) else {
                 std::println!("skipping the upgrade itself: build the wasm first");
                 return;

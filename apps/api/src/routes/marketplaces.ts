@@ -13,7 +13,7 @@ import { prisma, parseSplitSnapshot } from "@/lib/db";
 import { parseCommunityDetails, summarizeCommunitySales, type CommunityDetails } from "@/lib/community";
 import { fulfillmentOf } from "@/lib/fulfillment";
 import { loadFundraiseView, parseFundraiseRecipients, type FundraiseRecipient } from "@/lib/fundraise";
-import { boundOnChainId, communityModeOf, loadRewardsView, PERIOD_HISTORY_LIMIT, type CommunityMode } from "@/lib/rewards";
+import { communityModeOf, loadRewardsView, PERIOD_HISTORY_LIMIT, type CommunityMode } from "@/lib/rewards";
 import { isValidSlug } from "@/lib/slug";
 import { MARKETPLACE_SHARE_BPS, PLATFORM_FEE_BPS } from "@/lib/splits";
 import { getSessionUser } from "@/lib/session";
@@ -33,12 +33,10 @@ import {
   prepareCall,
   type ContractCall,
   demoTrustlineState,
-  getRewardsStatus,
   getUsdBalance,
   isTestnet,
   isValidAccountAddress,
   stellarConfig,
-  stellarExpertTxUrl,
   usdToStroops,
   type GoalPolicy,
 } from "@/lib/stellar";

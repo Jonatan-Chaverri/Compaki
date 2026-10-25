@@ -1,10 +1,11 @@
-# Soroban contracts workspace for Compaki.
+# Soroban contracts workspace for Compaki, laid out as a Scaffold Stellar
+# project (see scaffold.yml): contracts live in contracts/<name>.
 # One `marketplace` contract supports multiple marketplace instances keyed by
 # marketplace_id — cheaper and simpler than a factory for the demo.
 
 [workspace]
 resolver = "2"
-members = ["marketplace"]
+members = ["contracts/*"]
 
 [workspace.dependencies]
 # Pinned to major 21 to match the installed stellar-cli (soroban-env 21).

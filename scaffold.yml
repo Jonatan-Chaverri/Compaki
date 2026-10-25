@@ -1,0 +1,25 @@
+version: 2
+
+# Scaffold Stellar (https://github.com/theahaco/scaffold-stellar) manages the
+# contracts: `stellar scaffold build` compiles and optimizes them and
+# generates the typed TypeScript client from the contract's spec. The API
+# uses that client (apps/api: `npm run contract:client` regenerates it and
+# copies it to src/lib/stellar/generated/). Deploys and upgrades stay with
+# apps/api `npm run deploy:testnet`, which also handles today's testnet fees.
+project:
+  contracts-dir: contracts
+  clients-dir: packages/clients
+
+networks:
+  testnet:
+    # Created and funded with Friendbot on the first build (testnet only).
+    accounts: [compaki-testnet]
+
+contracts:
+  marketplace:
+    networks:
+      # The deployment the app uses (MARKETPLACE_CONTRACT_ID); `build` never
+      # deploys to a public network.
+      testnet:
+        type: contract
+        source: CC7YO6HMHHUNOAKTFEVHOIDVFLXAOG7PX4LLOGHZ6SYHX2W2DIALPTM5

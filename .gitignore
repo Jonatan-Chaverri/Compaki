@@ -46,6 +46,10 @@ apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
 
 # Rust build artifacts
+# Rust / Scaffold Stellar build output, and the clients `stellar scaffold
+# build` generates (the API keeps its own copy: npm run contract:client)
+/target/
 contracts/target/
+/packages/clients/
 
 DEMO.md
