@@ -17,6 +17,10 @@ const serverKeys: Record<string, string> = {
   "Sign in to pay": "signInOrCreateAccount",
   "Sign in to place an order": "signInOrCreateAccount",
   "Some cart items are no longer available": "cartItemsUnavailable",
+  "Activate your seller profile first": "sellerActivateFirst",
+  "Marketplace is not fully set up": "sellerMarketplaceUnavailable",
+  "Finish setting up your wallet first": "sellerPaymentSetup",
+  "Could not prepare your seller account. Please try again.": "sellerPrepareFailed",
 };
 
 export function localizedMessage(error: unknown, t: UiTranslator, fallback: string): string {

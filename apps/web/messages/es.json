@@ -1326,8 +1326,25 @@
     "sellerProductActionFailed": "No se pudo actualizar el producto. Comprueba tu sesión e intenta de nuevo.",
     "sellerPublishIn": "Publicar en",
     "sellerChooseMarketplace": "Escoge un marketplace",
-    "sellerMarketplaceOptionsHint": "Solo aparecen los marketplaces donde ya eres vendedor.",
+    "sellerMarketplaceOptionsHint": "Puedes publicar en varios marketplaces con tu mismo perfil de vendedor.",
     "sellerProductMarketplace": "Marketplace: {name}",
-    "sellerSignIn": "Inicia sesión para administrar tus productos y ventas."
+    "sellerSignIn": "Inicia sesión para administrar tus productos y ventas.",
+    "wantToBeSeller": "Quiero ser vendedor",
+    "sellerWelcomeTitle": "Lo que haces merece llegar más lejos.",
+    "sellerWelcomeDescription": "Activa tu perfil de vendedor una sola vez. Comparte tus productos en distintos marketplaces desde un mismo lugar.",
+    "sellerWelcomeMarkets": "Elige dónde vender",
+    "sellerWelcomeMarketsBody": "Publica en los marketplaces que mejor conecten con tus productos.",
+    "sellerWelcomeProducts": "Agrega tus productos",
+    "sellerWelcomeProductsBody": "Define el precio, las fotos y las unidades disponibles.",
+    "sellerWelcomeManage": "Gestiona todo en tu panel",
+    "sellerWelcomeManageBody": "Tus productos, pedidos y ventas de todos los marketplaces, juntos.",
+    "sellerWelcomeNote": "Podrás elegir un marketplace al crear cada producto.",
+    "sellerActivate": "Activar mi perfil de vendedor",
+    "sellerActivating": "Activando tu perfil…",
+    "sellerActivationFailed": "No pudimos activar tu perfil. Inténtalo de nuevo.",
+    "sellerActivateFirst": "Activa tu perfil de vendedor para publicar productos.",
+    "sellerMarketplaceUnavailable": "Este marketplace aún no está listo para recibir productos. Elige otro o inténtalo más tarde.",
+    "sellerPaymentSetup": "Completa la configuración de tu cuenta de pagos desde Mi perfil para poder publicar.",
+    "sellerPrepareFailed": "No pudimos preparar tu cuenta para vender en este marketplace. Inténtalo de nuevo."
   }
 }

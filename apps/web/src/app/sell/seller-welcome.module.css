@@ -1,0 +1,24 @@
+.page { max-width: 620px; margin: 0 auto; padding: 32px 24px 48px; }
+.intro { text-align: center; }
+.emblem { display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 18px; border: 1px solid var(--brand-yellow-line); color: var(--brand-yellow-ink); background: var(--brand-yellow-soft); transform: rotate(-5deg); }
+.emblem svg { transform: rotate(5deg); }
+.intro h1 { max-width: 480px; margin: 10px auto 0; font-size: clamp(30px, 4vw, 38px); font-weight: 550; line-height: 1.15; letter-spacing: -.045em; color: var(--ink); text-wrap: balance; }
+.description { max-width: 440px; margin: 12px auto 0; font-size: 13px; line-height: 1.8; color: var(--ink-muted); }
+.card { margin-top: 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface-card); overflow: hidden; }
+.steps { display: grid; gap: 20px; padding: 24px 28px; list-style: none; }
+.steps li { display: flex; align-items: center; gap: 16px; }
+.stepIcon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink-soft); background: var(--surface-soft); }
+.steps h2 { color: var(--ink); font-size: 14px; font-weight: 600; }
+.steps p { margin-top: 4px; color: var(--ink-muted); font-size: 12px; line-height: 1.65; }
+.action { padding: 22px 28px; border-top: 1px solid var(--line); background: var(--surface-soft); text-align: center; }
+.action > :global(.button-primary) { width: 100%; }
+.action button:disabled { opacity: .6; cursor: wait; transform: none; }
+.action p { margin-top: 12px; font-size: 11px; line-height: 1.7; color: var(--ink-muted); }
+.action .error { color: var(--status-error); }
+.explore { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 24px; font-size: 12px; color: var(--ink-muted); }
+.explore:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+@media (max-width: 640px) {
+  .page { padding: 32px 20px 48px; }
+  .steps { padding: 24px 20px; gap: 22px; }
+  .action { padding: 20px; }
+}

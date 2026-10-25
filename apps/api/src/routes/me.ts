@@ -1,5 +1,5 @@
 // GET /api/me — session user plus the marketplace they operate (if any) and
-// the marketplaces they sell in (drives the "Vendor dashboard" menu items).
+// their global seller capability and the marketplaces they already sell in.
 // GET /api/me/marketplaces — every marketplace the session user operates,
 // with sales and catalog totals ("My marketplaces").
 
@@ -11,9 +11,11 @@ import { getSessionUser } from "@/lib/session";
 import { ownWalletProvider } from "@/lib/wallets";
 import { publishedProducts } from "@/lib/products";
 import { createSellerDashboard } from "./seller-dashboard";
+import { createSellerEnrollment } from "./seller-enrollment";
 
 export const me = new Hono();
 me.route("/seller-dashboard", createSellerDashboard({ db: prisma, sessionUser: getSessionUser }));
+me.route("/seller", createSellerEnrollment({ db: prisma, sessionUser: getSessionUser }));
 
 me.get("/", async (c) => {
   const user = await getSessionUser(c);
@@ -34,7 +36,7 @@ me.get("/", async (c) => {
     }),
   ]);
   return c.json({
-    user: { id: user.id, name: user.name, email: user.email, country: user.country },
+    user: { id: user.id, name: user.name, email: user.email, country: user.country, isSeller: user.isSeller },
     wallet: {
       address: user.walletAddress,
       provider: user.walletAddress ? ownWalletProvider(user) : null,

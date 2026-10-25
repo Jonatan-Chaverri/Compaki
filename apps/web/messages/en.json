@@ -1326,8 +1326,25 @@
     "sellerProductActionFailed": "Could not update the product. Check your session and try again.",
     "sellerPublishIn": "Publish in",
     "sellerChooseMarketplace": "Choose a marketplace",
-    "sellerMarketplaceOptionsHint": "Only marketplaces where you are already a seller appear here.",
+    "sellerMarketplaceOptionsHint": "You can publish in several marketplaces with the same seller profile.",
     "sellerProductMarketplace": "Marketplace: {name}",
-    "sellerSignIn": "Sign in to manage your products and sales."
+    "sellerSignIn": "Sign in to manage your products and sales.",
+    "wantToBeSeller": "I want to sell",
+    "sellerWelcomeTitle": "What you make deserves to go further.",
+    "sellerWelcomeDescription": "Activate your seller profile once. Share your products across different marketplaces, all from one place.",
+    "sellerWelcomeMarkets": "Choose where to sell",
+    "sellerWelcomeMarketsBody": "Publish in the marketplaces that best connect with your products.",
+    "sellerWelcomeProducts": "Add your products",
+    "sellerWelcomeProductsBody": "Set your prices, photos and available stock.",
+    "sellerWelcomeManage": "Manage everything in your dashboard",
+    "sellerWelcomeManageBody": "Products, orders and sales from all your marketplaces, together.",
+    "sellerWelcomeNote": "Choose a marketplace each time you add a product.",
+    "sellerActivate": "Activate my seller profile",
+    "sellerActivating": "Activating your profile…",
+    "sellerActivationFailed": "We couldn’t activate your profile. Please try again.",
+    "sellerActivateFirst": "Activate your seller profile to publish products.",
+    "sellerMarketplaceUnavailable": "This marketplace isn’t ready to receive products yet. Choose another or try again later.",
+    "sellerPaymentSetup": "Finish setting up your payment account in My profile before publishing.",
+    "sellerPrepareFailed": "We couldn’t prepare your account to sell in this marketplace. Please try again."
   }
 }

@@ -1,13 +1,19 @@
 import type { PrismaClient } from "@prisma/client";
 import { Hono, type Context } from "hono";
 import { activeProducts, parseProductInput } from "../lib/products";
+import { SellerSetupError } from "../lib/seller-errors";
 
-type Dependencies = { db: Pick<PrismaClient, "product" | "marketplace" | "vendorMembership">; sessionUser: (c: Context) => Promise<{ id: string } | null> };
-export function createProductManagement({ db, sessionUser }: Dependencies) {
+type Dependencies = {
+  db: Pick<PrismaClient, "product" | "marketplace">;
+  sessionUser: (c: Context) => Promise<{ id: string; isSeller: boolean } | null>;
+  ensureVendor: (userId: string, marketplaceId: string) => Promise<unknown>;
+};
+export function createProductManagement({ db, sessionUser, ensureVendor }: Dependencies) {
   const router = new Hono();
   router.post("/", async c => {
     const user = await sessionUser(c);
     if (!user) return c.json({ error: "Not signed in" }, 401);
+    if (!user.isSeller) return c.json({ error: "Activate your seller profile first" }, 403);
     let body: unknown;
     try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON" }, 400); }
     const b = (body ?? {}) as Record<string, unknown>;
@@ -16,8 +22,13 @@ export function createProductManagement({ db, sessionUser }: Dependencies) {
     if (typeof input === "string") return c.json({ error: input }, 400);
     const marketplace = await db.marketplace.findUnique({ where: { slug } });
     if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
-    const membership = await db.vendorMembership.findUnique({ where: { marketplaceId_userId: { marketplaceId: marketplace.id, userId: user.id } } });
-    if (!membership) return c.json({ error: "You are not a vendor of this marketplace" }, 403);
+    try {
+      await ensureVendor(user.id, marketplace.id);
+    } catch (error) {
+      if (error instanceof SellerSetupError) return c.json({ error: error.message }, 409);
+      console.error("[seller-publication] setup failed:", error);
+      return c.json({ error: "Could not prepare your seller account. Please try again." }, 503);
+    }
     const product = await db.product.create({ data: { ...input, marketplaceId: marketplace.id, vendorId: user.id } });
     return c.json({ product }, 201);
   });

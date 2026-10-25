@@ -22,6 +22,8 @@ model User {
   email                  String?  @unique
   name                   String
   role                   String // "OPERATOR" | "VENDOR" | "BUYER" | "COMMUNITY"
+  // Selling is a global capability, independent of marketplace ownership.
+  isSeller               Boolean  @default(false)
   // scrypt hash ("salt:hash", hex). Null for legacy/custodial-only users, who
   // can claim their account by registering with the same email.
   passwordHash           String?

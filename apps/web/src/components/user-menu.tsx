@@ -19,11 +19,7 @@ interface SessionUser {
   id: string;
   name: string;
   email: string | null;
-}
-
-interface VendorMarketplace {
-  slug: string;
-  name: string;
+  isSeller: boolean;
 }
 
 function UserIcon({ className }: { className?: string }) {
@@ -61,7 +57,6 @@ export function UserMenu() {
   const wallet = useCompakiWallet();
   const [state, setState] = useState<"loading" | "out" | "in">("loading");
   const [user, setUser] = useState<SessionUser | null>(null);
-  const [vendorMarketplaces, setVendorMarketplaces] = useState<VendorMarketplace[]>([]);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -71,10 +66,9 @@ export function UserMenu() {
     fetch("/api/me")
       .then((res) => res.json())
       .then(
-        (data: { user: SessionUser | null; vendorMarketplaces?: VendorMarketplace[] }) => {
+        (data: { user: SessionUser | null }) => {
           if (cancelled) return;
           setUser(data.user);
-          setVendorMarketplaces(data.vendorMarketplaces ?? []);
           setState(data.user ? "in" : "out");
         },
       )
@@ -213,7 +207,7 @@ export function UserMenu() {
                   <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
                 </svg>
                 {t("myRewards")}</Link>
-              {vendorMarketplaces.length > 0 && <Link role="menuitem" href="/vendor" onClick={() => setOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"><Icon name="bag" className="h-4 w-4 text-slate-400" />{t("vendorDashboard")}</Link>}
+              <Link role="menuitem" href={user.isSeller ? "/vendor" : "/sell"} onClick={() => setOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"><Icon name={user.isSeller ? "bag" : "store"} className="h-4 w-4 text-slate-400" />{t(user.isSeller ? "vendorDashboard" : "wantToBeSeller")}</Link>
               <ThemeOptions />
               <button
                 role="menuitem"
@@ -246,6 +240,7 @@ export function UserMenu() {
               >
                 <UserIcon className="h-4 w-4 text-slate-400" />
                 {t("signInOrCreateAccount")}</Link>
+              <Link role="menuitem" href="/sell" onClick={() => setOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"><Icon name="store" className="h-4 w-4 text-slate-400" />{t("wantToBeSeller")}</Link>
               <ThemeOptions />
             </>
           )}

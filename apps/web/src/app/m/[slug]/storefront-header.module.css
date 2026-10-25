@@ -6,8 +6,6 @@
 .meta :global(.eyebrow) { font-size: 9px; }
 .heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; }
 .title { min-width: 0; color: var(--ink); font-size: clamp(25px, 3vw, 32px); font-weight: 550; line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; }
-.sellerLink { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink-soft); font-size: 11px; white-space: nowrap; }
-.sellerLink:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
 .description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: 850px; margin-top: 8px; color: var(--ink-muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .products { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .products svg { flex-shrink: 0; }
@@ -24,7 +22,6 @@
   .products { font-size: 9px; }
   .heading { margin-top: 9px; gap: 4px 12px; }
   .title { font-size: 26px; }
-  .sellerLink { font-size: 10px; min-height: 30px; }
   .description { margin-top: 7px; font-size: 11px; }
   .impact { padding: 11px 18px; gap: 9px; flex-wrap: wrap; }
   .impactIcon { display: none; }

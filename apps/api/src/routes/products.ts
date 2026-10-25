@@ -1,5 +1,5 @@
-// POST /api/products — create a product (session user must be a registered
-// vendor of the marketplace).
+// POST /api/products — create a product (global sellers; payment registration
+// in the chosen marketplace is prepared automatically).
 // PATCH /api/products/:id — edit a product (session user must own it).
 // GET /api/products/:id — public product info for the product detail page.
 // Purchases go through /api/orders (cart → pending order → pay).
@@ -11,12 +11,13 @@ import { createProductManagement } from "./product-management";
 import { createProductLifecycle } from "./product-lifecycle";
 import { communityModeOf } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
+import { ensureMarketplaceVendor } from "@/lib/seller-registration";
 
 import { communityFundLabel } from "./marketplaces";
 
 export const products = new Hono();
 products.route("/", createProductLifecycle({ db: prisma, sessionUser: getSessionUser }));
-products.route("/", createProductManagement({ db: prisma, sessionUser: getSessionUser }));
+products.route("/", createProductManagement({ db: prisma, sessionUser: getSessionUser, ensureVendor: ensureMarketplaceVendor }));
 
 products.get("/:id", async (c) => {
   const id = c.req.param("id");

@@ -17,7 +17,8 @@ import { boundOnChainId, communityModeOf, loadRewardsView, PERIOD_HISTORY_LIMIT,
 import { isValidSlug } from "@/lib/slug";
 import { MARKETPLACE_SHARE_BPS, PLATFORM_FEE_BPS } from "@/lib/splits";
 import { getSessionUser } from "@/lib/session";
-import { ownWalletPending, personalWallet } from "@/lib/wallets";
+import { ensureMarketplaceVendor } from "@/lib/seller-registration";
+import { SellerSetupError } from "@/lib/seller-errors";
 import {
   createCustodialAccount,
   createFundraiseMarketplace,
@@ -29,7 +30,6 @@ import {
   getUsdBalance,
   isTestnet,
   isValidAccountAddress,
-  registerVendor,
   stellarConfig,
   stellarExpertTxUrl,
   usdToStroops,
@@ -832,104 +832,25 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
   });
 });
 
-// ── POST /:slug/vendors — vendor registration ──────────────────────────────
-//
-// Registers the SESSION user as a vendor: provisions their custodial payment
-// account, registers them on-chain (register_vendor, signed by the operator's
-// custodial key — the invite link implies operator approval), and records the
-// membership. Idempotent: re-submitting resumes/returns.
-//
-// The vendor is always the signed-in user. (Earlier versions upserted a user
-// by the email in the request body and returned that user's session cookie,
-// which let anyone take over any account by knowing its email.)
-
+// Compatibility for older clients: enable the global seller profile, then
+// prepare payment registration in the requested marketplace.
 marketplaces.post("/:slug/vendors", async (c) => {
-  const slug = c.req.param("slug");
-  const sessionUser = await getSessionUser(c);
-  if (!sessionUser) return c.json({ error: "Sign in to join as a vendor" }, 401);
-
-  let body: unknown;
+  const user = await getSessionUser(c);
+  if (!user) return c.json({ error: "Not signed in" }, 401);
+  const marketplace = await prisma.marketplace.findUnique({ where: { slug: c.req.param("slug") } });
+  if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
+  await prisma.user.update({ where: { id: user.id }, data: { isSeller: true } });
   try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON" }, 400);
-  }
-  const b = (body ?? {}) as Record<string, unknown>;
-  const sells = typeof b.sells === "string" ? b.sells.trim().slice(0, 200) : "";
-
-  const marketplace = await prisma.marketplace.findUnique({
-    where: { slug },
-    include: { operator: true },
-  });
-  const onChainId = marketplace ? boundOnChainId(marketplace) : null;
-  if (!marketplace || onChainId === null) {
-    return c.json({ error: "Marketplace not found" }, 404);
-  }
-  if (!marketplace.operator.stellarSecretEncrypted) {
-    return c.json({ error: "Marketplace is not fully set up" }, 409);
-  }
-
-  if (ownWalletPending(sessionUser)) {
-    return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
-  }
-
-  try {
-    // 1. Payout address: the vendor's own Cavos wallet when they have one,
-    //    else a custodial payment account.
-    const vendor = sessionUser;
-    const personal = personalWallet(vendor);
-    let payoutAddress: string;
-    if (personal.kind === "none") {
-      const account = await createCustodialAccount();
-      await prisma.user.update({
-        where: { id: vendor.id },
-        data: {
-          stellarPublicKey: account.publicKey,
-          stellarSecretEncrypted: account.secretEncrypted,
-        },
-      });
-      payoutAddress = account.publicKey;
-    } else {
-      payoutAddress = personal.address;
-    }
-
-    // 2. Membership row (before the chain call so retries can resume).
-    let membership = await prisma.vendorMembership.upsert({
-      where: {
-        marketplaceId_userId: { marketplaceId: marketplace.id, userId: vendor.id },
-      },
-      update: { sellsDescription: sells },
-      create: {
-        marketplaceId: marketplace.id,
-        userId: vendor.id,
-        sellsDescription: sells,
-      },
-    });
-
-    // 3. On-chain vendor registration (skipped if a previous attempt landed).
-    if (!membership.registerTxHash) {
-      const { txHash } = await registerVendor({
-        operatorSecret: decryptSecret(marketplace.operator.stellarSecretEncrypted),
-        marketplaceId: onChainId,
-        vendorPublicKey: payoutAddress,
-      });
-      membership = await prisma.vendorMembership.update({
-        where: { id: membership.id },
-        data: { registerTxHash: txHash, payoutAddress },
-      });
-    }
-
+    const membership = await ensureMarketplaceVendor(user.id, marketplace.id);
     return c.json({
-      vendor: { id: vendor.id, name: vendor.name },
+      vendor: { id: user.id, name: user.name },
       marketplace: { name: marketplace.name, slug: marketplace.slug },
-      vendorDashboardPath: `/vendor/${marketplace.slug}`,
+      vendorDashboardPath: "/vendor",
       registerTxHash: membership.registerTxHash,
     });
   } catch (error) {
+    if (error instanceof SellerSetupError) return c.json({ error: error.message }, 409);
     console.error("[vendor-registration] failed:", error);
-    return c.json(
-      { error: "Could not finish your registration. Please try again." },
-      500,
-    );
+    return c.json({ error: "Could not finish your registration. Please try again." }, 503);
   }
 });
