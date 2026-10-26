@@ -1,7 +1,7 @@
-// Custodial account provisioning. Every Compaki user (operator, vendor,
-// buyer, community fund) gets a server-held Stellar keypair: funded via
-// Friendbot, trustline to demo USDC, and optionally some demo USDC minted
-// from the issuer so buyers have money to spend.
+// Account helpers: Friendbot funding, demo-asset trustlines, balances and the
+// one-time setup transaction a user's own wallet signs. Compaki never creates
+// or stores keys for its users; createTestAccount only serves the on-chain
+// proof script.
 
 import {
   Asset,
@@ -13,13 +13,11 @@ import {
 } from "@stellar/stellar-sdk";
 
 import { stellarConfig, usdToStroops } from "./config";
-import { encryptSecret } from "./crypto";
 import { withTimeoutRetry } from "./retry";
 
-export interface CustodialAccount {
+export interface TestAccount {
   publicKey: string;
-  /** AES-encrypted secret — safe to store in the DB. */
-  secretEncrypted: string;
+  secret: string;
 }
 
 let horizonServer: Horizon.Server | undefined;
@@ -78,18 +76,17 @@ async function submitTx(
 }
 
 /**
- * Creates a fully-provisioned custodial account:
- *  1. random keypair, funded via Friendbot,
- *  2. trustline to demo USDC,
- *  3. optional starting demo-USDC balance minted from the issuer,
- *  4. secret encrypted for DB storage.
+ * Creates a throwaway testnet account for scripts/demo-rewards.ts: a random
+ * keypair funded via Friendbot, with a trustline to the demo asset and an
+ * optional starting balance minted by the issuer. Its key only lives in the
+ * script's memory.
  *
  * The trustline and the mint ride in ONE transaction (issuer payment as a
- * second operation) so provisioning costs a single Horizon round trip.
+ * second operation) so it costs a single Horizon round trip.
  */
-export async function createCustodialAccount(options?: {
+export async function createTestAccount(options?: {
   startingUsd?: number;
-}): Promise<CustodialAccount> {
+}): Promise<TestAccount> {
   const keypair = Keypair.random();
   const startingUsd = options?.startingUsd ?? 0;
   const issuer = Keypair.fromSecret(stellarConfig.usdcIssuerSecret);
@@ -116,10 +113,7 @@ export async function createCustodialAccount(options?: {
     startingUsd > 0 ? [issuer] : [],
   );
 
-  return {
-    publicKey: keypair.publicKey(),
-    secretEncrypted: encryptSecret(keypair.secret()),
-  };
+  return { publicKey: keypair.publicKey(), secret: keypair.secret() };
 }
 
 /** Mints extra demo USDC to an existing account (top-ups for demos). */

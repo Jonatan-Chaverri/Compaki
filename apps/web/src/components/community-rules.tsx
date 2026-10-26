@@ -3,8 +3,9 @@ import type { UiTranslator } from "@/i18n/types";
 import { useTranslations } from "next-intl";
 
 // The on-chain rules of a marketplace's community share, chosen once in the
-// wizard: where it goes (mode), and for rewards / fundraising the rules the
-// contract enforces from then on.
+// wizard: where it goes (mode) — for classic, the account that receives it
+// with every sale — and for rewards / fundraising the rules the contract
+// enforces from then on.
 
 import { InfoHint } from "./info-hint";
 import { useId } from "react";
@@ -36,6 +37,9 @@ export interface CommunityRules {
   goalUsd: string;
   policy: GoalPolicy;
   recipients: RecipientDraft[];
+  /** classic: the account that receives the community share, and its public name */
+  fundName: string;
+  fundAddress: string;
 }
 
 export const defaultCommunityRules: CommunityRules = {
@@ -45,6 +49,8 @@ export const defaultCommunityRules: CommunityRules = {
   goalUsd: "",
   policy: "new-round",
   recipients: [{ label: "", address: "", percent: "100" }],
+  fundName: "",
+  fundAddress: "",
 };
 
 /** Percent text → basis points (two decimals allowed). */
@@ -54,6 +60,13 @@ function bpsOf(percent: string): number {
 
 /** First problem with the rules, or null when they can be launched. */
 export function communityRulesError(rules: CommunityRules, t: UiTranslator): string | null {
+  if (rules.mode === "classic") {
+    if (rules.fundName.trim().length < 2 || rules.fundName.trim().length > 80)
+      return t("rulesFundNameError");
+    if (!STELLAR_ADDRESS.test(rules.fundAddress.trim()))
+      return t("rulesFundAddressError");
+    return null;
+  }
   if (rules.mode !== "fundraise") return null;
   if (!goalValid(rules.goalUsd))
     return t("rulesTargetError");
@@ -84,6 +97,12 @@ export function communityRulesError(rules: CommunityRules, t: UiTranslator): str
 export function communityRulesSubmission(rules: CommunityRules) {
   return {
     communityMode: rules.mode,
+    ...(rules.mode === "classic"
+      ? {
+          communityFundName: rules.fundName.trim(),
+          communityFundAddress: rules.fundAddress.trim(),
+        }
+      : {}),
     ...(rules.mode === "rewards"
       ? {
           rewardsPeriodSeconds: rules.periodSeconds,
@@ -139,6 +158,17 @@ export function CommunityRulesFields({ value, onChange, communityPercent }: {
         </div>)}
       </div>
     </fieldset>
+
+    {value.mode === "classic" && <div className="purpose-rules-panel">
+      <fieldset>
+        <legend className="purpose-section-title">{t("communityFundWalletTitle")}<InfoHint label={t("communityFundWalletTitle")}>{t("communityFundWalletHint")}</InfoHint></legend>
+        <div className="community-recipient-row grid gap-2 rounded-lg bg-slate-50 p-2 sm:grid-cols-[1fr_2fr]">
+          <label className="community-recipient-name"><span>{t("publicName")}</span><input value={value.fundName} maxLength={80} onChange={e => set({ fundName: e.target.value })} placeholder={t("escuelaVerde")} className={inputClass} /></label>
+          <label className="community-recipient-address"><span>{t("paymentAccountAddress")}</span><input value={value.fundAddress} onChange={e => set({ fundAddress: e.target.value })} placeholder={t("paymentAccountAddressG")} className={`${inputClass} font-mono text-xs`} /></label>
+        </div>
+      </fieldset>
+      {error && <p className="text-xs text-amber-700">{error}</p>}
+    </div>}
 
     {value.mode === "rewards" && <div className="purpose-rules-panel">
       <div>

@@ -1,8 +1,6 @@
 // Last step of launching a marketplace: record its on-chain registration and
-// build the "your marketplace is live" payload. Shared by the custodial path
-// (POST /api/marketplaces signs and finishes in one stream) and by owners
-// with their own wallet, who sign the create_* call in the browser; then
-// POST /api/tx/:id finishes here.
+// build the "your marketplace is live" payload. The owner's wallet signs the
+// create_* call in the browser; then POST /api/tx/:id finishes here.
 
 import type { xdr } from "@stellar/stellar-sdk";
 

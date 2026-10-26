@@ -22,7 +22,7 @@ export interface ProfileUser {
 }
 
 export interface WalletInfo {
-  provider: "own" | "custodial" | "none";
+  provider: "own" | "none";
   address: string | null;
   walletAddress: string | null;
   walletProvider: "cavos" | "stellar-wallet" | null;
@@ -186,7 +186,6 @@ export function ProfileContent({ user, account, personalDetails }: ProfileConten
 const ACCESS_LABELS = {
   cavos: { title: t("personalAccountCavos"), detail: t("youApproveEachPaymentAndRewardCollectionFromYourBrowser") },
   "stellar-wallet": { title: t("connectedAccount"), detail: t("paymentsAndRewardCollectionsNeedYourApprovalInTheAppYou") },
-  custodial: { title: t("managedByCompaki"), detail: t("compakiManagesTheKeysAndApprovesPaymentsForThisOlderAccount") },
   none: { title: t("notSetUpYet"), detail: t("yourPaymentAccountWillBeSetUpWhenYouBuySell") },
 };
 

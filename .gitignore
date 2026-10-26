@@ -53,3 +53,5 @@ contracts/target/
 /packages/clients/
 
 DEMO.md
+
+.pytest_cache

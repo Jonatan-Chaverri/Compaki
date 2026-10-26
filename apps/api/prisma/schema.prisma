@@ -21,23 +21,15 @@ model User {
   id                     String   @id @default(cuid())
   email                  String?  @unique
   name                   String
-  role                   String // "OPERATOR" | "VENDOR" | "BUYER" | "COMMUNITY"
+  role                   String // "OPERATOR" | "VENDOR" | "BUYER"
   // Selling is a global capability, independent of marketplace ownership.
   isSeller               Boolean  @default(false)
-  // scrypt hash ("salt:hash", hex). Null for legacy/custodial-only users, who
-  // can claim their account by registering with the same email.
-  passwordHash           String?
   country                String?
-  // Custodial (server-held) Stellar account. Still used for operator actions
-  // (create marketplace, register vendors, open periods) and for accounts that
-  // haven't connected a Cavos wallet.
-  stellarPublicKey       String?  @unique
-  stellarSecretEncrypted String?
   // The user's own Stellar wallet: a Cavos wallet (email/Google login) or a
   // wallet they already had (Freighter, xBull, Albedo… via Stellar Wallets
-  // Kit). Its key never reaches Compaki; the user signs purchases and claims
-  // in the browser. Personal money (purchases, vendor revenue, member
-  // rewards) uses this wallet once it is ready. Mapped onto the original
+  // Kit). Its key never reaches Compaki; the user signs purchases, claims and
+  // marketplace launches in the browser. Their money (purchases, vendor
+  // revenue, operator share, member rewards) uses this wallet once it is ready. Mapped onto the original
   // cavosAddress / cavosWalletReadyAt columns (no data migration needed).
   walletAddress          String?  @unique @map("cavosAddress")
   // "cavos" | "stellar-wallet"; null on rows from before this field = cavos.
@@ -47,7 +39,6 @@ model User {
   createdAt              DateTime @default(now())
 
   marketplaces     Marketplace[]      @relation("MarketplaceOperator")
-  communityFundFor Marketplace[]      @relation("MarketplaceCommunityFund")
   products         Product[]          @relation("ProductVendor")
   purchases        Sale[]             @relation("SaleBuyer")
   orders           Order[]            @relation("OrderBuyer")
@@ -68,8 +59,8 @@ model Marketplace {
   contractMarketplaceId String?
   // Soroban contract instance that contractMarketplaceId belongs to. Ids are
   // only meaningful within one deployment; API routes refuse a marketplace
-  // whose contractId differs from MARKETPLACE_CONTRACT_ID (run
-  // `npm run marketplaces:rebind` after a contract redeploy).
+  // whose contractId differs from MARKETPLACE_CONTRACT_ID (after a new
+  // contract, the owner launches the marketplace again).
   contractId           String?
   // Hash of the create_marketplace transaction — the "verified on-chain" link.
   createTxHash         String?
@@ -113,13 +104,14 @@ model Marketplace {
   // fundraising ones.
   communityGoalUsd       Float?
   communityDetailsUpdatedAt DateTime?
+  // Classic marketplaces: the wallet the organizer named to receive the
+  // community share with every sale, and its public name.
+  communityFundAddress String?
+  communityFundName    String?
   createdAt            DateTime @default(now())
 
   operatorId String
   operator   User      @relation("MarketplaceOperator", fields: [operatorId], references: [id])
-  // Custodial account receiving the community share (role COMMUNITY).
-  communityFundId String?
-  communityFund   User?  @relation("MarketplaceCommunityFund", fields: [communityFundId], references: [id])
   products   Product[]
   vendors    VendorMembership[]
   orders     Order[]

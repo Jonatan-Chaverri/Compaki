@@ -21,7 +21,6 @@ interface DashboardPayload {
   slug: string;
   regenerativeEnabled: boolean;
   communityMode: CommunityMode;
-  demoImpersonation: boolean;
   community: CommunityDetails;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
   operatorAccount: string | null;
@@ -79,7 +78,6 @@ export default async function OperatorPage(props: { params: Promise<{ slug: stri
         slug={data.slug}
         regenerativeEnabled={data.regenerativeEnabled}
         communityMode={data.communityMode}
-        demoImpersonation={data.demoImpersonation}
         splits={data.splits}
         operatorAccount={data.operatorAccount}
         communityAccount={data.communityAccount}

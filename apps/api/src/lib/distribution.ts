@@ -13,13 +13,11 @@
 
 import { prisma } from "@/lib/db";
 import { releaseIfReached } from "@/lib/fundraise";
-import { operatorKeysSelect, operatorSignerOf } from "@/lib/operator";
-import { boundOnChainId, nextRulesOf } from "@/lib/rewards";
+import { boundOnChainId } from "@/lib/rewards";
 import {
   ContractError,
   distributeRewards,
   getFundraise,
-  getNextRules,
   getRewardsStatus,
   keepContractAlive,
   stellarConfig,
@@ -33,7 +31,6 @@ const marketplaceSelect = {
   contractId: true,
   rewardsNextVendorPoolBps: true,
   rewardsNextPeriodSeconds: true,
-  ...operatorKeysSelect,
 } as const;
 
 type DistributableMarketplace = {
@@ -42,8 +39,6 @@ type DistributableMarketplace = {
   contractId: string | null;
   rewardsNextVendorPoolBps: number | null;
   rewardsNextPeriodSeconds: number | null;
-  operatorAddress: string | null;
-  operator: { stellarPublicKey: string | null; stellarSecretEncrypted: string | null };
 };
 
 /**
@@ -59,26 +54,10 @@ export async function distributeIfDue(
   if (status.ledgerTime < status.periodEnd) return null;
 
   // The operator schedules the next rules on-chain (set_next_rules), so the
-  // distribution needs no signature and the contract applies them. Rules
-  // chosen before that existed are only in Postgres: a custodial operator
-  // passes them in the call.
-  const pending = nextRulesOf(marketplace);
-  let legacyRules = null;
-  let signerSecret = stellarConfig.usdcIssuerSecret;
-  if (pending && (await getNextRules(onChainId)) === null) {
-    const operator = operatorSignerOf(marketplace);
-    if (operator?.kind === "custodial") {
-      legacyRules = {
-        vendorPoolBps: pending.vendorPoolBps,
-        buyerPoolBps: 10_000 - pending.vendorPoolBps,
-        periodSeconds: pending.periodSeconds,
-      };
-      signerSecret = operator.secret;
-    }
-  }
+  // distribution needs no signature and the contract applies them.
   let result;
   try {
-    result = await distributeRewards({ signerSecret, marketplaceId: onChainId, next: legacyRules });
+    result = await distributeRewards({ signerSecret: stellarConfig.usdcIssuerSecret, marketplaceId: onChainId, next: null });
   } catch (error) {
     if (error instanceof ContractError && error.errorName === "PeriodNotEnded") return null;
     throw error;
@@ -147,7 +126,6 @@ export async function runCommunityTick(): Promise<void> {
         contractMarketplaceId: true,
         contractId: true,
         fundraiseNextTargetUsd: true,
-        ...operatorKeysSelect,
       },
     });
     for (const m of fundraisers) {

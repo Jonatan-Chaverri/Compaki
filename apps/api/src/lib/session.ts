@@ -6,9 +6,9 @@
 // same-origin /api proxy; Path=/ makes the one session valid across every
 // marketplace. It is marked Secure whenever the request came over HTTPS.
 //
-// The key is SESSION_SECRET. Without it, a key derived from
-// WALLET_ENCRYPTION_KEY for this purpose only is used, so the wallet key
-// itself never signs cookies; set SESSION_SECRET to keep them independent.
+// The key is SESSION_SECRET. Deployments from before it existed only have
+// WALLET_ENCRYPTION_KEY; then a key derived from it for this purpose is
+// used, so their sessions keep working until SESSION_SECRET is set.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 

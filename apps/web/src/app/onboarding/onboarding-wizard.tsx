@@ -756,6 +756,19 @@ const STEP_COPY = [
                               <dd>{community.communityDistribution}</dd>
                             </div>
                           )}
+                          {mode === "classic" && (
+                            <div className="onboarding-review-wide">
+                              <dt>{t("communityFund")}</dt>
+                              <dd>
+                                <ul className="onboarding-recipients-review">
+                                  <li>
+                                    <strong>{rules.fundName}</strong>
+                                    <code>{rules.fundAddress}</code>
+                                  </li>
+                                </ul>
+                              </dd>
+                            </div>
+                          )}
                           {mode === "rewards" && (
                             <>
                               <div>

@@ -41,9 +41,6 @@ export const stellarConfig = {
   get marketplaceContractId(): string {
     return requireEnv("MARKETPLACE_CONTRACT_ID");
   },
-  get walletEncryptionKey(): string {
-    return requireEnv("WALLET_ENCRYPTION_KEY");
-  },
 };
 
 /** UI amounts are USD floats; on-chain amounts are i128 with 7 decimals. */

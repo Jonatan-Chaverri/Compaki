@@ -3,7 +3,6 @@
 // @stellar/stellar-sdk directly.
 
 export * from "./config";
-export * from "./crypto";
 export * from "./retry";
 export * from "./accounts";
 export * from "./contract";

@@ -1,13 +1,11 @@
-// Order settlement shared by both payment paths:
+// Order settlement. The API prepares one item's purchase at a time, the
+// buyer's own wallet (Cavos or e.g. Freighter) signs it in the browser, and
+// POST /api/tx/:id submits it and comes back here for the next item
+// (completePurchaseStep).
 //
-//   - custodial buyers: the API signs every item's purchase in one request;
-//   - own-wallet buyers (Cavos or e.g. Freighter): the API prepares one item's purchase at a time, the buyer
-//     signs it in the browser, and POST /api/tx/:id submits it and comes back
-//     here for the next item (completePurchaseStep).
-//
-// Either way each order item settles as its own atomic on-chain purchase and
-// writes its Sale row right away, so a failure mid-order can be retried
-// without re-charging settled items.
+// Each order item settles as its own atomic on-chain purchase and writes its
+// Sale row right away, so a failure mid-order can be retried without
+// re-charging settled items.
 //
 // Stock is taken *before* the payment is submitted (reserveStock), with a
 // conditional update, so two buyers paying for the last unit at the same
@@ -116,14 +114,13 @@ export function loadOrderForPayment(orderId: string) {
       marketplace: {
         include: {
           operator: { select: { name: true } },
-          communityFund: { select: { name: true } },
           vendors: { select: { userId: true, payoutAddress: true } },
         },
       },
       items: {
         include: {
           product: {
-            include: { vendor: { select: { id: true, name: true, stellarPublicKey: true } } },
+            include: { vendor: { select: { id: true, name: true } } },
           },
           sale: { select: { id: true } },
         },
@@ -136,7 +133,7 @@ export type PaymentOrder = NonNullable<Awaited<ReturnType<typeof loadOrderForPay
 /** The address the vendor was registered with on-chain. */
 export function vendorAddressFor(order: PaymentOrder, item: PaymentOrder["items"][number]): string | null {
   const membership = order.marketplace.vendors.find((v) => v.userId === item.product.vendorId);
-  return membership?.payoutAddress ?? item.product.vendor.stellarPublicKey;
+  return membership?.payoutAddress ?? null;
 }
 
 export function lineAmount(item: { unitPriceUsd: number; quantity: number }) {

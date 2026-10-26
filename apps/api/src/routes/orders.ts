@@ -4,17 +4,17 @@
 //   GET  /          session buyer's orders (pending + completed; expired hidden)
 //   GET  /:id       checkout payload for one order (buyer only)
 //   POST /:id/pay   shipping address + payment: settles every item on-chain,
-//                   decrements stock, marks the order COMPLETED. Buyers with their
-//                   own wallet (Cavos or e.g. Freighter) sign each item in the browser: this returns
-//                   202 + the first transaction to sign, and POST /api/tx/:id
-//                   continues item by item (see src/lib/checkout.ts).
+//                   decrements stock, marks the order COMPLETED. The buyer's
+//                   own wallet (Cavos or e.g. Freighter) signs each item in the
+//                   browser: this returns 202 + the first transaction to sign,
+//                   and POST /api/tx/:id continues item by item (see
+//                   src/lib/checkout.ts).
 //
 // Expiry is lazy: any read or pay first flips stale PENDING orders to EXPIRED.
 
 import { Hono } from "hono";
 
 import {
-  completeOrder,
   lineAmount,
   loadOrderForPayment,
   nextOwnWalletPurchaseStep,
@@ -22,16 +22,12 @@ import {
   orderPayload,
   outOfStockMessage,
   PurchaseRefusedError,
-  recordSale,
-  releaseStock,
-  reserveStock,
   topUpDemoBalance,
   vendorAddressFor,
 } from "@/lib/checkout";
 import { prisma } from "@/lib/db";
 import { boundOnChainId, describeContractError } from "@/lib/rewards";
 import { getSessionUser } from "@/lib/session";
-import { createCustodialAccount, decryptSecret, purchase } from "@/lib/stellar";
 import { ownWalletPending, personalWallet } from "@/lib/wallets";
 import { publishedProducts } from "@/lib/products";
 
@@ -248,62 +244,7 @@ orders.post("/:id/pay", async (c) => {
       return c.json(step, "signatureRequired" in step ? 202 : 200);
     }
 
-    // Custodial account: first-time buyers start pre-funded (the "card
-    // payment" is simulated by minting demo money); returning buyers get
-    // topped up if their balance can't cover the order.
-    let buyerSecretEncrypted: string;
-    let buyerAddress: string;
-    if (wallet.kind === "none") {
-      const account = await createCustodialAccount({
-        startingUsd: Math.max(100, Math.ceil(remainingUsd)),
-      });
-      await prisma.user.update({
-        where: { id: sessionUser.id },
-        data: {
-          stellarPublicKey: account.publicKey,
-          stellarSecretEncrypted: account.secretEncrypted,
-        },
-      });
-      buyerSecretEncrypted = account.secretEncrypted;
-      buyerAddress = account.publicKey;
-    } else {
-      await topUpDemoBalance(wallet.address, remainingUsd);
-      buyerSecretEncrypted = wallet.secretEncrypted;
-      buyerAddress = wallet.address;
-    }
-    const buyerSecret = decryptSecret(buyerSecretEncrypted);
-
-    // One atomic on-chain split purchase per unsettled item, recorded as it
-    // settles so a failure mid-order can be retried without re-charging.
-    for (const item of unsettled) {
-      const settleStart = Date.now();
-      await reserveStock(item);
-      let settled;
-      try {
-        settled = await purchase({
-          buyerSecret,
-          marketplaceId: onChainId,
-          vendorPublicKey: vendorAddressFor(order, item) as string,
-          amountStroops: lineAmount(item).amountStroops,
-        });
-      } catch (error) {
-        await releaseStock(item, error);
-        throw error;
-      }
-      const { txHash, receipt } = settled;
-      await recordSale({
-        order,
-        item,
-        buyerId: sessionUser.id,
-        buyerAddress,
-        txHash,
-        receipt,
-        settleSeconds: Math.max(1, Math.round((Date.now() - settleStart) / 1000)),
-        shipping,
-      });
-    }
-
-    return c.json(await completeOrder(order.id, shipping));
+    return c.json({ error: "Sign in with your wallet to pay" }, 409);
   } catch (error) {
     if (error instanceof PurchaseRefusedError) return c.json({ error: error.message }, 409);
     const known = describeContractError(error);

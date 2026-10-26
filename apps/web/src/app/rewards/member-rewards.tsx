@@ -85,8 +85,7 @@ export function MemberRewards({ initial }: { initial: MemberRewardsPayload }) {
     setBusy(key);
     setTx({ state: "pending", label: pendingLabel });
     try {
-      // Own wallets sign the claim here (202 + transaction to approve);
-      // custodial accounts are signed by the API.
+      // The user's wallet signs the claim here (202 + transaction to approve).
       const result = await followSignatures<{ txHash?: string; amountUsd?: number }>(
         await readResult(await fetch(url, { method: "POST" })),
         wallet.signXdr,

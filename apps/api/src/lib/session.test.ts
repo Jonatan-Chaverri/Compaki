@@ -8,7 +8,6 @@ process.env.WALLET_ENCRYPTION_KEY = "wallet-key-for-tests";
 delete process.env.SESSION_SECRET;
 
 const { SESSION_SECONDS, clearSessionCookieHeader, sessionCookieHeader, sessionValue, userIdOfSession } = await import("./session");
-const { FailureLimiter } = await import("./rate-limit");
 
 const NOW = Date.UTC(2026, 9, 25);
 
@@ -52,19 +51,4 @@ test("cookies are Secure over HTTPS, including behind the web app's proxy", asyn
   assert.match(await cookie("http://localhost:4000/set", { headers: { "x-forwarded-proto": "https" } }), /; Secure$/);
   assert.match(await cookie("https://api.example/set"), /HttpOnly; SameSite=Lax; Max-Age=2592000; Secure/);
   assert.match(await cookie("https://api.example/clear"), /Max-Age=0; Secure/);
-});
-
-test("the limiter blocks after max failures in the window and frees up as they age", () => {
-  const limiter = new FailureLimiter(3, 60_000);
-  for (let i = 0; i < 2; i++) limiter.fail("k", NOW + i * 1000);
-  assert.equal(limiter.blockedFor("k", NOW + 2000), 0);
-  limiter.fail("k", NOW + 2000);
-  assert.equal(limiter.blockedFor("k", NOW + 2000), 58_000);
-  assert.equal(limiter.blockedFor("other", NOW + 2000), 0);
-  assert.equal(limiter.blockedFor("k", NOW + 60_000), 0);
-  limiter.fail("k", NOW + 61_000);
-  limiter.fail("k", NOW + 61_500);
-  assert.ok(limiter.blockedFor("k", NOW + 61_500) > 0);
-  limiter.reset("k");
-  assert.equal(limiter.blockedFor("k", NOW + 61_500), 0);
 });

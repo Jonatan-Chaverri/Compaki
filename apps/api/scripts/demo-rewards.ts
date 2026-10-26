@@ -31,10 +31,9 @@ import {
   ContractError,
   claimReward,
   distributeRewards,
-  createCustodialAccount,
   createFundraiseMarketplace,
   createRewardsMarketplace,
-  decryptSecret,
+  createTestAccount,
   getFundraise,
   getPeriodTotals,
   getReward,
@@ -82,18 +81,18 @@ async function main(): Promise<void> {
   console.log("── Compaki Community Rewards + fundraising demo (testnet) ──");
   console.log(`Contract: ${stellarExpertContractUrl(stellarConfig.marketplaceContractId)}`);
 
-  console.log("0. Provisioning custodial accounts (Friendbot + trustlines)...");
+  console.log("0. Creating throwaway testnet accounts (Friendbot + trustlines)...");
   const [operator, vendor1, vendor2, buyerA, buyerB, wallet1, wallet2] = await Promise.all([
-    createCustodialAccount(),
-    createCustodialAccount(),
-    createCustodialAccount(),
-    createCustodialAccount({ startingUsd: 150 }),
-    createCustodialAccount({ startingUsd: 150 }),
-    createCustodialAccount(),
-    createCustodialAccount(),
+    createTestAccount(),
+    createTestAccount(),
+    createTestAccount(),
+    createTestAccount({ startingUsd: 150 }),
+    createTestAccount({ startingUsd: 150 }),
+    createTestAccount(),
+    createTestAccount(),
   ]);
-  const operatorSecret = decryptSecret(operator.secretEncrypted);
-  const secretOf = (a: { secretEncrypted: string }) => decryptSecret(a.secretEncrypted);
+  const operatorSecret = operator.secret;
+  const secretOf = (a: { secret: string }) => a.secret;
   const buy = async (buyer: typeof buyerA, vendor: typeof vendor1, marketplaceId: bigint, amount: number) =>
     purchase({
       buyerSecret: secretOf(buyer),

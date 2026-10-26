@@ -1,23 +1,20 @@
 import type { xdr } from "@stellar/stellar-sdk";
 
 import { prisma } from "./db";
-import { operatorSignerOf } from "./operator";
 import { createPending, signatureRequest, type PendingTx } from "./pending-tx";
 import type { ProductInput } from "./products";
 import { boundOnChainId } from "./rewards";
 import { SellerSetupError } from "./seller-errors";
-import { createCustodialAccount, decryptSecret, invokeCall, joinCall, prepareCall, registerVendor } from "./stellar";
+import { joinCall, prepareCall } from "./stellar";
 import { ownWalletPending, personalWallet } from "./wallets";
 
 // The account is enabled globally. Only its payment registration is per market;
 // publishing handles that automatically, including retries after a failure.
 //
-// On-chain registration is signed by the marketplace's operator when the
-// backend holds that key (custodial operators), and otherwise by the seller
-// (`join`): the backend signs for custodial sellers, and sellers with their
-// own wallet approve it in the browser. Then the API answers 202 with the
-// transaction to sign, and POST /api/tx/:id finishes the registration
-// (completeJoin), creating the product being published, if any.
+// On-chain registration is signed by the seller (`join`), who approves it in
+// their own wallet: the API answers 202 with the transaction to sign, and
+// POST /api/tx/:id finishes the registration (completeJoin), creating the
+// product being published, if any.
 //
 // Serialize setup for one user so concurrent first publications share an account.
 const pending = new Map<string, Promise<unknown>>();
@@ -39,51 +36,33 @@ interface JoinContext {
 async function register(userId: string, marketplaceId: string, product?: ProductInput) {
   const [user, marketplace] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId } }),
-    prisma.marketplace.findUnique({ where: { id: marketplaceId }, include: { operator: true } }),
+    prisma.marketplace.findUnique({ where: { id: marketplaceId } }),
   ]);
   if (!user?.isSeller) throw new SellerSetupError("Activate your seller profile first");
   const onChainId = marketplace ? boundOnChainId(marketplace) : null;
-  const operator = marketplace ? operatorSignerOf(marketplace) : null;
-  if (!marketplace || onChainId === null || !operator) {
+  if (!marketplace || onChainId === null || !marketplace.operatorAddress) {
     throw new SellerSetupError("Marketplace is not fully set up");
   }
   if (ownWalletPending(user)) throw new SellerSetupError("Finish setting up your wallet first");
   const personal = personalWallet(user);
-  let payoutAddress: string;
-  let sellerSecret: string | null = null;
-  if (personal.kind === "none") {
-    const account = await createCustodialAccount();
-    await prisma.user.update({ where: { id: user.id }, data: { stellarPublicKey: account.publicKey, stellarSecretEncrypted: account.secretEncrypted } });
-    payoutAddress = account.publicKey;
-    sellerSecret = decryptSecret(account.secretEncrypted);
-  } else {
-    payoutAddress = personal.address;
-    if (personal.kind === "custodial") sellerSecret = decryptSecret(personal.secretEncrypted);
-  }
-  let membership = await prisma.vendorMembership.upsert({
+  if (personal.kind === "none") throw new SellerSetupError("Sign in with your wallet first");
+  const payoutAddress = personal.address;
+  const membership = await prisma.vendorMembership.upsert({
     where: { marketplaceId_userId: { marketplaceId, userId } },
     update: {},
     create: { marketplaceId, userId, sellsDescription: "" },
   });
   if (!membership.registerTxHash) {
-    let txHash: string;
-    if (operator.kind === "custodial") {
-      ({ txHash } = await registerVendor({ operatorSecret: operator.secret, marketplaceId: onChainId, vendorPublicKey: payoutAddress }));
-    } else if (sellerSecret) {
-      ({ txHash } = await invokeCall(joinCall({ marketplaceId: onChainId, vendor: payoutAddress }), sellerSecret));
-    } else {
-      const prepared = await prepareCall(joinCall({ marketplaceId: onChainId, vendor: payoutAddress }), payoutAddress);
-      const request = createPending<JoinContext>({
-        kind: "join",
-        userId,
-        signer: payoutAddress,
-        xdr: prepared.xdr,
-        hash: prepared.hash,
-        context: { membershipId: membership.id, payoutAddress, product: product ? { input: product, marketplaceId } : undefined },
-      });
-      return signatureRequest(request, `Join ${marketplace.name}`);
-    }
-    membership = await prisma.vendorMembership.update({ where: { id: membership.id }, data: { registerTxHash: txHash, payoutAddress } });
+    const prepared = await prepareCall(joinCall({ marketplaceId: onChainId, vendor: payoutAddress }), payoutAddress);
+    const request = createPending<JoinContext>({
+      kind: "join",
+      userId,
+      signer: payoutAddress,
+      xdr: prepared.xdr,
+      hash: prepared.hash,
+      context: { membershipId: membership.id, payoutAddress, product: product ? { input: product, marketplaceId } : undefined },
+    });
+    return signatureRequest(request, `Join ${marketplace.name}`);
   }
   return membership;
 }

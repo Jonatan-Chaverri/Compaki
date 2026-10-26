@@ -8,7 +8,6 @@ import { startCommunityScheduler } from "./lib/distribution";
 
 import { auth } from "./routes/auth";
 import { balance } from "./routes/balance";
-import { demo } from "./routes/demo";
 import { marketplaces } from "./routes/marketplaces";
 import { me } from "./routes/me";
 import { orders } from "./routes/orders";
@@ -27,7 +26,6 @@ app.use(logger());
 
 app.route("/api/auth", auth);
 app.route("/api/balance", balance);
-app.route("/api/demo", demo);
 app.route("/api/marketplaces", marketplaces);
 app.route("/api/me", me);
 app.route("/api/orders", orders);

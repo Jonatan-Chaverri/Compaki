@@ -355,7 +355,7 @@ export interface ContractCall {
   args: xdr.ScVal[];
 }
 
-/** Signs and submits `call` with a custodial key (also the fee payer). */
+/** Signs and submits `call` with a key Compaki holds for its own accounts or a script's test key (also the fee payer). */
 export function invokeCall(call: ContractCall, signerSecret: string): Promise<InvokeResult> {
   return invokeContract(call.method, call.args, Keypair.fromSecret(signerSecret));
 }
@@ -388,17 +388,6 @@ export function createMarketplaceCall(params: SplitParams & { operator: string; 
     community_fund: params.communityFund,
     ...splitArgs(params),
   });
-}
-
-/** Registers a classic marketplace instance on-chain. Returns its on-chain id. */
-export async function createMarketplace(params: SplitParams & {
-  operatorSecret: string;
-  communityFundPublicKey: string;
-}): Promise<{ marketplaceId: bigint; txHash: string }> {
-  const operator = Keypair.fromSecret(params.operatorSecret).publicKey();
-  const call = createMarketplaceCall({ ...params, operator, communityFund: params.communityFundPublicKey });
-  const { txHash, returnValue } = await invokeCall(call, params.operatorSecret);
-  return { marketplaceId: marketplaceIdOf(returnValue), txHash };
 }
 
 /**
@@ -531,7 +520,8 @@ export async function registerVendor(params: {
 }
 
 /**
- * Executes an atomic split purchase, signed by the buyer's custodial key.
+ * Executes an atomic split purchase signed by `buyerSecret` (the on-chain
+ * proof script; buyers in the app sign with their own wallet).
  * `amountStroops` is the token amount with 7 decimals (see usdToStroops).
  * The receipt is what the contract actually paid (see PurchaseReceipt).
  */

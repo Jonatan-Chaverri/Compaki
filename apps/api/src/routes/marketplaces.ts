@@ -23,13 +23,9 @@ import { finishLaunch, type LaunchContext } from "@/lib/launch";
 import { ownWalletPending, personalWallet } from "@/lib/wallets";
 import { createPending, signatureRequest } from "@/lib/pending-tx";
 import {
-  createCustodialAccount,
   createFundraiseMarketplaceCall,
   createMarketplaceCall,
   createRewardsMarketplaceCall,
-  decryptSecret,
-  invokeCall,
-  marketplaceIdOf,
   prepareCall,
   type ContractCall,
   demoTrustlineState,
@@ -40,7 +36,6 @@ import {
   usdToStroops,
   type GoalPolicy,
 } from "@/lib/stellar";
-import { demoImpersonationEnabled } from "./demo";
 import { createMarketplaceDeletion } from "./marketplace-deletion";
 import { activeProducts, publishedProducts } from "@/lib/products";
 
@@ -65,6 +60,8 @@ interface LaunchInput extends CommunityDetails {
   /** fundraise only (the target is communityGoalUsd) */
   fundraisePolicy: GoalPolicy | null;
   fundraiseRecipients: FundraiseRecipient[] | null;
+  /** classic with a community share: the wallet that receives it */
+  communityFund: { address: string; name: string } | null;
 }
 
 const DAY = 24 * 60 * 60;
@@ -78,12 +75,12 @@ const MAX_RECIPIENTS = 20; // mirrors the contract's MAX_RECIPIENTS
 /** Display name of where the community share goes. */
 export function communityFundLabel(m: {
   communityMode: string;
-  communityFund: { name: string } | null;
+  communityFundName: string | null;
 }): string | null {
   const mode = communityModeOf(m);
   if (mode === "rewards") return "Community Rewards treasury (on-chain)";
   if (mode === "fundraise") return "Fundraising fund (on-chain)";
-  return m.communityFund?.name ?? null;
+  return m.communityFundName;
 }
 
 function parseRecipients(raw: unknown): FundraiseRecipient[] | string {
@@ -173,6 +170,14 @@ function parseInput(body: unknown): LaunchInput | string {
     if (typeof recipients === "string") return recipients;
     fundraiseRecipients = recipients;
   }
+  let communityFund: LaunchInput["communityFund"] = null;
+  if (communityMode === "classic" && communityBps > 0) {
+    const address = typeof b.communityFundAddress === "string" ? b.communityFundAddress.trim() : "";
+    const fundName = typeof b.communityFundName === "string" ? b.communityFundName.trim() : "";
+    if (!isValidAccountAddress(address)) return "Enter the Stellar wallet that receives the community share";
+    if (fundName.length < 2 || fundName.length > 80) return "Give the community fund a public name (2–80 characters)";
+    communityFund = { address, name: fundName };
+  }
 
   return {
     name,
@@ -188,6 +193,7 @@ function parseInput(body: unknown): LaunchInput | string {
     rewardsVendorPoolBps,
     fundraisePolicy,
     fundraiseRecipients,
+    communityFund,
     ...community,
   };
 }
@@ -206,9 +212,8 @@ marketplaces.get("/:slug/community", async (c) => {
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug: c.req.param("slug") },
     include: {
-      operator: { select: { name: true, stellarPublicKey: true } },
-      communityFund: { select: { name: true, stellarPublicKey: true } },
-      vendors: { include: { user: { select: { name: true, stellarPublicKey: true } } } },
+      operator: { select: { name: true } },
+      vendors: { include: { user: { select: { name: true } } } },
     },
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
@@ -231,8 +236,8 @@ marketplaces.get("/:slug/community", async (c) => {
     } else if (mode === "fundraise") {
       fundraise = await loadFundraiseView(marketplace);
       if (!fundraise.bound) verificationError = "This marketplace’s fundraising fund is not connected yet. Verified amounts and recipients are unavailable.";
-    } else if (marketplace.splitCommunityBps > 0 && marketplace.communityFund?.stellarPublicKey) {
-      communityBalanceUsd = await getUsdBalance(marketplace.communityFund.stellarPublicKey);
+    } else if (marketplace.splitCommunityBps > 0 && marketplace.communityFundAddress) {
+      communityBalanceUsd = await getUsdBalance(marketplace.communityFundAddress);
     }
   } catch (error) {
     console.error("[community] verification unavailable:", error);
@@ -246,9 +251,9 @@ marketplaces.get("/:slug/community", async (c) => {
       ...communityDetailsOf(marketplace),
       communityDetailsUpdatedAt: marketplace.communityDetailsUpdatedAt?.toISOString() ?? null,
       splits: { vendorBps: marketplace.splitVendorBps, operatorBps: marketplace.splitOperatorBps, communityBps: marketplace.splitCommunityBps },
-      operator: { name: marketplace.operator.name, address: marketplace.operatorAddress ?? marketplace.operator.stellarPublicKey },
-      communityFund: marketplace.communityFund ? { name: marketplace.communityFund.name, address: marketplace.communityFund.stellarPublicKey } : null,
-      sellers: marketplace.vendors.map(v => ({ name: v.user.name, address: v.payoutAddress ?? v.user.stellarPublicKey })),
+      operator: { name: marketplace.operator.name, address: marketplace.operatorAddress },
+      communityFund: marketplace.communityFundAddress ? { name: marketplace.communityFundName ?? "", address: marketplace.communityFundAddress } : null,
+      sellers: marketplace.vendors.map(v => ({ name: v.user.name, address: v.payoutAddress })),
     },
     canManage: user?.id === marketplace.operatorId,
     sales: summarizeCommunitySales(sales),
@@ -303,7 +308,6 @@ marketplaces.get("/check-slug", async (c) => {
 marketplaces.get("/directory", async (c) => {
   const rows = await prisma.marketplace.findMany({
     include: {
-      communityFund: { select: { name: true } },
       _count: { select: { products: { where: publishedProducts }, vendors: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -328,14 +332,14 @@ marketplaces.get("/directory", async (c) => {
 
 // ── POST / — the launch orchestrator ───────────────────────────────────────
 //
-// Streams progress as Server-Sent Events while it: provisions custodial
-// payment accounts (operator, plus a community fund account for classic
-// marketplaces), registers the marketplace on-chain (create_marketplace,
+// Streams progress as Server-Sent Events while it: checks the payment wallets
+// (the owner's own wallet is the operator; a classic marketplace's community
+// share goes to the fund wallet the organizer named), asks the owner's wallet
+// to sign the on-chain registration (create_marketplace,
 // create_rewards_marketplace or create_fundraise_marketplace — for the last
 // two the community share is held by the contract), and writes the DB
-// records. Designed to be
-// retried: every step reuses whatever a previous attempt already created
-// (operator by email, marketplace + fund by slug, on-chain id if present).
+// records. Designed to be retried: every step reuses whatever a previous
+// attempt already created (marketplace by slug, on-chain id if present).
 
 type LaunchStep = "accounts" | "deploy" | "store";
 
@@ -365,6 +369,16 @@ marketplaces.post("/", async (c) => {
     return c.json({ error: "That URL is already taken" }, 409);
   }
 
+  // A classic marketplace pays its community share to the fund wallet with
+  // every sale, so it must already accept the demo asset.
+  if (input.communityFund) {
+    const state = await demoTrustlineState(input.communityFund.address);
+    if (state !== "ready") {
+      const why = state === "missing" ? "doesn't exist on Stellar testnet" : `doesn't accept ${stellarConfig.usdcCode} yet`;
+      return c.json({ error: `The community fund's wallet ${why}. Sign in to Compaki once with that wallet (or add a ${stellarConfig.usdcCode} trustline), then try again.` }, 400);
+    }
+  }
+
   // A release pays every recipient in one transaction, so each wallet must
   // already accept the demo asset or the funds could never be released.
   if (input.fundraiseRecipients) {
@@ -377,12 +391,15 @@ marketplaces.post("/", async (c) => {
     }
   }
 
-  // Owners with their own wallet register the marketplace with it (they sign
-  // in the browser); everyone else with their custodial account.
+  // The owner's own wallet registers the marketplace (it signs in the
+  // browser) and receives the operator share.
   if (ownWalletPending(sessionUser)) {
     return c.json({ error: "Finish setting up your wallet before launching a marketplace", code: "WALLET_SETUP" }, 409);
   }
   const ownWallet = personalWallet(sessionUser);
+  if (ownWallet.kind !== "own") {
+    return c.json({ error: "Sign in with your wallet to launch a marketplace" }, 409);
+  }
 
   const operator = await prisma.user.update({
     where: { id: sessionUser.id },
@@ -402,18 +419,6 @@ marketplaces.post("/", async (c) => {
         // ── 1. Payment accounts ────────────────────────────────────────
         stepStart("accounts");
 
-        let operatorUser = operator;
-        if (ownWallet.kind !== "own" && (!operatorUser.stellarPublicKey || !operatorUser.stellarSecretEncrypted)) {
-          const account = await createCustodialAccount();
-          operatorUser = await prisma.user.update({
-            where: { id: operator.id },
-            data: {
-              stellarPublicKey: account.publicKey,
-              stellarSecretEncrypted: account.secretEncrypted,
-            },
-          });
-        }
-
         // Marketplace row early (contract id null) so retries can resume.
         // Once registered on-chain, the split and community rules are frozen
         // there, so a re-submit must not change them off-chain either.
@@ -428,10 +433,12 @@ marketplaces.post("/", async (c) => {
           rewardsVendorPoolBps: input.rewardsVendorPoolBps,
           fundraisePolicy: input.fundraisePolicy,
           fundraiseRecipients: input.fundraiseRecipients ?? undefined,
+          communityFundAddress: input.communityFund?.address ?? null,
+          communityFundName: input.communityFund?.name ?? null,
           ...(input.communityMode === "fundraise" ? { communityGoalUsd } : {}),
         };
         const goalField = input.communityMode === "fundraise" ? {} : { communityGoalUsd };
-        let marketplace = await prisma.marketplace.upsert({
+        const marketplace = await prisma.marketplace.upsert({
           where: { slug: input.slug },
           update: {
             name: input.name,
@@ -451,44 +458,17 @@ marketplaces.post("/", async (c) => {
             ...goalField,
             communityDetailsUpdatedAt: new Date(),
             ...onChainFields,
-            operatorId: operatorUser.id,
+            operatorId: operator.id,
           },
-          include: { communityFund: true },
         });
-
-        // Rewards and fundraising marketplaces need no fund account: the
+        // Rewards and fundraising marketplaces need no fund wallet: the
         // contract holds the community share.
         const mode = communityModeOf(marketplace);
-        let fundUser = marketplace.communityFund;
-        if (mode === "classic" && !fundUser?.stellarPublicKey) {
-          const account = await createCustodialAccount();
-          fundUser = fundUser
-            ? await prisma.user.update({
-                where: { id: fundUser.id },
-                data: {
-                  stellarPublicKey: account.publicKey,
-                  stellarSecretEncrypted: account.secretEncrypted,
-                },
-              })
-            : await prisma.user.create({
-                data: {
-                  name: `${input.name} Community Fund`,
-                  role: "COMMUNITY",
-                  stellarPublicKey: account.publicKey,
-                  stellarSecretEncrypted: account.secretEncrypted,
-                },
-              });
-          marketplace = await prisma.marketplace.update({
-            where: { id: marketplace.id },
-            data: { communityFundId: fundUser.id },
-            include: { communityFund: true },
-          });
-        }
         stepDone("accounts");
 
         // ── 2. On-chain registration ───────────────────────────────────
         stepStart("deploy");
-        let registration: { contractMarketplaceId: string; createTxHash: string | null; operatorAddress: string } | null =
+        const registration: { contractMarketplaceId: string; createTxHash: string | null; operatorAddress: string } | null =
           marketplace.contractMarketplaceId && marketplace.operatorAddress
             ? {
                 contractMarketplaceId: marketplace.contractMarketplaceId,
@@ -497,8 +477,7 @@ marketplaces.post("/", async (c) => {
               }
             : null;
         if (registration === null) {
-          const operatorAddress = ownWallet.kind === "own" ? ownWallet.address : operatorUser.stellarPublicKey;
-          if (!operatorAddress) throw new Error("Payment accounts missing after provisioning");
+          const operatorAddress = ownWallet.address;
           const split = {
             operator: operatorAddress,
             vendorBps: marketplace.splitVendorBps,
@@ -525,33 +504,23 @@ marketplaces.post("/", async (c) => {
               policy: marketplace.fundraisePolicy === "stop" ? "stop" : "new-round",
             });
           } else {
-            if (!fundUser?.stellarPublicKey) {
-              throw new Error("Payment accounts missing after provisioning");
-            }
-            call = createMarketplaceCall({ ...split, communityFund: fundUser.stellarPublicKey });
+            // Without a community share the contract still needs a fund
+            // address; only rounding dust can reach it, so the operator's is used.
+            call = createMarketplaceCall({ ...split, communityFund: marketplace.communityFundAddress ?? operatorAddress });
           }
 
-          if (ownWallet.kind === "own") {
-            // The owner's wallet signs; POST /api/tx/:id finishes the launch.
-            const prepared = await prepareCall(call, operatorAddress);
-            const pending = createPending<LaunchContext>({
-              kind: "create-marketplace",
-              userId: operator.id,
-              signer: operatorAddress,
-              xdr: prepared.xdr,
-              hash: prepared.hash,
-              context: { marketplaceId: marketplace.id },
-            });
-            emit({ type: "signature", ...signatureRequest(pending, "Create your marketplace") });
-            return;
-          }
-          if (!operatorUser.stellarSecretEncrypted) throw new Error("Payment accounts missing after provisioning");
-          const { txHash, returnValue } = await invokeCall(call, decryptSecret(operatorUser.stellarSecretEncrypted));
-          registration = {
-            contractMarketplaceId: marketplaceIdOf(returnValue).toString(),
-            createTxHash: txHash,
-            operatorAddress,
-          };
+          // The owner's wallet signs; POST /api/tx/:id finishes the launch.
+          const prepared = await prepareCall(call, operatorAddress);
+          const pending = createPending<LaunchContext>({
+            kind: "create-marketplace",
+            userId: operator.id,
+            signer: operatorAddress,
+            xdr: prepared.xdr,
+            hash: prepared.hash,
+            context: { marketplaceId: marketplace.id },
+          });
+          emit({ type: "signature", ...signatureRequest(pending, "Create your marketplace") });
+          return;
         }
         stepDone("deploy");
 
@@ -602,7 +571,6 @@ marketplaces.get("/:slug/storefront", async (c) => {
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug },
     include: {
-      communityFund: { select: { name: true } },
       products: {
         where: publishedProducts,
         include: { vendor: { select: { name: true } } },
@@ -647,11 +615,10 @@ marketplaces.get("/:slug/dashboard", async (c) => {
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug },
     include: {
-      operator: { select: { id: true, name: true, stellarPublicKey: true } },
-      communityFund: { select: { id: true, name: true, stellarPublicKey: true } },
+      operator: { select: { id: true, name: true } },
       vendors: {
         include: {
-          user: { select: { id: true, name: true, email: true, stellarPublicKey: true } },
+          user: { select: { id: true, name: true, email: true } },
         },
         orderBy: { createdAt: "desc" },
       },
@@ -702,7 +669,6 @@ marketplaces.get("/:slug/dashboard", async (c) => {
     slug: marketplace.slug,
     regenerativeEnabled: marketplace.regenerativeEnabled,
     communityMode: communityModeOf(marketplace),
-    demoImpersonation: demoImpersonationEnabled(),
     community: communityDetailsOf(marketplace),
     splits: {
       vendorBps: marketplace.splitVendorBps,
@@ -710,13 +676,13 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       communityBps: marketplace.splitCommunityBps,
       platformBps: PLATFORM_FEE_BPS,
     },
-    // Where the operator share lands: the owner's own wallet or their custodial account.
-    operatorAccount: marketplace.operatorAddress ?? marketplace.operator.stellarPublicKey,
+    // Where the operator share lands: the owner's own wallet.
+    operatorAccount: marketplace.operatorAddress,
     // Rewards and fundraising marketplaces hold the community share in the
     // contract; their community tab reads that fund from chain instead.
     communityAccount: communityModeOf(marketplace) !== "classic"
       ? null
-      : marketplace.communityFund?.stellarPublicKey ?? null,
+      : marketplace.communityFundAddress,
     stats: {
       totalSales: allSales.length,
       grossVolume: allSales.reduce((acc, s) => acc + s.amountUsd, 0),
@@ -739,7 +705,7 @@ marketplaces.get("/:slug/dashboard", async (c) => {
       name: m.user.name,
       email: m.user.email ?? "",
       sells: m.sellsDescription,
-      account: m.payoutAddress ?? m.user.stellarPublicKey,
+      account: m.payoutAddress,
       registerTxHash: m.registerTxHash,
       joinedAt: m.createdAt.toISOString(),
       productCount: marketplace.products.filter((p) => p.vendorId === m.user.id).length,
@@ -773,7 +739,7 @@ marketplaces.get("/:slug/vendor-dashboard", async (c) => {
       })
     : null;
 
-  const payoutAddress = membership?.payoutAddress ?? user?.stellarPublicKey ?? null;
+  const payoutAddress = membership?.payoutAddress ?? null;
   if (!user || !membership || !payoutAddress) {
     return c.json({
       member: false as const,

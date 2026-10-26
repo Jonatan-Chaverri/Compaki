@@ -1,7 +1,7 @@
 // TypeScript-level role and split helpers used by the API. These remain in
 // code so the current demo payloads stay plain JSON/number values.
 
-export const ROLES = ["OPERATOR", "VENDOR", "BUYER", "COMMUNITY"] as const;
+export const ROLES = ["OPERATOR", "VENDOR", "BUYER"] as const;
 export type Role = (typeof ROLES)[number];
 
 export function isRole(value: string): value is Role {

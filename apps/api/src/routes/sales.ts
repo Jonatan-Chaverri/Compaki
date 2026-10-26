@@ -26,7 +26,6 @@ sales.get("/:id/receipt", async (c) => {
           marketplace: {
             include: {
               operator: { select: { name: true } },
-              communityFund: { select: { name: true } },
             },
           },
         },
@@ -57,7 +56,7 @@ sales.get("/:id/receipt", async (c) => {
         ? `Fundraising fund · round ${snapshot.fundraiseRound + 1}`
         : mode === "fundraise"
           ? "Fundraising recipients (paid directly)"
-          : marketplace.communityFund?.name ?? "Community fund";
+          : marketplace.communityFundName ?? "Community fund";
 
   const breakdown = [
     {

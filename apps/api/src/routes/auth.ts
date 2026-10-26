@@ -13,9 +13,6 @@
 //   POST /sep10            { transaction } → SEP-10 JWT (the standard endpoint
 //                          stellar.toml publishes as WEB_AUTH_ENDPOINT)
 //   POST /profile          name (+ country, required on first login) for the signed-in user
-//   POST /login            email + password (existing/demo accounts); after 5
-//                          failures for an email or 20 from one client within
-//                          15 minutes it answers 429 until the window passes
 //   POST /logout           clears the session cookie
 //
 // New accounts are created only through Cavos. An existing account is linked
@@ -23,15 +20,12 @@
 // we verified ourselves (Cavos proved the user received the code), or the
 // user is already signed in to that account when connecting the wallet.
 // A merely reported email is never enough — knowing an address is not proof
-// of owning it. Legacy passwordless users can't be claimed through /login;
-// `npm run users:set-password -- <email>` remains for demo accounts.
+// of owning it.
 
 import { Hono } from "hono";
 
 import { createChallenge, verifiedEmailFromCavosToken, verifyChallengeSignature } from "@/lib/cavos";
 import { prisma } from "@/lib/db";
-import { verifyPassword } from "@/lib/passwords";
-import { FailureLimiter } from "@/lib/rate-limit";
 import { createWalletChallenge, verifyWalletChallenge } from "@/lib/wallet-login";
 import {
   clearSessionCookieHeader,
@@ -42,17 +36,6 @@ import { buildChallenge, issueToken, Sep10Error, verifyChallenge } from "@/lib/s
 import { isValidAccountAddress, stellarConfig } from "@/lib/stellar";
 
 export const auth = new Hono();
-
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const loginFailuresByEmail = new FailureLimiter(5, LOGIN_WINDOW_MS);
-const loginFailuresByIp = new FailureLimiter(20, LOGIN_WINDOW_MS);
-
-/** The client's address: the first X-Forwarded-For hop (set by the web app's proxy and the host). */
-function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-}
 
 function publicUser(user: { id: string; name: string; email: string | null; country: string | null }) {
   return { id: user.id, name: user.name, email: user.email, country: user.country };
@@ -231,41 +214,6 @@ auth.post("/profile", async (c) => {
     data: { name, ...(country !== undefined ? { country } : {}) },
   });
   return c.json({ user: publicUser(updated) });
-});
-
-auth.post("/login", async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON" }, 400);
-  }
-  const b = (body ?? {}) as Record<string, unknown>;
-  const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
-  const password = typeof b.password === "string" ? b.password : "";
-  if (!EMAIL_RE.test(email) || password === "") {
-    return c.json({ error: "Invalid email or password" }, 401);
-  }
-
-  // Guessing passwords: a few failures per account, a few more per client.
-  const emailKey = `email:${email}`;
-  const ipKey = `ip:${clientIp(c)}`;
-  const waitMs = Math.max(loginFailuresByEmail.blockedFor(emailKey), loginFailuresByIp.blockedFor(ipKey));
-  if (waitMs > 0) {
-    c.header("Retry-After", String(Math.ceil(waitMs / 1000)));
-    return c.json({ error: "Too many sign-in attempts. Please wait a few minutes and try again." }, 429);
-  }
-
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user?.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
-    loginFailuresByEmail.fail(emailKey);
-    loginFailuresByIp.fail(ipKey);
-    return c.json({ error: "Invalid email or password" }, 401);
-  }
-
-  loginFailuresByEmail.reset(emailKey);
-  c.header("Set-Cookie", sessionCookieHeader(c, user.id));
-  return c.json({ user: publicUser(user) });
 });
 
 auth.post("/logout", (c) => {

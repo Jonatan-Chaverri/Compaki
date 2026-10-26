@@ -25,7 +25,7 @@ products.get("/:id", async (c) => {
     where: { id },
     include: {
       vendor: { select: { name: true } },
-      marketplace: { include: { communityFund: { select: { name: true } } } },
+      marketplace: true,
     },
   });
   if (!product || product.visibility !== "PUBLISHED") return c.json({ error: "Product not found" }, 404);

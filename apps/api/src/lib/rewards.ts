@@ -46,18 +46,14 @@ export function boundOnChainId(marketplace: {
   return BigInt(marketplace.contractMarketplaceId);
 }
 
-/** Display names for Stellar addresses (own wallets and custodial accounts). */
+/** Display names for Stellar addresses (users' wallets). */
 export async function namesOf(addresses: string[]): Promise<Map<string, string>> {
   if (addresses.length === 0) return new Map();
   const users = await prisma.user.findMany({
-    where: { OR: [{ stellarPublicKey: { in: addresses } }, { walletAddress: { in: addresses } }] },
-    select: { name: true, stellarPublicKey: true, walletAddress: true },
+    where: { walletAddress: { in: addresses } },
+    select: { name: true, walletAddress: true },
   });
-  return new Map(
-    users.flatMap((u) =>
-      [u.stellarPublicKey, u.walletAddress].filter(Boolean).map((a) => [a as string, u.name] as const),
-    ),
-  );
+  return new Map(users.map((u) => [u.walletAddress as string, u.name] as const));
 }
 
 export interface ParticipantView {

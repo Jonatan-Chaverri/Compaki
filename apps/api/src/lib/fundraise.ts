@@ -5,24 +5,20 @@
 // recipient labels, names, release tx hashes and the operator's pending
 // next target. Once a round reaches its target the API releases it right
 // after the sale that reached it (and the scheduler catches any it missed):
-//   - with the operator's next target (0 = stop), signed by the operator's
-//     custodial key, as the contract requires;
-//   - otherwise with the policy's default, which anyone may submit (the
-//     demo-asset issuer account pays the network fee).
+// The release needs no signature (the demo-asset issuer account pays the
+// network fee): the contract applies the next target the operator scheduled
+// on-chain (set_next_target), or else the policy's default.
 
 import { prisma } from "@/lib/db";
-import { operatorKeysSelect, operatorSignerOf } from "@/lib/operator";
 import { boundOnChainId, communityModeOf, namesOf } from "@/lib/rewards";
 import {
   ContractError,
   getFundraise,
-  getNextTarget,
   releaseFundraise,
   stellarConfig,
   stellarExpertContractUrl,
   stellarExpertTxUrl,
   stroopsToUsd,
-  usdToStroops,
   type GoalPolicy,
 } from "@/lib/stellar";
 
@@ -154,8 +150,6 @@ export async function releaseIfReached(marketplace: {
   contractMarketplaceId: string | null;
   contractId: string | null;
   fundraiseNextTargetUsd: number | null;
-  operatorAddress: string | null;
-  operator: { stellarPublicKey: string | null; stellarSecretEncrypted: string | null };
 }): Promise<{ round: number; amountUsd: number; txHash: string } | null> {
   const onChainId = boundOnChainId(marketplace);
   if (onChainId === null) return null;
@@ -163,21 +157,11 @@ export async function releaseIfReached(marketplace: {
   if (!state.collecting || state.raisedStroops <= 0n || state.raisedStroops < state.targetStroops) return null;
 
   // The operator schedules the next target on-chain (set_next_target), so the
-  // release needs no signature and the contract applies it. A target chosen
-  // before that existed is only in Postgres: a custodial operator passes it.
+  // release needs no signature and the contract applies it.
   const nextTarget = marketplace.fundraiseNextTargetUsd;
-  let legacyTarget: bigint | null = null;
-  let signerSecret = stellarConfig.usdcIssuerSecret;
-  if (nextTarget !== null && (await getNextTarget(onChainId)) === null) {
-    const operator = operatorSignerOf(marketplace);
-    if (operator?.kind === "custodial") {
-      legacyTarget = usdToStroops(nextTarget);
-      signerSecret = operator.secret;
-    }
-  }
   let released;
   try {
-    released = await releaseFundraise({ signerSecret, marketplaceId: onChainId, nextTargetStroops: legacyTarget });
+    released = await releaseFundraise({ signerSecret: stellarConfig.usdcIssuerSecret, marketplaceId: onChainId, nextTargetStroops: null });
   } catch (error) {
     if (error instanceof ContractError && error.errorName === "GoalNotReached") return null;
     throw error;
@@ -209,7 +193,7 @@ export async function releaseIfReached(marketplace: {
   return { round: state.round, amountUsd, txHash: released.txHash };
 }
 
-/** releaseIfReached for a marketplace by id (loads the operator key it may need). */
+/** releaseIfReached for a marketplace by id. */
 export async function releaseIfReachedById(marketplaceId: string) {
   const marketplace = await prisma.marketplace.findUnique({
     where: { id: marketplaceId },
@@ -218,7 +202,6 @@ export async function releaseIfReachedById(marketplaceId: string) {
       contractMarketplaceId: true,
       contractId: true,
       fundraiseNextTargetUsd: true,
-      ...operatorKeysSelect,
     },
   });
   return marketplace ? releaseIfReached(marketplace) : null;

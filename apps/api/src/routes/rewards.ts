@@ -16,17 +16,14 @@
 //
 // Every balance, rule and claim right in these payloads is read from the
 // contract (see src/lib/rewards.ts and src/lib/fundraise.ts). Postgres adds
-// who took part, names and tx hashes. Participants with their own wallet sign
-// their claims in the browser; for custodial accounts the backend signs with
-// the key it holds, so there `require_auth` proves "the backend acted for
-// this user" (README "Custody").
+// who took part, names and tx hashes. Participants sign their claims in the
+// browser with their own wallet.
 
 import { Hono } from "hono";
 
 import { parseSplitSnapshot, prisma } from "@/lib/db";
 import { distributeIfDue, loadDistributable } from "@/lib/distribution";
 import { loadFundraiseView, releaseIfReachedById } from "@/lib/fundraise";
-import { operatorAddressOf, operatorKeysSelect, operatorSignerOf, type OperatorSigner } from "@/lib/operator";
 import { createPending, signatureRequest, type PendingTx } from "@/lib/pending-tx";
 import {
   boundOnChainId,
@@ -38,14 +35,11 @@ import {
 import { getSessionUser } from "@/lib/session";
 import { personalWallet, userAddresses } from "@/lib/wallets";
 import {
-  claimReward,
-  decryptSecret,
   getFundraise,
   getPeriodTotals,
   getReward,
   getRewardsStatus,
   claimedAmountOf,
-  invokeCall,
   prepareCall,
   prepareClaim,
   setNextRulesCall,
@@ -80,7 +74,7 @@ const marketplaceSelect = {
   contractId: true,
 } as const;
 
-/** The address the viewer's money uses (own wallet once ready, else custodial). */
+/** The address the viewer's money uses (their wallet, once ready). */
 function viewerAddressOf(user: Parameters<typeof personalWallet>[0]): string | null {
   const personal = personalWallet(user);
   return personal.kind === "none" ? null : personal.address;
@@ -122,11 +116,8 @@ rewards.get("/marketplace/:slug", async (c) => {
 // ── POST /marketplace/:slug/periods/:id/claim ──────────────────────────────
 //
 // Claims for the session user only: the contract pays the address whose
-// authorization it checks. The user may have taken part with their own
-// wallet and/or a custodial account; the first one with an unclaimed reward
-// is used. An own wallet signs in the browser (202 + the transaction; POST
-// /api/tx/:id submits it and calls completeClaim); a custodial account is
-// signed by the backend.
+// authorization it checks. The user's wallet signs in the browser (202 + the
+// transaction; POST /api/tx/:id submits it and calls completeClaim).
 
 /** Auxiliary record for the explorer link; the claim is already final on-chain. */
 async function recordClaim(params: {
@@ -184,45 +175,24 @@ rewards.post("/marketplace/:slug/periods/:id/claim", async (c) => {
       return c.json({ error: "You have no unclaimed reward in this period.", code: "NothingToClaim" }, 409);
     }
 
-    // Their own wallet took part: they sign the claim themselves.
-    if (claimable === user.walletAddress) {
-      if (!user.walletReadyAt) {
-        return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
-      }
-      const prepared = await prepareClaim({
-        memberPublicKey: user.walletAddress,
-        marketplaceId: onChainId,
-        periodId,
-      });
-      const pending = createPending<ClaimContext>({
-        kind: "claim",
-        userId: user.id,
-        signer: user.walletAddress,
-        xdr: prepared.xdr,
-        hash: prepared.hash,
-        context: { marketplaceId: marketplace.id, periodId },
-      });
-      return c.json(signatureRequest(pending, `Claim your period #${periodId + 1} reward`), 202);
+    // The user signs the claim with their own wallet.
+    if (!user.walletReadyAt) {
+      return c.json({ error: "Finish setting up your wallet first", code: "WALLET_SETUP" }, 409);
     }
-
-    // Custodial account: the backend signs with the key it holds.
-    if (claimable !== user.stellarPublicKey || !user.stellarSecretEncrypted) {
-      return c.json({ error: "This reward belongs to an account you can't sign for here." }, 403);
-    }
-    const { amountStroops, txHash } = await claimReward({
-      memberSecret: decryptSecret(user.stellarSecretEncrypted),
+    const prepared = await prepareClaim({
+      memberPublicKey: claimable,
       marketplaceId: onChainId,
       periodId,
     });
-    const amountUsd = stroopsToUsd(amountStroops);
-    await recordClaim({
-      marketplaceId: marketplace.id,
-      periodId,
-      memberAddress: claimable,
-      amountUsd,
-      txHash,
+    const pending = createPending<ClaimContext>({
+      kind: "claim",
+      userId: user.id,
+      signer: claimable,
+      xdr: prepared.xdr,
+      hash: prepared.hash,
+      context: { marketplaceId: marketplace.id, periodId },
     });
-    return c.json({ periodId, amountUsd, txHash, verifyUrl: stellarExpertTxUrl(txHash) });
+    return c.json(signatureRequest(pending, `Claim your period #${periodId + 1} reward`), 202);
   } catch (error) {
     const { body, status } = errorResponse(error, "Could not claim the reward");
     return c.json(body, status);
@@ -279,9 +249,8 @@ rewards.post("/marketplace/:slug/fundraise/release", async (c) => {
 //
 // Scheduled on-chain (set_next_rules / set_next_target, operator-signed) and
 // applied by the next distribution / release, which then needs no signature.
-// An operator with their own wallet signs in the browser (202 + transaction,
-// finished by POST /api/tx/:id); for a custodial operator the backend signs.
-// Postgres mirrors the confirmed choice for display. They never touch the
+// The operator's wallet signs in the browser (202 + transaction, finished by
+// POST /api/tx/:id). Postgres mirrors the confirmed choice for display. They never touch the
 // running period or round; null clears them.
 
 const DAY = 24 * 60 * 60;
@@ -296,50 +265,42 @@ async function operatorMarketplace(c: Parameters<typeof getSessionUser>[0], slug
   if (!user) return { error: c.json({ error: "Sign in as the operator" }, 401) };
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug },
-    select: { ...marketplaceSelect, ...operatorKeysSelect },
+    select: { ...marketplaceSelect, operatorAddress: true },
   });
   if (!marketplace) return { error: c.json({ error: "Marketplace not found" }, 404) };
   if (marketplace.operatorId !== user.id) {
     return { error: c.json({ error: "Only the marketplace operator can change this" }, 403) };
   }
   const onChainId = boundOnChainId(marketplace);
-  const signer = operatorSignerOf(marketplace);
-  if (onChainId === null || !signer) {
+  const operatorAddress = marketplace.operatorAddress;
+  if (onChainId === null || !operatorAddress) {
     return { error: c.json({ error: "This marketplace is not ready for purchases yet" }, 409) };
   }
   // The browser can only sign with the wallet the session belongs to.
-  if (signer.kind === "own" && signer.address !== user.walletAddress) {
+  if (operatorAddress !== user.walletAddress) {
     return { error: c.json({ error: "Sign in with the wallet that created this marketplace" }, 409) };
   }
-  return { user, marketplace, onChainId, signer };
+  return { user, marketplace, onChainId, operatorAddress };
 }
 
-/**
- * Submits an operator-signed call: right away for a custodial operator,
- * or as a 202 + transaction for the operator's own wallet to sign.
- */
+/** Prepares an operator call as a 202 + transaction for the operator's wallet to sign. */
 async function signAsOperator<C>(
-  found: { user: { id: string }; signer: OperatorSigner },
+  found: { user: { id: string }; operatorAddress: string },
   call: ContractCall,
   pendingKind: "next-rules" | "next-target",
   context: C,
   label: string,
-  finish: (context: C) => Promise<Record<string, unknown>>,
 ) {
-  if (found.signer.kind === "custodial") {
-    await invokeCall(call, found.signer.secret);
-    return { status: 200 as const, body: await finish(context) };
-  }
-  const prepared = await prepareCall(call, found.signer.address);
+  const prepared = await prepareCall(call, found.operatorAddress);
   const pending = createPending<C>({
     kind: pendingKind,
     userId: found.user.id,
-    signer: found.signer.address,
+    signer: found.operatorAddress,
     xdr: prepared.xdr,
     hash: prepared.hash,
     context,
   });
-  return { status: 202 as const, body: signatureRequest(pending, label) };
+  return signatureRequest(pending, label);
 }
 
 interface NextRulesContext {
@@ -410,15 +371,14 @@ rewards.put("/marketplace/:slug/next-rules", async (c) => {
       marketplaceId: found.onChainId,
       rules: rules && { ...rules, buyerPoolBps: 10_000 - rules.vendorPoolBps },
     });
-    const { status, body: result } = await signAsOperator(
+    const result = await signAsOperator(
       found,
       call,
       "next-rules",
       { marketplaceId: marketplace.id, rules },
       "Schedule the next period's rules",
-      saveNextRules,
     );
-    return c.json(result, status);
+    return c.json(result, 202);
   } catch (error) {
     const { body: errBody, status } = errorResponse(error, "Could not save the next period's rules");
     return c.json(errBody, status);
@@ -464,15 +424,14 @@ rewards.put("/marketplace/:slug/fundraise/next-target", async (c) => {
       marketplaceId: found.onChainId,
       targetStroops: target === null ? null : usdToStroops(target),
     });
-    const { status, body: result } = await signAsOperator(
+    const result = await signAsOperator(
       found,
       call,
       "next-target",
       { marketplaceId: marketplace.id, targetUsd: target },
       "Schedule the next round's target",
-      saveNextTarget,
     );
-    return c.json(result, status);
+    return c.json(result, 202);
   } catch (error) {
     const { body: errBody, status } = errorResponse(error, "Could not save the next round's target");
     return c.json(errBody, status);
@@ -491,7 +450,7 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
   if (!user) return c.json({ error: "Sign in as the operator" }, 401);
   const marketplace = await prisma.marketplace.findUnique({
     where: { slug: c.req.param("slug") },
-    select: { ...marketplaceSelect, ...operatorKeysSelect },
+    select: { ...marketplaceSelect, operatorAddress: true },
   });
   if (!marketplace) return c.json({ error: "Marketplace not found" }, 404);
   if (marketplace.operatorId !== user.id) {
@@ -500,7 +459,7 @@ rewards.post("/marketplace/:slug/guarantees", async (c) => {
   const mode = communityModeOf(marketplace);
   const onChainId = boundOnChainId(marketplace);
   // Simulation only: the operator's address, no key needed.
-  const operatorAddress = operatorAddressOf(marketplace);
+  const operatorAddress = marketplace.operatorAddress;
   if (mode === "classic" || onChainId === null || !operatorAddress) {
     return c.json({ error: "This marketplace has no protected community fund" }, 400);
   }

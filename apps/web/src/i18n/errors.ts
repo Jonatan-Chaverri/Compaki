@@ -12,7 +12,6 @@ for (const messages of [en.ui, es.ui]) {
 }
 const serverKeys: Record<string, string> = {
   "Only rewards marketplaces have claims.": "claimsNotApplicable",
-  "Invalid email or password": "passwordInvalid",
   "Not signed in": "signInOrCreateAccount",
   "Sign in to pay": "signInOrCreateAccount",
   "Sign in to place an order": "signInOrCreateAccount",
@@ -36,6 +35,8 @@ export function localizedMessage(error: unknown, t: UiTranslator, fallback: stri
     [/^At most (\d+) recipient wallets$/, (m) => t("apiAtMostRecipients", { count: Number(m[1]) })],
     [/^Invalid Stellar address: (.*)$/, (m) => t("apiInvalidStellarAddress", { address: m[1] })],
     [/^Recipient shares must add up to exactly 100% \(got ([\d.]+)%\)$/, (m) => t("rulesTotalError", { total: Number(m[1]) })],
+    [/^The community fund's wallet doesn't exist on Stellar testnet\./, () => t("apiFundWalletMissing")],
+    [/^The community fund's wallet doesn't accept (\S+) yet\./, (m) => t("apiFundNoTrustline", { code: m[1] })],
     [/^(.+)'s wallet doesn't exist on Stellar testnet\./, (m) => t("apiRecipientWalletMissing", { name: m[1] })],
     [/^(.+)'s wallet doesn't accept (\S+) yet\./, (m) => t("apiRecipientNoTrustline", { name: m[1], code: m[2] })],
     [/^(.+) is not ready for purchase yet$/, (m) => t("apiProductNotReady", { product: m[1] })],

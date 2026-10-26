@@ -53,7 +53,6 @@ export interface OperatorDashboardProps {
   slug: string;
   regenerativeEnabled: boolean;
   communityMode: CommunityMode;
-  demoImpersonation: boolean;
   splits: { vendorBps: number; operatorBps: number; communityBps: number };
   operatorAccount: string | null;
   communityAccount: string | null;
@@ -71,7 +70,7 @@ export interface OperatorDashboardProps {
 }
 
 export function OperatorDashboard({ community, initialTab = "overview", name, slug, communityMode,
-  demoImpersonation, splits, operatorAccount, communityAccount, stats, sales, vendors, catalog }: OperatorDashboardProps) {
+  splits, operatorAccount, communityAccount, stats, sales, vendors, catalog }: OperatorDashboardProps) {
   const locale = useLocale();
   const t = useTranslations("ui");
   const hasCommunity = splits.communityBps > 0;
@@ -170,7 +169,6 @@ export function OperatorDashboard({ community, initialTab = "overview", name, sl
           <div className={styles.vendorIdentity}><span className={styles.avatar}>{vendor.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase()}</span><div><h3>{vendor.name}</h3><p>{vendor.email}</p>{vendor.sells && <p className={styles.vendorDescription}>{vendor.sells}</p>}</div></div>
           <div className={styles.vendorActions}><span className={styles.productCount}>{t("productCount", { count: vendor.productCount })}</span>
             {vendor.registerTxHash && <details className={styles.registration}><summary>{t("dashboardRegistration")}</summary><a href={`https://stellar.expert/explorer/testnet/tx/${vendor.registerTxHash}`} target="_blank" rel="noopener noreferrer">{t("viewRegistration")}</a></details>}
-            {demoImpersonation && <a href={`/api/demo/impersonate?userId=${vendor.id}&redirect=/vendor/${slug}`} className={styles.textAction} title={t("localDemoShortcutEnableDemoImpersonationSwitchesYourSessionToThis")}>{t("viewTheirDashboard")}</a>}
           </div>
         </li>)}</ul>}
     </section>}
